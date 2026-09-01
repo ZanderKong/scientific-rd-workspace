@@ -5,9 +5,10 @@ Revises:
 Create Date: 2026-09-01
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "0001_phase1_foundation"
 down_revision = None
@@ -26,8 +27,12 @@ def upgrade() -> None:
         sa.Column("title", sa.String(length=240), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("code"),
     )
@@ -42,7 +47,9 @@ def upgrade() -> None:
         sa.Column("json_schema", json_type, nullable=False),
         sa.Column("ui_schema", json_type, nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("key"),
     )
@@ -61,8 +68,12 @@ def upgrade() -> None:
         sa.Column("objective", sa.Text(), nullable=True),
         sa.Column("structured_data", json_type, nullable=False),
         sa.Column("note_document", json_type, nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.ForeignKeyConstraint(["parent_experiment_id"], ["experiments.id"]),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"]),
         sa.ForeignKeyConstraint(["template_id"], ["experiment_templates.id"]),
@@ -71,7 +82,9 @@ def upgrade() -> None:
     )
     op.create_index("ix_experiments_code", "experiments", ["code"], unique=False)
     op.create_index("ix_experiments_project_id", "experiments", ["project_id"], unique=False)
-    op.create_index("ix_experiments_parent_experiment_id", "experiments", ["parent_experiment_id"], unique=False)
+    op.create_index(
+        "ix_experiments_parent_experiment_id", "experiments", ["parent_experiment_id"], unique=False
+    )
 
     op.create_table(
         "attachments",
@@ -82,7 +95,9 @@ def upgrade() -> None:
         sa.Column("content_type", sa.String(length=160), nullable=True),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("sha256", sa.String(length=64), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("storage_key"),
@@ -96,12 +111,19 @@ def upgrade() -> None:
         sa.Column("revision_number", sa.Integer(), nullable=False),
         sa.Column("snapshot_json", json_type, nullable=False),
         sa.Column("change_note", sa.String(length=500), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.ForeignKeyConstraint(["experiment_id"], ["experiments.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("experiment_id", "revision_number"),
     )
-    op.create_index("ix_experiment_revisions_experiment_id", "experiment_revisions", ["experiment_id"], unique=False)
+    op.create_index(
+        "ix_experiment_revisions_experiment_id",
+        "experiment_revisions",
+        ["experiment_id"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:

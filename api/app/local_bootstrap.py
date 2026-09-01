@@ -5,9 +5,9 @@ The production/default database remains PostgreSQL. This module is used by
 still creates the schema, and the normal demo seed is applied afterwards.
 """
 
-from alembic import command
 from alembic.config import Config
 
+from alembic import command
 from app.core.config import get_settings
 from app.seed import seed
 

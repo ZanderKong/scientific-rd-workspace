@@ -13,7 +13,13 @@ router = APIRouter(prefix="/experiment-templates", tags=["experiment-templates"]
 
 @router.get("", response_model=list[TemplateOut])
 def list_templates(db: Session = Depends(get_db)) -> list[ExperimentTemplate]:
-    return list(db.scalars(select(ExperimentTemplate).where(ExperimentTemplate.is_active).order_by(ExperimentTemplate.name)))
+    return list(
+        db.scalars(
+            select(ExperimentTemplate)
+            .where(ExperimentTemplate.is_active)
+            .order_by(ExperimentTemplate.name)
+        )
+    )
 
 
 @router.get("/{template_id}", response_model=TemplateOut)

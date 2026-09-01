@@ -30,7 +30,9 @@ def iter_unknown_fields(schema: dict[str, Any], data: Any, path: str = "") -> It
     if isinstance(properties, dict):
         for key, child_schema in properties.items():
             if key in data:
-                yield from iter_unknown_fields(child_schema, data[key], f"{path + '.' if path else ''}{key}")
+                yield from iter_unknown_fields(
+                    child_schema, data[key], f"{path + '.' if path else ''}{key}"
+                )
     if schema.get("type") == "array" and isinstance(data, list):
         item_schema = schema.get("items", {})
         for index, item in enumerate(data):

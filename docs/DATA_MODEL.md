@@ -58,7 +58,7 @@ status：
 ```text
 ExperimentTemplate
 - id: UUID
-- key: string unique
+- key: string
 - name: string
 - version: integer
 - json_schema: JSONB
@@ -66,6 +66,11 @@ ExperimentTemplate
 - is_active: boolean
 - created_at
 ```
+
+unique：
+`(key, version)`
+
+每个 template version 是 immutable row。已被 Experiment 引用的 `key`、`version`、`json_schema` 或 `ui_schema` 不得原地修改；发布新 schema 时创建同一 `key` 的新 `version` 行，并通过 `is_active` 控制新建 Experiment 可选的版本。历史 Experiment 永久通过 `template_id` 绑定到其创建时的精确 schema row，`template_version` 是该绑定的显式快照字段。
 
 Phase 1 seed 一个模板即可。
 

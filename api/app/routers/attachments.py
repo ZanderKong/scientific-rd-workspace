@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -15,6 +16,7 @@ from app.services import attachment_storage_key
 from app.storage import LocalStorageAdapter, sanitise_filename
 
 router = APIRouter(tags=["attachments"])
+logger = logging.getLogger(__name__)
 
 
 def _storage() -> LocalStorageAdapter:
@@ -94,6 +96,25 @@ def delete_attachment(attachment_id: uuid.UUID, db: Session = Depends(get_db)) -
     attachment = db.get(Attachment, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=404, detail="attachment not found")
-    _storage().delete(attachment.storage_key)
-    db.delete(attachment)
-    db.commit()
+    storage_key = attachment.storage_key
+    try:
+        db.delete(attachment)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    try:
+        _storage().delete(storage_key)
+    except Exception as exc:
+        logger.exception(
+            "Attachment metadata %s was deleted, but byte cleanup failed for %s",
+            attachment_id,
+            storage_key,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "attachment metadata deleted but byte cleanup failed; server cleanup is required"
+            ),
+        ) from exc

@@ -16,6 +16,7 @@ import type {
   JsonObject,
   Revision
 } from '@/lib/domain';
+import { parseRevisionSnapshot } from '@/lib/revision-snapshot';
 import { BackLink, formatBytes, formatDate, PageHeader, PageState, StatusBadge } from './shared';
 import { StructuredForm } from './structured-form';
 
@@ -81,7 +82,11 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
     void load();
   }, [load]);
   const schema = (template?.json_schema ?? {}) as JsonObject;
-  const snapshot = selectedRevision?.snapshot_json as Record<string, unknown> | undefined;
+  const snapshot = selectedRevision ? parseRevisionSnapshot(selectedRevision.snapshot_json) : null;
+  const snapshotUsesLoadedTemplate =
+    snapshot !== null &&
+    template?.id === snapshot.experiment.template_id &&
+    template.version === snapshot.experiment.template_version;
   async function saveMetadata() {
     if (!experiment) return;
     setBusy(true);
@@ -263,7 +268,12 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
               <CardTitle>Structured properties</CardTitle>
             </CardHeader>
             <CardContent>
-              <StructuredForm schema={schema} data={structured} onChange={setStructured} />
+              <StructuredForm
+                schema={schema}
+                uiSchema={template?.ui_schema}
+                data={structured}
+                onChange={setStructured}
+              />
               <Button className='mt-4' onClick={saveMetadata} disabled={busy}>
                 Save structured data
               </Button>
@@ -374,18 +384,80 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
             </CardHeader>
             <CardContent>
               {selectedRevision ? (
-                <div className='grid gap-4'>
-                  <pre className='max-h-72 overflow-auto rounded-lg bg-muted p-3 text-xs'>
-                    {JSON.stringify(snapshot, null, 2)}
-                  </pre>
-                  <RichNoteEditor
-                    initialContent={
-                      (snapshot?.note_document as Array<Record<string, unknown>>) || defaultNote
-                    }
-                    editable={false}
-                    key={selectedRevision.id}
-                  />
-                </div>
+                snapshot ? (
+                  <div className='grid gap-6'>
+                    <div className='grid gap-1 rounded-lg border p-4 text-sm'>
+                      <div className='flex flex-wrap items-center justify-between gap-2'>
+                        <span className='font-medium'>{snapshot.experiment.title}</span>
+                        <StatusBadge status={snapshot.experiment.status} />
+                      </div>
+                      <p className='text-muted-foreground'>
+                        Template v{snapshot.experiment.template_version}
+                      </p>
+                      {snapshot.experiment.objective ? (
+                        <p>{snapshot.experiment.objective}</p>
+                      ) : null}
+                    </div>
+
+                    <section className='grid gap-2'>
+                      <h3 className='text-sm font-medium'>Structured properties</h3>
+                      {snapshotUsesLoadedTemplate ? (
+                        <StructuredForm
+                          schema={schema}
+                          uiSchema={template?.ui_schema}
+                          data={snapshot.experiment.structured_data}
+                          readonly
+                        />
+                      ) : (
+                        <p className='rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive'>
+                          The exact template version for this revision could not be resolved.
+                        </p>
+                      )}
+                    </section>
+
+                    <section className='grid gap-2'>
+                      <h3 className='text-sm font-medium'>Experimental note</h3>
+                      {snapshot.experiment.note_document.length > 0 ? (
+                        <RichNoteEditor
+                          initialContent={snapshot.experiment.note_document}
+                          editable={false}
+                          key={selectedRevision.id}
+                        />
+                      ) : (
+                        <p className='text-sm text-muted-foreground'>No note content.</p>
+                      )}
+                    </section>
+
+                    <section className='grid gap-2'>
+                      <h3 className='text-sm font-medium'>Attachment metadata</h3>
+                      {snapshot.attachments.length > 0 ? (
+                        <ul className='divide-y rounded-lg border text-sm'>
+                          {snapshot.attachments.map((attachment) => (
+                            <li key={attachment.id} className='grid gap-1 px-3 py-2'>
+                              <span className='font-medium'>{attachment.original_filename}</span>
+                              <span className='text-xs text-muted-foreground'>
+                                {formatBytes(attachment.size_bytes)} · SHA-256 {attachment.sha256}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className='text-sm text-muted-foreground'>
+                          No attachments in this snapshot.
+                        </p>
+                      )}
+                    </section>
+
+                    <details className='rounded-lg border p-3 text-xs'>
+                      <summary className='cursor-pointer font-medium'>Raw snapshot JSON</summary>
+                      <pre className='mt-3 max-h-72 overflow-auto rounded-lg bg-muted p-3'>
+                        {JSON.stringify(selectedRevision.snapshot_json, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                ) : (
+                  <p className='text-sm text-destructive'>Revision snapshot is malformed.</p>
+                )
               ) : (
                 <p className='text-sm text-muted-foreground'>
                   Choose a revision to inspect its immutable snapshot.

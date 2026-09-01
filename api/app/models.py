@@ -4,7 +4,18 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    event,
+    func,
+    inspect,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, Uuid
@@ -16,9 +27,10 @@ JsonColumn = JSON().with_variant(JSONB, "postgresql")
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("code"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(32), index=True)
     title: Mapped[str] = mapped_column(String(240))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active")
@@ -34,9 +46,12 @@ class Project(Base):
 
 class ExperimentTemplate(Base):
     __tablename__ = "experiment_templates"
+    __table_args__ = (
+        UniqueConstraint("key", "version", name="uq_experiment_templates_key_version"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    key: Mapped[str] = mapped_column(String(120), index=True)
     name: Mapped[str] = mapped_column(String(240))
     version: Mapped[int] = mapped_column(Integer, default=1)
     json_schema: Mapped[dict[str, Any]] = mapped_column(JsonColumn)
@@ -47,11 +62,22 @@ class ExperimentTemplate(Base):
     experiments: Mapped[list[Experiment]] = relationship(back_populates="template")
 
 
+@event.listens_for(ExperimentTemplate, "before_update")
+def prevent_template_version_mutation(
+    _mapper: Any, _connection: Any, target: ExperimentTemplate
+) -> None:
+    state = inspect(target)
+    immutable_fields = ("key", "name", "version", "json_schema", "ui_schema")
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("experiment template versions are immutable; create a new version row")
+
+
 class Experiment(Base):
     __tablename__ = "experiments"
+    __table_args__ = (UniqueConstraint("code"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(32), index=True)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), index=True)
     template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("experiment_templates.id"))
     template_version: Mapped[int] = mapped_column(Integer)

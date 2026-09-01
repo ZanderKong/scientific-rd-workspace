@@ -8,7 +8,6 @@ from app.core.config import get_settings
 from app.main import app
 from app.models import Experiment, ExperimentTemplate, Project
 
-
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -28,7 +27,9 @@ def test_phase_one_demo_flow(db, monkeypatch, tmp_path) -> None:
         json_schema=SCHEMA,
         is_active=True,
     )
-    project = Project(code="PRJ-001", title="Colorimetric Sensor Formulation Optimisation", status="active")
+    project = Project(
+        code="PRJ-001", title="Colorimetric Sensor Formulation Optimisation", status="active"
+    )
     db.add_all([template, project])
     db.flush()
     source = Experiment(
@@ -39,7 +40,9 @@ def test_phase_one_demo_flow(db, monkeypatch, tmp_path) -> None:
         title="2-POA + KI + starch",
         status="completed",
         structured_data={"starch_amount": 1.0, "drying_temperature": 60},
-        note_document=[{"type": "paragraph", "content": [{"type": "text", "text": "Objective", "styles": {}}]}],
+        note_document=[
+            {"type": "paragraph", "content": [{"type": "text", "text": "Objective", "styles": {}}]}
+        ],
     )
     db.add(source)
     db.commit()
@@ -58,7 +61,9 @@ def test_phase_one_demo_flow(db, monkeypatch, tmp_path) -> None:
         )
         assert upload.status_code == 201
         attachment_id = upload.json()["id"]
-        assert client.get(f"/api/v1/attachments/{attachment_id}/download").content == b"demo evidence"
+        assert (
+            client.get(f"/api/v1/attachments/{attachment_id}/download").content == b"demo evidence"
+        )
 
         revision = client.post(
             f"/api/v1/experiments/{source.id}/revisions",
@@ -79,7 +84,18 @@ def test_phase_one_demo_flow(db, monkeypatch, tmp_path) -> None:
             json={"structured_data": {"starch_amount": 0.5, "drying_temperature": 60}},
         )
         assert changed.status_code == 200
-        assert client.get(f"/api/v1/experiments/{source.id}").json()["structured_data"]["starch_amount"] == 1.0
-        assert source_revision["snapshot_json"]["experiment"]["structured_data"]["starch_amount"] == 1.0
+        assert (
+            client.get(f"/api/v1/experiments/{source.id}").json()["structured_data"][
+                "starch_amount"
+            ]
+            == 1.0
+        )
+        assert (
+            source_revision["snapshot_json"]["experiment"]["structured_data"]["starch_amount"]
+            == 1.0
+        )
+        deleted = client.delete(f"/api/v1/attachments/{attachment_id}")
+        assert deleted.status_code == 204
+        assert client.get(f"/api/v1/attachments/{attachment_id}/download").status_code == 404
     finally:
         get_settings.cache_clear()

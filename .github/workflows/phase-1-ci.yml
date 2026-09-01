@@ -1,0 +1,107 @@
+name: Phase 1 CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-postgresql:
+    name: Backend / PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend dependencies
+        run: uv sync --locked
+      - name: Migrate a blank PostgreSQL database
+        run: uv run alembic upgrade head
+      - name: Check model and migration parity
+        run: uv run alembic check
+      - name: Verify seed idempotency
+        run: |
+          uv run python -m app.seed
+          uv run python -m app.seed
+          uv run python - <<'PY'
+          from sqlalchemy import func, select
+
+          from app.db import SessionLocal
+          from app.models import Experiment, ExperimentTemplate, Project
+
+          with SessionLocal() as db:
+              project_count = db.scalar(
+                  select(func.count()).select_from(Project).where(Project.code == "PRJ-001")
+              )
+              template_count = db.scalar(
+                  select(func.count())
+                  .select_from(ExperimentTemplate)
+                  .where(
+                      ExperimentTemplate.key == "materials-formulation-v1",
+                      ExperimentTemplate.version == 1,
+                  )
+              )
+              experiment_count = db.scalar(
+                  select(func.count())
+                  .select_from(Experiment)
+                  .where(Experiment.code.in_(["EXP-041", "EXP-044", "EXP-045"]))
+              )
+
+          assert project_count == 1
+          assert template_count == 1
+          assert experiment_count == 3
+          PY
+      - name: Run backend tests against PostgreSQL
+        run: uv run pytest
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm run test
+      - name: Production build
+        run: npm run build

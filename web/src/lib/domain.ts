@@ -51,11 +51,34 @@ export interface Attachment {
   created_at: string;
 }
 
+export interface RevisionExperimentSnapshot {
+  title: string;
+  status: ExperimentStatus;
+  objective: string | null;
+  template_id: string;
+  template_version: number;
+  structured_data: JsonObject;
+  note_document: Array<JsonObject>;
+}
+
+export interface RevisionAttachmentSnapshot {
+  id: string;
+  original_filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  sha256: string;
+}
+
+export interface RevisionSnapshot {
+  experiment: RevisionExperimentSnapshot;
+  attachments: Array<RevisionAttachmentSnapshot>;
+}
+
 export interface Revision {
   id: string;
   experiment_id: string;
   revision_number: number;
-  snapshot_json: JsonObject;
+  snapshot_json: RevisionSnapshot;
   change_note: string | null;
   created_at: string;
 }

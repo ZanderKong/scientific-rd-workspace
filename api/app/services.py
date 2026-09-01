@@ -3,21 +3,30 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Attachment, Experiment, ExperimentRevision, ExperimentTemplate, Project
-from app.schemas import CloneRequest, ExperimentCreate, ExperimentUpdate, ProjectCreate, ProjectUpdate
-from app.storage import LocalStorageAdapter, sanitise_filename
+from app.models import Experiment, ExperimentRevision, ExperimentTemplate, Project
+from app.schemas import (
+    CloneRequest,
+    ExperimentCreate,
+    ExperimentUpdate,
+    ProjectCreate,
+    ProjectUpdate,
+)
+from app.storage import sanitise_filename
 from app.validation import validate_template_data
 
 
 def _next_code(db: Session, model: type[Project] | type[Experiment], prefix: str) -> str:
     values = db.scalars(select(model.code).where(model.code.like(f"{prefix}-%"))).all()
-    numbers = [int(match.group(1)) for value in values if (match := re.fullmatch(rf"{prefix}-(\d+)", value))]
+    numbers = [
+        int(match.group(1))
+        for value in values
+        if (match := re.fullmatch(rf"{prefix}-(\d+)", value))
+    ]
     return f"{prefix}-{max(numbers, default=0) + 1:03d}"
 
 
@@ -97,7 +106,9 @@ def _snapshot(experiment: Experiment) -> dict[str, Any]:
     }
 
 
-def create_revision(db: Session, experiment_id: uuid.UUID, change_note: str | None) -> ExperimentRevision:
+def create_revision(
+    db: Session, experiment_id: uuid.UUID, change_note: str | None
+) -> ExperimentRevision:
     locked = db.scalars(
         select(Experiment)
         .where(Experiment.id == experiment_id)
@@ -134,7 +145,9 @@ def clone_experiment(db: Session, source: Experiment, payload: CloneRequest) -> 
         title=payload.new_title,
         status="draft",
         objective=source.objective,
-        structured_data=copy.deepcopy(source.structured_data) if payload.copy_structured_data else {},
+        structured_data=copy.deepcopy(source.structured_data)
+        if payload.copy_structured_data
+        else {},
         note_document=copy.deepcopy(source.note_document) if payload.copy_note else [],
     )
     db.add(clone)
@@ -151,6 +164,7 @@ def clone_experiment(db: Session, source: Experiment, payload: CloneRequest) -> 
     return clone
 
 
-def attachment_storage_key(experiment_id: uuid.UUID, attachment_id: uuid.UUID, filename: str) -> str:
+def attachment_storage_key(
+    experiment_id: uuid.UUID, attachment_id: uuid.UUID, filename: str
+) -> str:
     return f"{experiment_id}/{attachment_id}/{sanitise_filename(filename)}"
-

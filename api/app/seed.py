@@ -131,7 +131,10 @@ def seed() -> None:
             db.flush()
 
         template = db.scalar(
-            select(ExperimentTemplate).where(ExperimentTemplate.key == "materials-formulation-v1")
+            select(ExperimentTemplate).where(
+                ExperimentTemplate.key == "materials-formulation-v1",
+                ExperimentTemplate.version == 1,
+            )
         )
         if template is None:
             template = ExperimentTemplate(
@@ -150,19 +153,46 @@ def seed() -> None:
                 "EXP-041",
                 "Baseline formulation",
                 None,
-                {"primary_material": "Material A", "primary_material_concentration": {"value": 5, "unit": "wt%"}, "solvent": "ethanol", "additives": [], "drying_temperature": {"value": 60, "unit": "°C"}, "drying_time": {"value": 20, "unit": "min"}, "substrate": "polymer film"},
+                {
+                    "primary_material": "Material A",
+                    "primary_material_concentration": {"value": 5, "unit": "wt%"},
+                    "solvent": "ethanol",
+                    "additives": [],
+                    "drying_temperature": {"value": 60, "unit": "°C"},
+                    "drying_time": {"value": 20, "unit": "min"},
+                    "substrate": "polymer film",
+                },
             ),
             (
                 "EXP-044",
                 "Baseline + KI",
                 "EXP-041",
-                {"primary_material": "Material A", "primary_material_concentration": {"value": 5, "unit": "wt%"}, "solvent": "ethanol", "additives": [{"name": "KI", "amount": 1, "unit": "g"}], "drying_temperature": {"value": 60, "unit": "°C"}, "drying_time": {"value": 20, "unit": "min"}, "substrate": "polymer film"},
+                {
+                    "primary_material": "Material A",
+                    "primary_material_concentration": {"value": 5, "unit": "wt%"},
+                    "solvent": "ethanol",
+                    "additives": [{"name": "KI", "amount": 1, "unit": "g"}],
+                    "drying_temperature": {"value": 60, "unit": "°C"},
+                    "drying_time": {"value": 20, "unit": "min"},
+                    "substrate": "polymer film",
+                },
             ),
             (
                 "EXP-045",
                 "2-POA + KI + starch",
                 "EXP-044",
-                {"primary_material": "Material A", "primary_material_concentration": {"value": 5, "unit": "wt%"}, "solvent": "ethanol", "additives": [{"name": "KI", "amount": 1, "unit": "g"}, {"name": "starch", "amount": 1, "unit": "wt%"}], "drying_temperature": {"value": 60, "unit": "°C"}, "drying_time": {"value": 20, "unit": "min"}, "substrate": "polymer film"},
+                {
+                    "primary_material": "Material A",
+                    "primary_material_concentration": {"value": 5, "unit": "wt%"},
+                    "solvent": "ethanol",
+                    "additives": [
+                        {"name": "KI", "amount": 1, "unit": "g"},
+                        {"name": "starch", "amount": 1, "unit": "wt%"},
+                    ],
+                    "drying_temperature": {"value": 60, "unit": "°C"},
+                    "drying_time": {"value": 20, "unit": "min"},
+                    "substrate": "polymer film",
+                },
             ),
         ]
         by_code: dict[str, Experiment] = {}

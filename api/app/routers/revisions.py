@@ -25,7 +25,9 @@ def create_revision_route(
 
 
 @router.get("/experiments/{experiment_id}/revisions", response_model=list[RevisionOut])
-def list_revisions(experiment_id: uuid.UUID, db: Session = Depends(get_db)) -> list[ExperimentRevision]:
+def list_revisions(
+    experiment_id: uuid.UUID, db: Session = Depends(get_db)
+) -> list[ExperimentRevision]:
     if db.get(Experiment, experiment_id) is None:
         raise HTTPException(status_code=404, detail="experiment not found")
     return list(
@@ -37,9 +39,7 @@ def list_revisions(experiment_id: uuid.UUID, db: Session = Depends(get_db)) -> l
     )
 
 
-@router.get(
-    "/experiments/{experiment_id}/revisions/{revision_number}", response_model=RevisionOut
-)
+@router.get("/experiments/{experiment_id}/revisions/{revision_number}", response_model=RevisionOut)
 def get_revision(
     experiment_id: uuid.UUID, revision_number: int, db: Session = Depends(get_db)
 ) -> ExperimentRevision:

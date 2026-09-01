@@ -40,7 +40,9 @@ def get_project(project_id: uuid.UUID, db: Session = Depends(get_db)) -> Project
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
-    count = db.scalar(select(func.count(Experiment.id)).where(Experiment.project_id == project.id)) or 0
+    count = (
+        db.scalar(select(func.count(Experiment.id)).where(Experiment.project_id == project.id)) or 0
+    )
     return _project_out(project, count)
 
 
