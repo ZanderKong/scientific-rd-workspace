@@ -5,8 +5,8 @@
 - Repository: `scientific-rd-workspace-codex-pack-v0.1`
 - Visibility: private（为避免在未确认前公开科研工作区）
 - Owner: `ZanderKong`
-- Remote URL: 创建并推送后回填
-- Initial commit: 创建并推送后回填
+- Remote URL: https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1
+- Initial commit: `80dbf63` (`Implement Phase 1 scientific R&D workspace`)
 
 ## 本次完成内容
 
