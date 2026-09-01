@@ -2,8 +2,8 @@
 
 ## 1. Status
 
-- PARTIAL — implementation and local checks pass; PostgreSQL-backed checks are pending because Docker is unavailable in the current environment.
-- Git commit/tag: not created (working tree handoff)
+- PARTIAL — implementation and local checks pass. A Docker-free local SQLite deployment is now available; PostgreSQL-backed checks remain pending because Docker is unavailable in the current environment.
+- Git commit/tag: `80dbf63` (Phase 1 implementation); local deployment additions are recorded in the next local commit.
 - Date: 2026-09-01
 
 ## 2. What Was Actually Implemented
@@ -40,6 +40,8 @@ docker compose up -d postgres
 cd api && uv sync && uv run fastapi dev app/main.py
 cd web && npm install && npm run dev
 ```
+
+When Docker/PostgreSQL is unavailable, the repository also provides `./scripts/start-local.sh`. It initializes `data/local/scientific_rd.db` with the same Alembic migration and demo seed, then starts the API and Web together. This SQLite path is for local development only; the production/default configuration remains PostgreSQL.
 
 ### Migration Commands
 
