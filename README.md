@@ -96,7 +96,7 @@ Phase 1 的「完成」不是页面画出来，而是 `docs/exec-plans/01-founda
 
 ## Phase 1 本地启动
 
-Prerequisites: Node.js 22+, npm, Python 3.11+, uv, and Docker Desktop (for PostgreSQL 17). The current environment did not have Docker installed, so database-backed runtime checks are recorded as pending in the handoff.
+Prerequisites: Node.js 22+, npm, Python 3.11+, uv, and Docker Desktop (for PostgreSQL 17). Phase 1 has been audited against a real PostgreSQL 17.11 server; see `docs/handoff/PHASE_1_HANDOFF.md` for the closeout evidence.
 
 ```bash
 cp api/.env.example api/.env

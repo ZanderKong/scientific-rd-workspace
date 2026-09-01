@@ -1,6 +1,7 @@
 # Execution Plan 01 — Foundation + ELN Core
 
-**Status:** ACTIVE  
+**Status:** COMPLETE — Phase 1 P0 audit passed against PostgreSQL 17.11 on 2026-09-01
+
 **Release target:** `phase-1-foundation`  
 **Goal:** 做出第一个真实持久化、可演示的科研工作台纵向切片。  
 **Do not implement:** Phase 2 Measurement/Compare/Literature 或 Phase 3 AI/Eval。
@@ -1042,3 +1043,27 @@ Deviation from plan:
 
 Follow-up:
 - Run the documented Compose/API startup path in a Docker-enabled environment and repeat the complete `docs/DEMO_SCENARIO.md` flow.
+
+## Phase 1 closeout completed — 2026-09-01
+
+Implemented:
+- Corrected revision snapshot parsing to use `snapshot_json.experiment`, and added read-only schema-driven structured-property, BlockNote, and attachment-metadata rendering.
+- Replaced mutable template-key semantics with immutable version rows and unique `(key, version)` through migration `0002_immutable_template_versions`.
+- Reordered attachment deletion so database metadata commits before byte cleanup, with explicit tests for both failure boundaries.
+- Added `.github/workflows/phase-1-ci.yml` with PostgreSQL 17 blank migration, migration parity, idempotent seed, PostgreSQL backend tests, and the complete frontend quality pipeline.
+- Corrected and finalized `docs/handoff/PHASE_1_HANDOFF.md`.
+
+Actual commands and results:
+- `uv run alembic upgrade head` on a blank PostgreSQL 17.11 database — passed (`0001` then `0002`).
+- `uv run alembic check` against PostgreSQL — passed, no model/migration differences.
+- `uv run python -m app.seed` twice against PostgreSQL — passed without duplicates.
+- `TEST_DATABASE_URL=postgresql+psycopg://... uv run pytest` — 11 passed; the suite asserts the PostgreSQL dialect.
+- `uvx ruff check app tests alembic` and Ruff format check — passed.
+- `npm run lint`, `npm run typecheck`, `npm run test`, format check, and `npm run build` — passed; 4 frontend tests.
+- Live browser/API audit against PostgreSQL — overview, exact-version experiment rendering, structured edit, revision create/read-only view, clone/lineage, attachment upload/download/delete, refresh, and full service restart persistence passed.
+
+Deviation from plan:
+- Docker remained unavailable, so the final local audit used PostgreSQL 17.11 built and run natively. The repository CI uses the official `postgres:17-alpine` service and exercises the same acceptance commands.
+
+Follow-up:
+- Phase 1 is closed. Do not begin Phase 2 without a separate reviewed execution plan and explicit authorization.

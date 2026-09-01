@@ -2,80 +2,102 @@
 
 ## 1. Status
 
-- PARTIAL — implementation and local checks pass. A Docker-free local SQLite deployment is now available; PostgreSQL-backed checks remain pending because Docker is unavailable in the current environment.
-- Git commit/tag: `80dbf63` (Phase 1 implementation); local deployment additions: `8d76903`.
-- Date: 2026-09-01
+- **PASS** — all Phase 1 P0 acceptance criteria passed against PostgreSQL 17.11.
+- Closeout implementation commit: `ba86520`; this document is finalized by its containing commit.
+- Audit date: 2026-09-01.
+- Phase 2/3 functionality was not started.
 
-## 2. What Was Actually Implemented
+## 2. Delivered Product Slice
 
-The repository now contains a Next.js 16/React 19 web workspace and a FastAPI/SQLAlchemy API for the Phase 1 path:
+The repository contains a persistent Next.js 16/React 19 web workspace and a FastAPI/SQLAlchemy API for:
 
 `Project → Experiment → Structured Properties → Rich Note → Attachments → Clone → Revisions`
 
-Projects and experiments are editable through typed API calls. Experiment structured properties are validated against an active server-owned JSON Schema and rendered with JSON Forms. Notes are stored separately as BlockNote JSON. Attachments use a local storage adapter with safe keys, size enforcement, and SHA-256 metadata. Clone creates a new entity with parent lineage and a new initial revision. Revisions are immutable snapshots.
+Structured experiment properties are rendered by JSON Forms and validated again by the API against the exact server-owned template version bound to the experiment. Rich notes are stored separately as BlockNote JSON. Attachment bytes use the local storage adapter while authoritative metadata stays in PostgreSQL. Clones receive new identities and parent lineage. Revisions are append-only snapshots.
 
-## 3. Repository Structure
+## 3. Phase 1 Closeout Fixes
 
-- `web/` — Next.js app shell, workspace routes, JSON Forms, BlockNote, typed API client, Vitest tests.
-- `api/` — FastAPI app, SQLAlchemy models, Alembic migration, seed, local storage adapter, API tests.
-- `docker-compose.yml` — PostgreSQL 17 service.
-- `data/uploads/` — local attachment storage root (ignored except placeholder).
-- `third_party_licenses/` and `THIRD_PARTY_NOTICES.md` — direct reuse attribution.
+1. The revision viewer now reads `snapshot_json.experiment.note_document`. It renders snapshot metadata, schema-driven structured properties, BlockNote content, and attachment metadata in read-only form; raw JSON remains an optional diagnostic disclosure.
+2. `ExperimentTemplate` now uses immutable version rows with unique `(key, version)`. Migration `0002_immutable_template_versions` replaces the former unique-key constraint. Historical experiments retain their exact `template_id` and `template_version`; schema-bearing fields cannot be updated in place, while `is_active` remains a lifecycle toggle.
+3. Attachment deletion commits metadata removal before deleting bytes. A failed database commit therefore cannot leave authoritative metadata pointing to deleted bytes. A later byte-cleanup failure is logged and returned as a diagnostic 500, leaving only a non-authoritative orphan for server cleanup.
+4. `.github/workflows/phase-1-ci.yml` adds PostgreSQL 17 CI. It checks a blank-database Alembic upgrade, migration/model parity, seed idempotency, all backend tests against PostgreSQL, and frontend lint, typecheck, tests, and production build.
+5. This handoff now matches the implementation, including the revision detail parameter `{revision_number}`.
 
-## 4. Runtime
+## 4. Repository Structure
 
-### Prerequisites
+- `web/` — Next.js application shell, Phase 1 routes, JSON Forms, BlockNote, typed API client, and Vitest tests.
+- `api/` — FastAPI application, SQLAlchemy models, Alembic migrations, seed, storage adapter, and pytest suite.
+- `.github/workflows/phase-1-ci.yml` — PostgreSQL 17 backend and frontend CI jobs.
+- `docker-compose.yml` — PostgreSQL 17 development service.
+- `data/uploads/` — ignored local attachment storage root.
+- `third_party_licenses/` and `THIRD_PARTY_NOTICES.md` — reuse attribution.
 
-Node.js 22+, npm, Python 3.11+, uv, and Docker Desktop for PostgreSQL.
+## 5. Runtime
 
-### Environment Variables
+### Standard PostgreSQL path
 
-- API: copy `api/.env.example` to `api/.env`; `DATABASE_URL`, `CORS_ORIGINS`, `STORAGE_ROOT`, and `MAX_UPLOAD_BYTES` are supported.
-- Web: `NEXT_PUBLIC_API_URL` defaults to `http://localhost:8000/api/v1`.
-
-### Start Commands
+Prerequisites: Node.js 22+, npm, Python 3.11+, uv, and Docker Desktop.
 
 ```bash
+cp api/.env.example api/.env
 docker compose up -d postgres
-cd api && uv sync && uv run fastapi dev app/main.py
-cd web && npm install && npm run dev
+
+cd api
+uv sync --locked
+uv run alembic upgrade head
+uv run python -m app.seed
+uv run fastapi dev app/main.py
 ```
 
-When Docker/PostgreSQL is unavailable, the repository also provides `./scripts/start-local.sh`. It initializes `data/local/scientific_rd.db` with the same Alembic migration and demo seed, then starts the API and Web together. This SQLite path is for local development only; the production/default configuration remains PostgreSQL.
-
-### Migration Commands
+In another terminal:
 
 ```bash
-cd api && uv run alembic upgrade head
+cd web
+npm ci
+npm run dev
 ```
 
-### Seed Commands
+Open `http://localhost:3000/dashboard/overview`.
 
-```bash
-cd api && uv run python -m app.seed
-```
+API configuration supports `DATABASE_URL`, `CORS_ORIGINS`, `STORAGE_ROOT`, and `MAX_UPLOAD_BYTES`. The web client uses `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000/api/v1`.
 
-## 5. Actual Data Model
+### Docker-free development fallback
 
-Tables: `projects`, `experiment_templates`, `experiments`, `attachments`, `experiment_revisions`.
+`./scripts/start-local.sh` migrates and seeds `data/local/scientific_rd.db`, then starts API and Web together. This SQLite path is for local development convenience only; PostgreSQL remains authoritative for Phase 1 acceptance and the default shared runtime.
 
-Important constraints include unique project/experiment codes, active template selection, foreign keys, clone `parent_experiment_id`, attachment metadata separate from bytes, and unique `(experiment_id, revision_number)` revision numbering. `structured_data` and `note_document` are separate JSON columns. Revision rows are append-only through the API.
+## 6. Data Model
 
-## 6. Actual API
+Tables: `projects`, `experiment_templates`, `experiments`, `attachments`, and `experiment_revisions`.
+
+Important guarantees:
+
+- unique project and experiment codes;
+- unique immutable template versions by `(key, version)`;
+- permanent experiment binding to an exact template row/version;
+- server-side structured-data validation against that bound schema;
+- clone lineage through `parent_experiment_id`;
+- separate `structured_data` and `note_document` JSONB columns;
+- attachment metadata separate from bytes;
+- unique `(experiment_id, revision_number)` and append-only revisions through the API.
+
+## 7. API Surface
 
 - `GET /api/v1/health`
 - `GET|POST /api/v1/projects`
 - `GET|PATCH /api/v1/projects/{project_id}`
 - `GET /api/v1/experiment-templates`
+- `GET /api/v1/experiment-templates/{template_id}`
+- `GET /api/v1/experiments`
 - `GET|POST /api/v1/projects/{project_id}/experiments`
 - `GET|PATCH /api/v1/experiments/{experiment_id}`
 - `POST /api/v1/experiments/{experiment_id}/clone`
 - `GET|POST /api/v1/experiments/{experiment_id}/revisions`
-- `GET /api/v1/experiments/{experiment_id}/revisions/{revision_id}`
+- `GET /api/v1/experiments/{experiment_id}/revisions/{revision_number}`
 - `GET|POST /api/v1/experiments/{experiment_id}/attachments`
-- `GET|DELETE /api/v1/attachments/{attachment_id}` plus download route
+- `GET /api/v1/attachments/{attachment_id}/download`
+- `DELETE /api/v1/attachments/{attachment_id}`
 
-## 7. Frontend Routes
+## 8. Frontend Routes
 
 - `/dashboard/overview`
 - `/dashboard/projects`
@@ -84,52 +106,46 @@ Important constraints include unique project/experiment codes, active template s
 - `/dashboard/experiments`
 - `/dashboard/experiments/[experimentId]`
 
-## 8. Third-party Dependencies
+## 9. Final P0 Audit
+
+The closeout used a real UTF-8 PostgreSQL 17.11 server on macOS because Docker was unavailable. The same database checks are encoded in GitHub Actions with the `postgres:17-alpine` service image.
+
+| P0 acceptance criterion | Result and evidence |
+| --- | --- |
+| PostgreSQL, API, and Web start | PASS — PostgreSQL 17.11, FastAPI, and Next.js were run together. |
+| Health and CORS | PASS — live `/api/v1/health` returned `{"status":"healthy"}` and browser requests succeeded. |
+| Blank database migration | PASS — `alembic upgrade head` applied `0001` and `0002` on blank PostgreSQL. |
+| Migration/model parity | PASS — `alembic check` reported no new upgrade operations. |
+| Seed idempotency | PASS — seed ran twice; one PRJ-001, one template v1, and three demo experiments remained. |
+| Project and experiment CRUD | PASS — PostgreSQL-backed API tests and browser flow passed. |
+| Schema validation | PASS — valid writes pass and invalid/unknown structured fields return explanatory 4xx responses. |
+| Exact template-version binding | PASS — tests cover old inactive version use, same-key v2 creation, duplicate rejection, and immutable schema rows. |
+| Structured-property editing | PASS — EXP-046 starch was changed from `1` to `0.5`, saved, refreshed, and retained. |
+| Rich-note storage | PASS — note JSON remains separate and is covered by the PostgreSQL demo test. |
+| Attachment lifecycle | PASS — upload, SHA-256-verified download, delete, and post-delete 404 succeeded against the live PostgreSQL API. Failure-ordering tests cover database-commit and byte-cleanup faults. |
+| Revision creation/viewing | PASS — revision created on PostgreSQL; viewer displayed nested note and disabled structured controls. |
+| Clone and lineage | PASS — browser-created EXP-046 retained template v1, new identity, draft state, and parent lineage. |
+| Refresh and service restart persistence | PASS — clone title and starch `0.5` remained after PostgreSQL, API, and Web restart. |
+| Backend quality | PASS — Ruff check/format and 11 pytest tests; pytest ran with asserted PostgreSQL dialect. |
+| Frontend quality | PASS — lint, typecheck, 4 Vitest tests, format check, and Next.js 16.2.12 production build. |
+| License and repository hygiene | PASS — attribution retained, no nested `.git`, planning documents preserved. |
+
+Browser inspection also confirmed there was no Next.js error overlay and no JSON Forms renderer error. The only observed browser diagnostic was the non-blocking development `metadataBase` warning.
+
+## 10. Third-party Dependencies
 
 - Kiranism dashboard starter snapshot: MIT; SHA `7705dfc0d13889e45c26a55ad5908da6a7a9a605`.
 - `@jsonforms/core`, `@jsonforms/react`, `@jsonforms/vanilla-renderers` 3.8.0: MIT.
-- `@blocknote/core`, `@blocknote/react`, `@blocknote/shadcn` 0.54.0: MPL-2.0; no XL packages used.
-- FastAPI, SQLAlchemy, Alembic, Pydantic, psycopg, jsonschema are installed through `api/pyproject.toml`/`uv.lock`.
+- `@blocknote/core`, `@blocknote/react`, `@blocknote/shadcn` 0.54.0: MPL-2.0; no XL packages are used.
+- FastAPI, SQLAlchemy, Alembic, Pydantic, psycopg, and jsonschema are locked in `api/uv.lock`.
 
-## 9. Verification Results
+## 11. Non-blocking Debt and Deferred Scope
 
-- frontend lint: PASS (oxlint; inherited starter warnings remain).
-- frontend typecheck: PASS.
-- frontend tests: PASS — 2 tests.
-- frontend build: PASS — Next.js 16.2.12.
-- backend tests: PASS — 5 tests, including the API-level Phase 1 demo flow.
-- migration blank DB: PENDING — Docker and PostgreSQL binaries unavailable (`docker: command not found`).
-- seed idempotency: PASS against a temporary SQLite schema; production PostgreSQL seed pending.
-- browser smoke: PASS for clean localhost loads of overview, projects, and experiments; meaningful content, no Next error overlay, no console errors. API-offline state was intentionally observed.
-- demo scenario: PARTIAL — UI route path and API behavior are implemented; full live-API scenario awaits PostgreSQL.
+- The inherited starter dependency graph reports npm audit advisories and several oxlint warnings; neither blocks the Phase 1 path.
+- Starlette emits one upstream TestClient/httpx deprecation warning in pytest.
+- Phase 1 intentionally uses local filesystem attachment bytes, not object storage.
+- Measurement, Compare, CSV/XLSX import, charts, Literature/Zotero, embeddings/pgvector, AI, LangGraph, Langfuse, MCP, permissions/collaboration, jobs, notifications, and instrument integrations remain deferred. No Phase 2/3 tables, routes, navigation, or runtime dependencies were added.
 
-## 10. Known Issues
+## 12. Closeout Decision
 
-### Blocker
-
-- None in source code. PostgreSQL-backed verification is environment-blocked until Docker/PostgreSQL is available.
-
-### Non-blocking debt
-
-- npm audit reported three dependency advisories from the starter dependency graph; no forced upgrade was applied.
-- A few inherited starter components still emit oxlint warnings.
-- The workspace currently uses local filesystem attachments, not object storage.
-
-### Intentionally deferred
-
-Measurement, CSV/XLSX import, charts, Compare/batch workflows, Zotero/literature, embeddings/pgvector, AI, LangGraph, Langfuse, MCP, permissions/collaboration, S3/MinIO, jobs, notifications, and instrument integrations remain outside Phase 1.
-
-## 11. Architectural Decisions Made During Implementation
-
-- npm is the frontend package runner because Bun is not installed.
-- Google-hosted `next/font` imports were removed so builds work offline; the theme’s Geist/system CSS fallback remains.
-- The starter’s product/user routes and mock API routes were removed from the active build surface.
-- JSON Forms uses its official vanilla renderer set with a small wrapper style layer rather than a new renderer library.
-
-## 12. Phase 2 Constraints
-
-Keep the API client boundary and the five Phase 1 tables stable. Preserve separate `structured_data` and `note_document` storage, append-only revisions, clone lineage, and the `StorageAdapter` abstraction. Do not add Phase 2/3 features to the Phase 1 navigation or migration without an updated execution plan.
-
-## 13. Recommended Next Action
-
-Run the Compose/API startup path on a Docker-enabled machine, execute `docs/DEMO_SCENARIO.md` end-to-end, and update this handoff from PARTIAL to PASS only after the blank-DB migration and live persistence checks succeed.
+Phase 1 is frozen as passing. Any Phase 2 work requires a separate reviewed execution plan and explicit authorization.
