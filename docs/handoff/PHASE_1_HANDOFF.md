@@ -3,7 +3,7 @@
 ## 1. Status
 
 - PARTIAL — implementation and local checks pass. A Docker-free local SQLite deployment is now available; PostgreSQL-backed checks remain pending because Docker is unavailable in the current environment.
-- Git commit/tag: `80dbf63` (Phase 1 implementation); local deployment additions are recorded in the next local commit.
+- Git commit/tag: `80dbf63` (Phase 1 implementation); local deployment additions: `8d76903`.
 - Date: 2026-09-01
 
 ## 2. What Was Actually Implemented
