@@ -48,6 +48,8 @@ export function parseRevisionSnapshot(value: unknown): RevisionSnapshot | null {
     return null;
   }
   return {
+    snapshot_schema_version:
+      typeof value.snapshot_schema_version === 'number' ? value.snapshot_schema_version : 1,
     experiment: {
       title: experiment.title,
       status: experiment.status as ExperimentStatus,
@@ -57,6 +59,21 @@ export function parseRevisionSnapshot(value: unknown): RevisionSnapshot | null {
       structured_data: experiment.structured_data,
       note_document: experiment.note_document
     },
-    attachments: value.attachments
+    attachments: value.attachments,
+    measurements: Array.isArray(value.measurements)
+      ? value.measurements
+          .filter(isObject)
+          .map((item) => item as NonNullable<RevisionSnapshot['measurements']>[number])
+      : undefined,
+    literature_links: Array.isArray(value.literature_links)
+      ? value.literature_links
+          .filter(isObject)
+          .map((item) => item as NonNullable<RevisionSnapshot['literature_links']>[number])
+      : undefined,
+    evidence: Array.isArray(value.evidence)
+      ? value.evidence
+          .filter(isObject)
+          .map((item) => item as NonNullable<RevisionSnapshot['evidence']>[number])
+      : undefined
   };
 }

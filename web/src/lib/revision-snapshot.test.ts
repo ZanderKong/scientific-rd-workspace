@@ -46,4 +46,39 @@ describe('revision snapshots', () => {
       }
     ]);
   });
+
+  it('preserves v2 read-only references while accepting the Phase 1 shape', () => {
+    const snapshot = parseRevisionSnapshot({
+      snapshot_schema_version: 2,
+      experiment: {
+        title: 'v2',
+        status: 'completed',
+        objective: null,
+        template_id: 'template',
+        template_version: 1,
+        structured_data: {},
+        note_document: []
+      },
+      attachments: [],
+      measurements: [
+        {
+          id: 'measurement',
+          name: 'Response',
+          measurement_type: 'other_xy',
+          x_label: 'X',
+          x_unit: '1',
+          y_label: 'Y',
+          y_unit: 'AU',
+          row_count: 1,
+          summary_json: {},
+          points_sha256: 'digest',
+          import_id: 'import',
+          source_attachment_id: 'attachment',
+          source_sha256: 'source'
+        }
+      ]
+    });
+    expect(snapshot?.snapshot_schema_version).toBe(2);
+    expect(snapshot?.measurements?.[0].name).toBe('Response');
+  });
 });

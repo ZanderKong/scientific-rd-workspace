@@ -19,6 +19,8 @@ import type {
 import { parseRevisionSnapshot } from '@/lib/revision-snapshot';
 import { BackLink, formatBytes, formatDate, PageHeader, PageState, StatusBadge } from './shared';
 import { StructuredForm } from './structured-form';
+import { MeasurementData } from './measurement-data';
+import { ExperimentLiterature } from './experiment-literature';
 
 const RichNoteEditor = dynamic(
   () => import('./rich-note-editor').then((mod) => mod.RichNoteEditor),
@@ -44,7 +46,9 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
   const [template, setTemplate] = useState<ExperimentTemplate | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [revisions, setRevisions] = useState<Revision[]>([]);
-  const [tab, setTab] = useState<'overview' | 'record' | 'files' | 'revisions'>('overview');
+  const [tab, setTab] = useState<
+    'overview' | 'record' | 'files' | 'data' | 'literature' | 'revisions'
+  >('overview');
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
   const [status, setStatus] = useState('draft');
@@ -205,16 +209,18 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
         }
       />
       <div className='mb-4 flex flex-wrap gap-1 border-b'>
-        {(['overview', 'record', 'files', 'revisions'] as const).map((item) => (
-          <Button
-            key={item}
-            variant={tab === item ? 'secondary' : 'ghost'}
-            className='rounded-b-none capitalize'
-            onClick={() => setTab(item)}
-          >
-            {item}
-          </Button>
-        ))}
+        {(['overview', 'record', 'files', 'data', 'literature', 'revisions'] as const).map(
+          (item) => (
+            <Button
+              key={item}
+              variant={tab === item ? 'secondary' : 'ghost'}
+              className='rounded-b-none capitalize'
+              onClick={() => setTab(item)}
+            >
+              {item}
+            </Button>
+          )
+        )}
       </div>
       {message && (
         <p className='mb-4 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary'>{message}</p>
@@ -337,6 +343,17 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
           </CardContent>
         </Card>
       )}
+      {tab === 'data' && (
+        <MeasurementData
+          experiment={experiment}
+          attachments={attachments}
+          onMessage={(text, isError) => {
+            if (isError) setError(text);
+            else setMessage(text);
+          }}
+        />
+      )}
+      {tab === 'literature' && <ExperimentLiterature experiment={experiment} />}
       {tab === 'revisions' && (
         <div className='grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
           <Card>
@@ -447,6 +464,58 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                         </p>
                       )}
                     </section>
+
+                    {snapshot.measurements?.length ? (
+                      <section className='grid gap-2'>
+                        <h3 className='text-sm font-medium'>Measurement references</h3>
+                        <ul className='divide-y rounded-lg border text-sm'>
+                          {snapshot.measurements.map((measurement) => (
+                            <li key={measurement.id} className='grid gap-1 px-3 py-2'>
+                              <span className='font-medium'>{measurement.name}</span>
+                              <span className='text-xs text-muted-foreground'>
+                                {measurement.row_count} rows · {measurement.x_label} (
+                                {measurement.x_unit}) → {measurement.y_label} ({measurement.y_unit})
+                              </span>
+                              <span className='text-xs text-muted-foreground'>
+                                Immutable points SHA-256 {measurement.points_sha256}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ) : null}
+
+                    {snapshot.literature_links?.length ? (
+                      <section className='grid gap-2'>
+                        <h3 className='text-sm font-medium'>Literature references</h3>
+                        <ul className='divide-y rounded-lg border text-sm'>
+                          {snapshot.literature_links.map((link) => (
+                            <li key={link.id} className='grid gap-1 px-3 py-2'>
+                              <span className='font-medium'>{link.title}</span>
+                              <span className='text-xs text-muted-foreground'>
+                                {link.relationship_type} · literature {link.literature_id}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ) : null}
+
+                    {snapshot.evidence?.length ? (
+                      <section className='grid gap-2'>
+                        <h3 className='text-sm font-medium'>Evidence references</h3>
+                        <ul className='divide-y rounded-lg border text-sm'>
+                          {snapshot.evidence.map((item) => (
+                            <li key={item.id} className='grid gap-1 px-3 py-2'>
+                              <span className='font-medium'>{item.claim_text}</span>
+                              <span className='text-xs text-muted-foreground'>
+                                {item.stance} · {item.source_type} · {item.status}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ) : null}
 
                     <details className='rounded-lg border p-3 text-xs'>
                       <summary className='cursor-pointer font-medium'>Raw snapshot JSON</summary>

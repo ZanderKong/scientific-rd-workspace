@@ -1,5 +1,12 @@
 # GitHub 交接报告
 
+## 最新状态（2026-09-01）
+
+- Phase 1 remains frozen and passing from baseline `9bb494d`.
+- Phase 2 scientific workflow implementation is included in the current branch; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
+- Phase 2 is intentionally **not** marked PASS yet: PostgreSQL 17 acceptance must still run in GitHub Actions or a PostgreSQL 17 environment.
+- The current implementation commit is recorded in `PHASE_2_HANDOFF.md` after push.
+
 ## 仓库
 
 - Repository: `scientific-rd-workspace-codex-pack-v0.1`
@@ -55,7 +62,7 @@ cd ../web && npm install && npm run dev
 
 - 当前执行环境没有 Docker，因此 PostgreSQL 空库 migration、生产数据库 seed 和 PostgreSQL 连接验证尚未在本机完成；SQLite 本地开发部署已完成并通过健康检查。
 - npm audit 报告 starter 依赖树中存在 3 条 advisory，未执行破坏性强制升级。
-- Phase 2/3 的 Measurement、Compare、Literature、AI、RAG、LangGraph、Langfuse、MCP、pgvector、Zotero 等均未实现。
+- 本节是 Phase 1 初始交接时的范围记录；Phase 2 的 Measurement、Compare、CSV/XLSX import、Literature 和 Evidence 当前实现状态见 `PHASE_2_HANDOFF.md`。AI、RAG、LangGraph、Langfuse、MCP、pgvector 和自动化 Evidence Gate 仍保持 Phase 3 延后。
 
 ## 交接建议
 

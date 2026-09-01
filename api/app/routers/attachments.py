@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db import get_db
-from app.models import Attachment, Experiment
+from app.models import Attachment, Experiment, MeasurementImport
 from app.schemas import AttachmentOut
 from app.services import attachment_storage_key
 from app.storage import LocalStorageAdapter, sanitise_filename
@@ -96,6 +96,21 @@ def delete_attachment(attachment_id: uuid.UUID, db: Session = Depends(get_db)) -
     attachment = db.get(Attachment, attachment_id)
     if attachment is None:
         raise HTTPException(status_code=404, detail="attachment not found")
+    references = db.scalars(
+        select(MeasurementImport).where(
+            MeasurementImport.source_attachment_id == attachment.id,
+            MeasurementImport.status == "completed",
+        )
+    ).all()
+    if references:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "attachment_in_use",
+                "message": "Attachment is authoritative raw data for a completed measurement.",
+                "import_ids": [str(item.id) for item in references],
+            },
+        )
     storage_key = attachment.storage_key
     try:
         db.delete(attachment)

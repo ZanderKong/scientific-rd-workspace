@@ -1,0 +1,93 @@
+name: Phase 2 Scientific Workflow CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-postgresql:
+    name: Backend / PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend dependencies
+        run: uv sync --locked
+      - name: Migrate blank PostgreSQL database
+        run: uv run alembic upgrade head
+      - name: Verify migration/model parity
+        run: uv run alembic check
+      - name: Backend lint and format
+        run: |
+          uv run ruff check app tests
+          uv run ruff format --check app tests
+      - name: Verify idempotent Phase 2 seed
+        run: |
+          uv run python -m app.seed
+          uv run python -m app.seed
+          uv run python - <<'PY'
+          from sqlalchemy import func, select
+          from app.db import SessionLocal
+          from app.models import EvidenceRecord, LiteratureRecord, Measurement, MeasurementImport
+          with SessionLocal() as db:
+              assert db.scalar(select(func.count()).select_from(Measurement)) == 3
+              assert db.scalar(select(func.count()).select_from(MeasurementImport)) == 3
+              assert db.scalar(select(func.count()).select_from(LiteratureRecord)) == 1
+              assert db.scalar(select(func.count()).select_from(EvidenceRecord)) == 1
+          PY
+      - name: Run backend tests against PostgreSQL
+        run: uv run pytest
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run format:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm run test
+      - name: Production build
+        run: npm run build

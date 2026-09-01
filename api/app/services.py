@@ -8,7 +8,14 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Experiment, ExperimentRevision, ExperimentTemplate, Project
+from app.models import (
+    Experiment,
+    ExperimentLiteratureLink,
+    ExperimentRevision,
+    ExperimentTemplate,
+    Measurement,
+    Project,
+)
 from app.schemas import (
     CloneRequest,
     ExperimentCreate,
@@ -83,7 +90,56 @@ def update_experiment(db: Session, experiment: Experiment, payload: ExperimentUp
 
 
 def _snapshot(experiment: Experiment) -> dict[str, Any]:
+    measurements = []
+    for measurement in getattr(experiment, "measurements", []):
+        import_record = measurement.import_record
+        measurements.append(
+            {
+                "id": str(measurement.id),
+                "name": measurement.name,
+                "measurement_type": measurement.measurement_type,
+                "schema_key": measurement.schema_key,
+                "schema_version": measurement.schema_version,
+                "x_label": measurement.x_label,
+                "x_unit": measurement.x_unit,
+                "y_label": measurement.y_label,
+                "y_unit": measurement.y_unit,
+                "row_count": measurement.row_count,
+                "summary_json": copy.deepcopy(measurement.summary_json),
+                "points_sha256": measurement.points_sha256,
+                "import_id": str(measurement.import_id),
+                "source_attachment_id": str(import_record.source_attachment_id),
+                "source_sha256": import_record.source_sha256,
+            }
+        )
+    literature_links = []
+    for link in getattr(experiment, "literature_links", []):
+        literature = link.literature
+        literature_links.append(
+            {
+                "id": str(link.id),
+                "literature_id": str(literature.id),
+                "relationship_type": link.relationship_type,
+                "title": literature.title,
+                "authors": copy.deepcopy(literature.authors_json),
+                "publication_year": literature.publication_year,
+                "doi": literature.doi,
+            }
+        )
+    evidence = []
+    for item in getattr(experiment, "evidence_records", []):
+        evidence.append(
+            {
+                "id": str(item.id),
+                "claim_text": item.claim_text,
+                "stance": item.stance,
+                "source_type": item.source_type,
+                "source_snapshot_json": copy.deepcopy(item.source_snapshot_json),
+                "status": item.status,
+            }
+        )
     return {
+        "snapshot_schema_version": 2,
         "experiment": {
             "title": experiment.title,
             "status": experiment.status,
@@ -103,6 +159,9 @@ def _snapshot(experiment: Experiment) -> dict[str, Any]:
             }
             for attachment in experiment.attachments
         ],
+        "measurements": measurements,
+        "literature_links": literature_links,
+        "evidence": evidence,
     }
 
 
@@ -112,7 +171,14 @@ def create_revision(
     locked = db.scalars(
         select(Experiment)
         .where(Experiment.id == experiment_id)
-        .options(selectinload(Experiment.attachments))
+        .options(
+            selectinload(Experiment.attachments),
+            selectinload(Experiment.measurements).selectinload(Measurement.import_record),
+            selectinload(Experiment.literature_links).selectinload(
+                ExperimentLiteratureLink.literature
+            ),
+            selectinload(Experiment.evidence_records),
+        )
         .with_for_update()
     ).first()
     if locked is None:

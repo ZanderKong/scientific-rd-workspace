@@ -24,6 +24,20 @@ export const navGroups: NavGroup[] = [
         icon: 'flask',
         isActive: false,
         items: []
+      },
+      {
+        title: 'Compare',
+        url: '/dashboard/compare',
+        icon: 'trendingUp',
+        isActive: false,
+        items: []
+      },
+      {
+        title: 'Literature',
+        url: '/dashboard/literature',
+        icon: 'post',
+        isActive: false,
+        items: []
       }
     ]
   }

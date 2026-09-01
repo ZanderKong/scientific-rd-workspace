@@ -34,4 +34,28 @@ describe('api client', () => {
       expect.objectContaining({ method: 'POST' })
     );
   });
+
+  it('retains structured import diagnostics on ApiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: 'non_numeric_value',
+              message: '1 invalid cell',
+              errors: [{ row: 3, column: 'y', message: 'Expected a finite number.' }]
+            }
+          }),
+          { status: 422 }
+        )
+      )
+    );
+    await expect(api.listProjects()).rejects.toEqual(
+      expect.objectContaining({
+        status: 422,
+        details: expect.objectContaining({ code: 'non_numeric_value' })
+      })
+    );
+  });
 });
