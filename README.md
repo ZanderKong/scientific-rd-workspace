@@ -20,8 +20,11 @@ docs/
 ├── exec-plans/
 │   ├── 01-foundation-eln.md
 │   ├── 02-scientific-workflow-scope.md
+│   ├── 02-scientific-workflow.md
 │   └── 03-scientific-ai-scope.md
 ├── handoff/
+│   ├── PHASE_1_HANDOFF.md
+│   ├── PHASE_2_HANDOFF.md
 │   └── PHASE_HANDOFF_TEMPLATE.md
 └── references/
     └── SOURCES.md
@@ -29,31 +32,31 @@ docs/
 
 ## 当前阶段
 
-**Active Phase：Phase 1 — Foundation + ELN Core**
+**Closed phases：Phase 1 — Foundation + ELN Core；Phase 2 — Scientific Workflow**
 
-Phase 1 做完之后，产品应能够完成：
+Phase 1 已完成并通过：
 
 > Project → Experiment → Structured Properties → Rich Note → Attachment → Save → Clone → Revision History
 
-这是第一个真实可运行的纵向切片。
+Phase 2 已完成并通过：
 
-Phase 2 和 Phase 3 目前只定义产品边界和接口，不应在 Phase 1 中提前实现。
+> Raw Attachment → Import → Measurement → Plot → Compare → Literature → Evidence
 
-## 推荐工作方式
+Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在提交 `939bf82` 上通过；详情见 `docs/handoff/PHASE_2_HANDOFF.md`。Phase 3 尚未开始。
 
-1. 新建一个空文件夹。
-2. 将本文件包中的所有文件复制到该文件夹根目录。
-3. 用 Git 初始化仓库。
-4. 可选但推荐：先让你 Codex 客户端中用于高推理规划的模型读取整个目录，执行 `docs/CODEX_PROMPTS.md` 中的「Preflight / Plan Review」。
-5. 然后让执行模型读取 `AGENTS.md` 与 `docs/exec-plans/01-foundation-eln.md`，按照 milestone 顺序实现。
-6. 每个 milestone 都必须通过指定验证，再继续下一个。
-7. Phase 1 完成后，不要直接执行 Phase 2 scope。先基于真实仓库生成新的详细 Phase 2 Execution Plan。
+## 阶段执行记录
+
+1. Phase 1 按 `docs/exec-plans/01-foundation-eln.md` 完成并关闭。
+2. Phase 2 基于冻结的 Phase 1 架构生成并执行 `docs/exec-plans/02-scientific-workflow.md`。
+3. Phase 2 的 PostgreSQL 17、后端和前端门禁已通过 GitHub Actions。
+4. Phase 1/2 的最终证据分别记录在 `docs/handoff/PHASE_1_HANDOFF.md` 和 `docs/handoff/PHASE_2_HANDOFF.md`。
+5. Phase 3 仍仅保留原始 scope，未在本次关闭工作中实现或规划。
 
 ## 核心原则
 
 - 一个主产品壳，一个 canonical data model。
 - 开源项目作为 starter、组件或独立 service 使用，不把多个完整产品源码硬 merge。
-- Phase 1 不引入 LangGraph、Langfuse、MCP、pgvector、Zotero 集成。
+- Phase 1/2 不引入 LangGraph、Langfuse、MCP、pgvector 或 Zotero 运行时集成。
 - 不为了未来需求提前制造微服务。
 - 不重新开发富文本编辑器或通用 Schema Form Engine。
 - 每个阶段必须保持可运行。
@@ -90,11 +93,11 @@ Phase 2 和 Phase 3 目前只定义产品边界和接口，不应在 Phase 1 中
 - 前后端可以直接本机启动
 - 必须提供一条明确的开发启动路径
 
-## 完成定义
+## 阶段完成状态
 
-Phase 1 的「完成」不是页面画出来，而是 `docs/exec-plans/01-foundation-eln.md` 中所有 P0 acceptance criteria 均通过，并产出一份 Phase Handoff。
+Phase 1 和 Phase 2 的所有 P0 acceptance criteria 均已通过，并分别产出正式 handoff。Phase 2 的权威验收由 PostgreSQL 17 GitHub Actions workflow run `33522448986` 提供。
 
-## Phase 1 本地启动
+## Phase 1/2 本地启动
 
 Prerequisites: Node.js 22+, npm, Python 3.11+, uv, and Docker Desktop (for PostgreSQL 17). Phase 1 has been audited against a real PostgreSQL 17.11 server; see `docs/handoff/PHASE_1_HANDOFF.md` for the closeout evidence.
 

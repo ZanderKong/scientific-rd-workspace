@@ -1,8 +1,10 @@
 # Execution Plan 02 — Scientific Workflow
 
-**Status:** IN PROGRESS — Phase 2 implementation started with explicit authorization
+**Status:** COMPLETE — `PHASE 2 PASS` at accepted source commit `939bf82`
 
 **Baseline:** Phase 1 PASS at commit `9bb494d`
+
+**Acceptance:** GitHub Actions workflow `Phase 2 Scientific Workflow CI`, run `33522448986`, completed successfully against PostgreSQL 17 on 2026-09-01
 
 **Release target:** `phase-2-scientific-workflow`
 
@@ -1330,7 +1332,17 @@ Append notes; never delete prior notes.
 - Added computed Compare API, manual Literature/Evidence APIs, source snapshots, withdrawal semantics, and an optional `LiteratureProvider` protocol seam; no Zotero provider was added.
 - Added Experiment Data, Compare, and Literature/Evidence frontend surfaces using the existing typed client and Recharts 3.8.
 - Added deterministic Phase 2 seed data and a PostgreSQL 17/frontend CI workflow.
-- Local verification completed with 18 backend tests, frontend tests/typecheck/build, SQLite migration upgrade/check, and idempotent seed counts. PostgreSQL execution remains the CI-authoritative gate when Docker/PostgreSQL is available.
+- Local verification completed with 18 backend tests, frontend tests/typecheck/build, SQLite migration upgrade/check, and idempotent seed counts.
+- PostgreSQL 17 acceptance completed in GitHub Actions run `33522448986` for source commit `939bf82`: blank migration, migration/model parity, backend lint/format, idempotent Phase 2 seed, PostgreSQL backend tests, and all frontend gates passed.
+- The same source commit passed Phase 1 CI run `33522448939`, preserving the frozen Phase 1 contracts.
+
+## Phase 2 closeout — 2026-09-01
+
+- All Phase 2 P0 acceptance criteria are satisfied.
+- Final verdict: `PHASE 2 PASS`.
+- Accepted implementation commit: `b916292`; accepted source/documentation state: `939bf82`.
+- Successful Phase 2 workflow: https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33522448986
+- Phase 2 is closed. No Phase 3 implementation or planning was performed during closeout.
 
 ```markdown
 ## M<N> completed — YYYY-MM-DD
@@ -1354,4 +1366,4 @@ Follow-up:
 - Exact next-milestone dependency or remaining bounded debt.
 ```
 
-Do not mark this plan complete until Milestone 10 produces a PostgreSQL-backed `PHASE 2 PASS` handoff.
+Milestone 10 is complete: the PostgreSQL 17 workflow passed and `docs/handoff/PHASE_2_HANDOFF.md` records `PHASE 2 PASS`.

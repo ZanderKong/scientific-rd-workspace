@@ -3,9 +3,10 @@
 ## 最新状态（2026-09-01）
 
 - Phase 1 remains frozen and passing from baseline `9bb494d`.
-- Phase 2 scientific workflow implementation is included in the current branch; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
-- Phase 2 is intentionally **not** marked PASS yet: PostgreSQL 17 acceptance must still run in GitHub Actions or a PostgreSQL 17 environment.
-- The current implementation commit is recorded in `PHASE_2_HANDOFF.md` after push.
+- Phase 2 is formally closed as **PASS**; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
+- Accepted source commit: `939bf82`; implementation commit: `b916292`.
+- PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
+- Phase 3 has not begun.
 
 ## 仓库
 
@@ -58,12 +59,12 @@ cd ../web && npm install && npm run dev
 
 该 SQLite 路径仅用于本地开发，生产默认配置仍为 PostgreSQL。
 
-## 尚待确认
+## 历史说明和非阻塞项
 
-- 当前执行环境没有 Docker，因此 PostgreSQL 空库 migration、生产数据库 seed 和 PostgreSQL 连接验证尚未在本机完成；SQLite 本地开发部署已完成并通过健康检查。
+- 本机没有 Docker，因此早期只执行了 SQLite 本地验证；该限制已由 GitHub Actions 的 PostgreSQL 17 成功验收取代，不再是阶段阻塞项。
 - npm audit 报告 starter 依赖树中存在 3 条 advisory，未执行破坏性强制升级。
 - 本节是 Phase 1 初始交接时的范围记录；Phase 2 的 Measurement、Compare、CSV/XLSX import、Literature 和 Evidence 当前实现状态见 `PHASE_2_HANDOFF.md`。AI、RAG、LangGraph、Langfuse、MCP、pgvector 和自动化 Evidence Gate 仍保持 Phase 3 延后。
 
 ## 交接建议
 
-首次在 Docker 可用环境执行上述启动命令，完成 `docs/DEMO_SCENARIO.md` 全流程后，再将 handoff 状态从 PARTIAL 更新为 PASS。
+Phase 1 与 Phase 2 均已正式关闭并通过 PostgreSQL 17 CI。后续阶段必须保持现有不可变模板、revision 和 provenance 保证；本次交接未启动 Phase 3。
