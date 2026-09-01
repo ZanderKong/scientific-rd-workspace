@@ -1,0 +1,31 @@
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/.env*
+!web/.env.example
+web/npm-debug.log*
+
+# Python
+api/.venv/
+api/__pycache__/
+**/__pycache__/
+**/*.pyc
+api/.pytest_cache/
+**/.pytest_cache/
+api/.mypy_cache/
+api/.ruff_cache/
+api/*.pyc
+api/.env*
+!api/.env.example
+
+# Local runtime data
+data/uploads/
+data/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

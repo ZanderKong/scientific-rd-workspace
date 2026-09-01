@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: scientific
+      POSTGRES_PASSWORD: scientific
+      POSTGRES_DB: scientific_rd
+    ports:
+      - "5432:5432"
+    volumes:
+      - scientific-rd-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scientific -d scientific_rd"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  scientific-rd-postgres:

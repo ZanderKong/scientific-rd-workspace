@@ -1,0 +1,2 @@
+JSON Forms is licensed under the MIT License.
+Source: https://github.com/eclipsesource/jsonforms

@@ -1,0 +1,4 @@
+BlockNote core packages used by this project are licensed under the Mozilla Public License 2.0.
+Source: https://github.com/TypeCellOS/BlockNote
+
+The Phase 1 implementation does not use BlockNote XL packages.
