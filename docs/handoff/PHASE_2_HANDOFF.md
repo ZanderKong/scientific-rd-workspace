@@ -5,7 +5,7 @@
 - **Implementation status:** complete in the working tree; PostgreSQL 17 acceptance is still pending in this environment.
 - **Verdict:** `PHASE 2 NOT READY` until the PostgreSQL 17 CI/audit gates pass.
 - **Phase 1 baseline:** `9bb494d` (Phase 1 remains frozen and passing).
-- **Implementation commit:** `1b0dc0d` (`Implement Phase 2 scientific workflow`).
+- **Implementation commit:** `b916292` (`Implement Phase 2 scientific workflow`).
 - **Scope boundary:** no Measurement Compare extensions beyond this plan, AI, LangGraph, Langfuse, MCP, embeddings, pgvector, Evidence Gate decisions, or other Phase 3 functionality were added.
 
 ## 2. Delivered slice
