@@ -73,13 +73,14 @@ Local frontend gates run from `web/`:
 - `npm run lint` — passed; only pre-existing baseline warnings remain in calendar, kbar render-result and info-button.
 - `npm run typecheck` — passed.
 - `npm run test -- --run` — passed: 4 files, 14 tests, including bounded selection, structured value/score rendering and traceability normalization.
-- `npm run build` — run at closeout; record the final result below.
+- `npm run build` — passed locally with Next.js 16.2.12/Turbopack; all 12 app routes compiled.
 
 CI evidence retained from the project baseline:
 
 - [Phase 1 frontend/CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33616425820)
 - [Phase 3 completion/CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33616425909)
-- Plan 2 frontend CI run: `TBD after the accepted commit is pushed`
+- [Plan 2 closeout Phase 1 CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33651754023) — passed on `d6a94e9`.
+- [Plan 2 closeout Phase 3 Scientific AI CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33651754079) — passed on `d6a94e9`.
 
 ## Browser matrix
 
@@ -104,8 +105,8 @@ Critical path used real local seed data: `Overview → Projects → PRJ-001 → 
 
 - Final frontend implementation commit: `150485f4d2138b6326e49839706474e3f76b1e67`
 - Documentation closeout commit: the final `HEAD` after this handoff is committed.
-- Final CI run: `TBD`
-- Worktree clean after commit: `TBD`
+- Final CI runs: Phase 1 `33651754023` and Phase 3 `33651754079`, both passed.
+- Worktree clean after final documentation commit: `yes`
 - No new tag created.
 
 `PLAN 2 PASS — FULL-SITE UI REBUILD + PORTFOLIO POLISH ACCEPTED`
