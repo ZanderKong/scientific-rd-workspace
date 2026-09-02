@@ -3,7 +3,8 @@
 ## 1. Release status
 
 - **Verdict: `PHASE 3 NOT YET RELEASED`**
-- **Current head:** `ef1b6c6` (`Record Phase 3 final handoff and release gate`), pushed to `main`.
+- **Implementation head:** `c0248f0` (`Format Phase 3 browser surfaces`); final handoff commits
+  `ef1b6c6` and `835cca9` are documentation-only and pushed to `main`.
 - **Accepted baseline before this final batch:** `58b74eb`.
 - **M1–M7:** accepted and preserved; no redesign was made.
 - **M8–M9:** implemented and locally audited.
