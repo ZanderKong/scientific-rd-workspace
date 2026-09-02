@@ -290,7 +290,9 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                   Enabling review decision <code>{provenance.enabling_review_decision_id}</code>
                 </p>
                 <details className='rounded border p-3 text-xs'>
-                  <summary className='cursor-pointer font-medium'>Inspect immutable snapshots</summary>
+                  <summary className='cursor-pointer font-medium'>
+                    Inspect immutable snapshots
+                  </summary>
                   <pre className='mt-2 max-h-72 overflow-auto'>
                     {JSON.stringify(
                       {

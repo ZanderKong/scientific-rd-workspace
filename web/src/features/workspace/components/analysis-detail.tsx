@@ -269,7 +269,8 @@ function FindingCard({
               </Button>
             )}
             {finding.suggested_next_experiment_json &&
-              (latestReview?.decision === 'accept' || latestReview?.decision === 'needs_evidence') &&
+              (latestReview?.decision === 'accept' ||
+                latestReview?.decision === 'needs_evidence') &&
               finding.suggested_next_experiment_json.validation_status === 'valid' && (
                 <Button
                   size='sm'
