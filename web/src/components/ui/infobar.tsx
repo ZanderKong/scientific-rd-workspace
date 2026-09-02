@@ -208,7 +208,10 @@ function InfobarProvider({
               ...style
             } as React.CSSProperties
           }
-          className={cn('group/infobar-wrapper flex flex-1 w-full', className)}
+          className={cn(
+            'group/infobar-wrapper flex flex-1 w-full [&>*:first-child]:min-w-0',
+            className
+          )}
           {...props}
         >
           {children}
@@ -297,7 +300,7 @@ function Infobar({
         data-slot='infobar-container'
         className={cn(
           'sticky top-0 z-30 hidden h-[calc(100dvh-3.5rem)] w-(--infobar-width) shrink-0 overflow-hidden rounded-tl-xl border-l border-t transition-[width,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:flex',
-          'group-data-[collapsible=offcanvas]:w-0 group-data-[collapsible=offcanvas]:overflow-hidden group-data-[collapsible=offcanvas]:border-0 group-data-[collapsible=offcanvas]:opacity-0',
+          'group-data-[collapsible=offcanvas]:w-0 group-data-[collapsible=offcanvas]:overflow-visible group-data-[collapsible=offcanvas]:border-0 group-data-[collapsible=offcanvas]:opacity-0',
           className
         )}
         {...props}
@@ -305,10 +308,11 @@ function Infobar({
         <div
           data-infobar='infobar'
           data-slot='infobar-inner'
-          className='bg-sidebar text-sidebar-foreground flex h-full w-full flex-col overflow-y-auto'
+          className='bg-sidebar text-sidebar-foreground flex h-full w-full flex-col overflow-x-hidden overflow-y-auto group-data-[collapsible=offcanvas]:hidden'
         >
           {children}
         </div>
+        <InfobarRail />
       </div>
     </div>
   );
@@ -355,7 +359,7 @@ function InfobarRail({ className, ...props }: React.ComponentProps<'button'>) {
         '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
         'hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full',
         '[[data-side=left][data-collapsible=offcanvas]_&]:-right-2',
-        '[[data-side=right][data-collapsible=offcanvas]_&]:-left-2',
+        '[[data-side=right][data-collapsible=offcanvas]_&]:-left-6',
         className
       )}
       {...props}

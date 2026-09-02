@@ -9,7 +9,6 @@ import {
   InfobarGroup,
   InfobarGroupContent,
   InfobarHeader,
-  InfobarRail,
   InfobarTrigger,
   useInfobar
 } from '@/components/ui/infobar';
@@ -88,7 +87,6 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
           </InfobarGroupContent>
         </InfobarGroup>
       </InfobarContent>
-      <InfobarRail />
     </Infobar>
   );
 }

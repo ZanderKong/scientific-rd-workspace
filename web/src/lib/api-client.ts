@@ -27,6 +27,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/
   /\/$/,
   ''
 );
+export const API_REQUEST_TIMEOUT_MS = 10_000;
 
 export class ApiError extends Error {
   status: number;
@@ -40,12 +41,36 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const controller = new AbortController();
+  const callerSignal = init?.signal;
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+  }
+  const timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...init, cache: 'no-store' });
-  } catch {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      cache: 'no-store',
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      if (callerSignal?.aborted) throw new ApiError('Request cancelled. Try again.', 0);
+      throw new ApiError('Request timed out. Try again.', 408);
+    }
     throw new ApiError('Backend unreachable. Start the API and try again.', 0);
+  } finally {
+    clearTimeout(timeoutId);
+    if (callerSignal && onCallerAbort) {
+      callerSignal.removeEventListener('abort', onCallerAbort);
+    }
   }
   if (!response.ok) {
     let message = `Request failed (${response.status})`;

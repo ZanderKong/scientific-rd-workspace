@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, ApiError } from './api-client';
+import { api, API_REQUEST_TIMEOUT_MS, ApiError, request } from './api-client';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('api client', () => {
   it('parses structured API errors', async () => {
@@ -57,5 +60,53 @@ describe('api client', () => {
         details: expect.objectContaining({ code: 'non_numeric_value' })
       })
     );
+  });
+
+  it('reports network failures without retrying writes', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('connection refused'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      api.createProject({ title: 'New project', description: '', status: 'active' })
+    ).rejects.toEqual(
+      expect.objectContaining({
+        message: 'Backend unreachable. Start the API and try again.',
+        status: 0
+      })
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('times out a hanging request and preserves caller cancellation', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation((_url: string, options: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.listProjects();
+    const timedOut = expect(pending).rejects.toEqual(
+      expect.objectContaining({
+        message: 'Request timed out. Try again.',
+        status: 408
+      })
+    );
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MS);
+    await timedOut;
+
+    const callerController = new AbortController();
+    const cancelled = request<unknown>('/projects', { signal: callerController.signal });
+    callerController.abort();
+    await expect(cancelled).rejects.toEqual(
+      expect.objectContaining({
+        message: 'Request cancelled. Try again.',
+        status: 0
+      })
+    );
+    vi.useRealTimers();
   });
 });

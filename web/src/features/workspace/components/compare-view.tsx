@@ -153,6 +153,8 @@ export function CompareView() {
               setProjectId(e.target.value);
               setSelectedIds([]);
               setResult(null);
+              setSelectedLiterature([]);
+              setSelectedEvidence([]);
             }}
           >
             <option value=''>{t('chooseProject')}</option>
