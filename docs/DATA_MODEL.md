@@ -180,46 +180,62 @@ snapshot 示例：
 }
 ```
 
-## 4. Phase 2 Reserved Concepts
+## 4. Phase 2 Implemented Concepts
 
-以下现在定义语义，但 Phase 1 不建完整实现。
+Phase 2 建立了受限的结构化测量与证据模型，并保持原始附件到科学结果的 provenance。
 
 ### Measurement
 一次被结构化的数据测量结果。
-
-未来：
 
 ```text
 Measurement
 - id
 - experiment_id
-- measurement_type
-- schema_version
-- data
-- source_attachment_id
+- import_id
+- measurement_type / schema_key / schema_version
+- summary_json / points_sha256
+- MeasurementPoint rows
 ```
 
 ### Literature
-文献实体。
+项目级文献实体，可链接到 Experiment；provider/external metadata 是可选的。
 
 ### Evidence
-某个 scientific claim 的证据引用。
+某个 scientific claim 的人工维护证据引用，必须恰好来自 Literature、Measurement 或
+ExperimentRevision 之一，并保留 immutable source snapshot。
 
 ### Relation
 通用 provenance relation 未来可引入，但 Phase 1 不为了「通用图」重构所有 FK。
 
-## 5. Phase 3 Reserved Concepts
+## 5. Phase 3 Implemented Concepts (M1–M4)
+
+### ScientificAnalysisRun
+一次同步、单 provider-call 的科学分析，记录 project、冻结 context、provider/model profile、
+structured-output mode、prompt/schema/workflow versions、validated output、failure state 和可选
+Langfuse trace metadata。Run 状态不会改变已持久化的 context 或 Findings。
+
+### AnalysisContextSnapshot
+AnalysisRun 的不可变 canonical JSON 快照，包含精确 ExperimentRevision、template/schema hash、
+Measurement/import/source hashes 与采样点、Literature/Evidence snapshots、Compare 和 factor
+differences。`snapshot_sha256` 校验同一选择的确定性。
 
 ### Finding
-AI 或人提出的结构化科研判断。
+AI 返回的结构化科研判断，分为 observation、hypothesis、comparative、causal 和 recommendation。
+`structured_support_json` 保存服务端重算的 Direct Structured Support；`evidence_gate_status` 是
+版本化确定性策略的权威状态，与模型 confidence/gate 建议分开保存。模型建议不能直接写入实验。
+
+### FindingEvidenceLink
+Finding 到项目内 EvidenceRecord 的不可变链接，并保存当时的 Evidence 快照。它不代表直接结构化
+支持；直接支持保存在 Finding 自身。
 
 ### ReviewDecision
-Accept、Reject、Needs Evidence。
+Accept、Reject、Needs Evidence 的 append-only、有序人工评审。后续决定必须 supersede 当前最新
+决定；Finding 仅允许更新 review_status。
 
-### EvaluationCase
-从 bad case 生成的可回归测试案例。
+Phase 3 M5+ 的 EvaluationCase、EvaluationRun、EvaluationResult、ExperimentProvenanceLink 等
+仍按执行计划保留为后续里程碑，尚未实现。
 
-这些实体不得在 Phase 1 以空表方式提前加入。
+M5+ 的 Evaluation 实体仍不会以空表方式提前加入。
 
 ## 6. Experiment Template Seed
 

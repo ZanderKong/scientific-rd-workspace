@@ -373,3 +373,232 @@ class EvidenceRecord(Base):
     experiment_revision: Mapped[ExperimentRevision | None] = relationship(
         foreign_keys=[experiment_revision_id]
     )
+
+
+class ScientificAnalysisRun(Base):
+    __tablename__ = "scientific_analysis_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose in ('interactive', 'evaluation_replay')",
+            name="ck_scientific_analysis_runs_purpose",
+        ),
+        CheckConstraint(
+            "status in ('building_context', 'running', 'completed', 'failed', 'interrupted')",
+            name="ck_scientific_analysis_runs_status",
+        ),
+        CheckConstraint(
+            "provider_key in ('litellm', 'fixture')",
+            name="ck_scientific_analysis_runs_provider",
+        ),
+        CheckConstraint(
+            "structured_output_mode in ('native_schema', 'json_object')",
+            name="ck_scientific_analysis_runs_output_mode",
+        ),
+        CheckConstraint("prompt_version > 0", name="ck_scientific_analysis_runs_prompt_version"),
+        CheckConstraint(
+            "output_schema_version > 0", name="ck_scientific_analysis_runs_schema_version"
+        ),
+        CheckConstraint(
+            "workflow_version > 0", name="ck_scientific_analysis_runs_workflow_version"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), index=True)
+    purpose: Mapped[str] = mapped_column(String(32), default="interactive")
+    status: Mapped[str] = mapped_column(String(32), default="building_context")
+    provider_key: Mapped[str] = mapped_column(String(32), default="fixture")
+    model_profile_key: Mapped[str] = mapped_column(String(120))
+    structured_output_mode: Mapped[str] = mapped_column(String(32), default="native_schema")
+    requested_model: Mapped[str] = mapped_column(String(255))
+    resolved_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_response_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_model_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_key: Mapped[str] = mapped_column(String(120))
+    prompt_version: Mapped[int] = mapped_column(Integer, default=1)
+    prompt_sha256: Mapped[str] = mapped_column(String(64))
+    prompt_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    output_schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    workflow_version: Mapped[int] = mapped_column(Integer, default=1)
+    generation_parameters_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    model_metadata_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    raw_output_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validated_output_json: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    langfuse_trace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    langfuse_sync_status: Mapped[str] = mapped_column(String(32), default="disabled")
+    langfuse_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project: Mapped[Project] = relationship()
+    context_snapshot: Mapped[AnalysisContextSnapshot | None] = relationship(
+        back_populates="analysis_run", uselist=False
+    )
+    findings: Mapped[list[Finding]] = relationship(back_populates="analysis_run")
+
+
+class AnalysisContextSnapshot(Base):
+    __tablename__ = "analysis_context_snapshots"
+    __table_args__ = (UniqueConstraint("analysis_run_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    analysis_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scientific_analysis_runs.id"), index=True
+    )
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    snapshot_sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    analysis_run: Mapped[ScientificAnalysisRun] = relationship(back_populates="context_snapshot")
+
+
+class Finding(Base):
+    __tablename__ = "findings"
+    __table_args__ = (
+        UniqueConstraint("analysis_run_id", "ordinal"),
+        CheckConstraint(
+            "claim_type in ("
+            "'scientific_observation', 'hypothesis', 'comparative_finding', "
+            "'causal_claim', 'recommendation')",
+            name="ck_findings_claim_type",
+        ),
+        CheckConstraint(
+            "confidence_label in ('low', 'medium', 'high')",
+            name="ck_findings_confidence_label",
+        ),
+        CheckConstraint(
+            "model_proposed_gate_status in ("
+            "'supported', 'partially_supported', 'insufficient_evidence', 'contradicted')",
+            name="ck_findings_model_gate_status",
+        ),
+        CheckConstraint(
+            "evidence_gate_status in ("
+            "'supported', 'partially_supported', 'insufficient_evidence', 'contradicted')",
+            name="ck_findings_evidence_gate_status",
+        ),
+        CheckConstraint(
+            "review_status in ('pending_review', 'accepted', 'rejected', 'needs_evidence')",
+            name="ck_findings_review_status",
+        ),
+        CheckConstraint("gate_policy_version > 0", name="ck_findings_gate_policy_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), index=True)
+    analysis_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scientific_analysis_runs.id"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    claim: Mapped[str] = mapped_column(Text)
+    claim_type: Mapped[str] = mapped_column(String(48))
+    confidence_label: Mapped[str] = mapped_column(String(16))
+    confidence_rationale: Mapped[str] = mapped_column(Text)
+    applicability_scope: Mapped[str] = mapped_column(Text)
+    limitations_json: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    risks_json: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    missing_evidence_json: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    comparison_assertions_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JsonColumn, default=list
+    )
+    structured_support_json: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    causal_target_json: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
+    suggested_next_experiment_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JsonColumn, nullable=True
+    )
+    model_proposed_gate_status: Mapped[str] = mapped_column(String(32))
+    model_proposed_gate_rationale: Mapped[str] = mapped_column(Text)
+    evidence_gate_status: Mapped[str] = mapped_column(String(32))
+    evidence_gate_rationale_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    gate_policy_version: Mapped[int] = mapped_column(Integer, default=1)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending_review")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project: Mapped[Project] = relationship()
+    analysis_run: Mapped[ScientificAnalysisRun] = relationship(back_populates="findings")
+    evidence_links: Mapped[list[FindingEvidenceLink]] = relationship(
+        back_populates="finding", cascade="all, delete-orphan"
+    )
+    reviews: Mapped[list[ReviewDecision]] = relationship(
+        back_populates="finding",
+        cascade="all, delete-orphan",
+        order_by="ReviewDecision.sequence_number",
+    )
+
+
+class FindingEvidenceLink(Base):
+    __tablename__ = "finding_evidence_links"
+    __table_args__ = (
+        UniqueConstraint("finding_id", "evidence_record_id"),
+        CheckConstraint(
+            "role in ('supporting', 'contradicting', 'contextual')",
+            name="ck_finding_evidence_links_role",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    finding_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("findings.id"), index=True)
+    evidence_record_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("evidence_records.id"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(24))
+    rationale: Mapped[str] = mapped_column(Text)
+    evidence_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    finding: Mapped[Finding] = relationship(back_populates="evidence_links")
+    evidence_record: Mapped[EvidenceRecord] = relationship()
+
+
+class ReviewDecision(Base):
+    __tablename__ = "review_decisions"
+    __table_args__ = (
+        UniqueConstraint("finding_id", "sequence_number"),
+        CheckConstraint(
+            "decision in ('accept', 'reject', 'needs_evidence')",
+            name="ck_review_decisions_decision",
+        ),
+        CheckConstraint("sequence_number > 0", name="ck_review_decisions_sequence"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    finding_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("findings.id"), index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    decision: Mapped[str] = mapped_column(String(24))
+    reviewer_name: Mapped[str] = mapped_column(String(240))
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supersedes_review_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("review_decisions.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    finding: Mapped[Finding] = relationship(back_populates="reviews")
+    supersedes: Mapped[ReviewDecision | None] = relationship(remote_side=[id])
+
+
+def _reject_update(
+    _mapper: Any, _connection: Any, target: Any, allowed: tuple[str, ...] = ()
+) -> None:
+    state = inspect(target)
+    changed = [attribute.key for attribute in state.attrs if attribute.history.has_changes()]
+    if any(key not in allowed for key in changed):
+        raise ValueError(f"{target.__class__.__name__} is immutable")
+
+
+def _reject_delete(_mapper: Any, _connection: Any, target: Any) -> None:
+    raise ValueError(f"{target.__class__.__name__} is immutable")
+
+
+event.listen(AnalysisContextSnapshot, "before_update", _reject_update)
+event.listen(AnalysisContextSnapshot, "before_delete", _reject_delete)
+event.listen(Finding, "before_update", lambda m, c, t: _reject_update(m, c, t, ("review_status",)))
+event.listen(Finding, "before_delete", _reject_delete)
+event.listen(FindingEvidenceLink, "before_update", _reject_update)
+event.listen(FindingEvidenceLink, "before_delete", _reject_delete)
+event.listen(ReviewDecision, "before_update", _reject_update)
+event.listen(ReviewDecision, "before_delete", _reject_delete)

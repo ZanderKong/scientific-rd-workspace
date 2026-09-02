@@ -22,11 +22,9 @@
 
 ## 当前目标
 
-当前只实现：
-
-**Phase 1 — Foundation + ELN Core**
-
-明确禁止提前实现 Phase 2、Phase 3 的完整能力。
+Phase 1 和 Phase 2 已关闭。当前执行批次是 **Phase 3 — Scientific AI，Milestones 1–4**；完成
+M4 后必须停止，不得开始 M5 或 Evaluation/UI/draft-Experiment 里程碑。Phase 1/2 的 immutable
+template、Revision、Measurement/import、Literature/Evidence 及存储契约保持不变。
 
 Phase 1 目标用户路径：
 

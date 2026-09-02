@@ -89,9 +89,21 @@ https://github.com/eclipsesource/jsonforms
 License:
 MIT。
 
-## 5. Langfuse
+## 5. LiteLLM
 
-Phase 3 才接入。
+Phase 3 M1–M4 embeds the LiteLLM Python SDK behind the Workspace `AIProvider` interface. The
+LiteLLM Gateway/Proxy service is deliberately not included. Exact dependency versions are verified
+at implementation time and locked in `api/uv.lock`; provider credentials remain server-side.
+
+Upstream:
+https://github.com/BerriAI/litellm
+
+License:
+MIT (SDK; transitive licenses remain in lockfiles).
+
+## 6. Langfuse
+
+Phase 3 M1–M4 optionally projects traces only; it is disabled by default and never authoritative.
 
 用途：
 - traces
@@ -107,7 +119,7 @@ Phase 3 才接入。
 Upstream:
 https://github.com/langfuse/langfuse
 
-## 6. Zotero
+## 7. Zotero
 
 Phase 2 才考虑接入。
 
@@ -122,7 +134,7 @@ Zotero Web API v3 或 Local API。
 Docs:
 https://www.zotero.org/support/dev/web_api/v3/
 
-## 7. eLabFTW / Kadi4Mat / NOMAD / Chemotion
+## 8. eLabFTW / Kadi4Mat / NOMAD / Chemotion
 
 定位：
 **设计参考，而不是 Phase 1 runtime dependency。**

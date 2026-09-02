@@ -2,78 +2,86 @@
 
 ## 1. Status
 
-- **Plan status:** `READY FOR EXECUTION`.
-- **Implementation status:** Phase 3 has **not** started; this handoff records a documentation-only plan revision.
-- **Date:** 2026-09-02.
-- **Stable Phase 1/2 baseline:** `fc0a944` (`Close Phase 2 documentation`).
-- **Phase 1 baseline:** `9bb494d`.
-- **Phase 2 accepted source:** `939bf82`.
-- **Documentation commit:** recorded in the GitHub commit that adds this handoff and the revised plan.
-- **Release tag:** no `v0.1-demo` tag; Phase 3 acceptance has not been claimed.
+- **Implementation status:** Milestones 1–4 complete in this batch; work intentionally stops before
+  Milestone 5. This is not a Phase 3 release closeout or `PHASE 3 PASS` claim.
+- **Implementation baseline:** Phase 3 work started from `4384191` (approved plan and handoff).
+- **Implementation commit:** the commit containing this handoff (`Implement Phase 3 milestones 1-4`);
+  use `git log -1` for its final hash.
+- **Phase 1 baseline:** `9bb494d`; **Phase 2 accepted commit:** `939bf82`.
+- **Release tag:** no `v0.1-demo` tag has been created.
 
-## 2. What Was Actually Delivered
+## 2. What Was Delivered
 
-Only the existing Phase 3 execution plan was revised in place:
+### Milestone 1 — contracts and persistence
 
-- Direct Structured Support is distinct from Curated Evidence. Validated Measurement comparisons, structured Experiment differences, and immutable Revision structured properties may support descriptive/comparative claims without an EvidenceRecord, but never establish causality.
-- Analysis accepts 0–25 curated EvidenceRecords when the selected structured context is sufficient.
-- EvaluationCase now covers immutable `bad_case` and controlled `reference_case` records, with review provenance, case-type-aware dataset hashing, and a small 4–8-case P0 dataset.
-- AI model profiles explicitly support `native_schema` and `json_object`; both require direct JSON/Pydantic/scientific-reference validation and forbid extraction, repair, or autonomous retries.
-- Evaluation execution is explicitly limited to one API process and one worker with sequential in-process execution; multi-worker deployment is unsupported in v0.1.
-- LiteLLM and Langfuse wording now requires implementation-time stable-version verification and exact lockfile pinning rather than treating a planning-time version as permanently current.
-- The 10-milestone structure, Phase 1/2 guarantees, gated prefilled Experiment draft flow, PostgreSQL source-of-truth boundary, optional Langfuse projection, and deferred LangGraph/RAG/pgvector/MCP scope remain intact.
+- Added additive Alembic migration `0005_scientific_analysis`.
+- Added `ScientificAnalysisRun`, immutable `AnalysisContextSnapshot`, immutable `Finding`, immutable
+  `FindingEvidenceLink`, and append-only `ReviewDecision` ORM records.
+- Added typed Pydantic contracts for analysis selection, five Finding types, typed Direct Structured
+  Support assertions, gate/review states, and the two structured-output modes.
+- Added versioned `scientific_analysis/v1` and `evaluation_judge/v1` prompts, model-profile capability
+  metadata, and exact LiteLLM `1.99.0` / Langfuse `4.15.1` lockfile entries after implementation-time
+  dependency verification.
 
-No migrations, ORM models, routers, providers, frontend routes, CI workflows, seed data, or runtime behavior were implemented by this change.
+### Milestone 2 — frozen scientific context
 
-## 3. Repository Files
+- Context builder requires 2–5 same-Project Experiment revisions and explicit 1–10 Measurements.
+- It rejects revision drift, cross-Project records, unselected Evidence sources, withdrawn Evidence,
+  and oversized/non-finite data before a provider call.
+- Context snapshots include exact revision/template identity and schema hashes, Measurement → Import →
+  Attachment provenance, full point hashes with bounded samples, Literature/Evidence snapshots,
+  server-side Compare output, lineage, and name-addressable factor differences such as
+  `/additives/@KI` and `/additives/@starch`.
+- Evidence selection is explicitly 0–25; valid direct structured comparisons do not require an
+  EvidenceRecord.
 
-- [Execution Plan 03](../exec-plans/03-scientific-ai.md) — complete implementation specification and acceptance contract.
-- [Phase 3 Handoff](PHASE_3_HANDOFF.md) — this status and scope record.
+### Milestone 3 — provider and analysis workflow
 
-Phase 1 and Phase 2 handoffs remain authoritative for delivered product behavior:
+- Added the small `AIProvider` boundary with deterministic `FixtureProvider` and embedded
+  `LiteLLMProvider`; no LiteLLM Gateway, LangGraph, queue, RAG, embeddings, pgvector, or MCP was added.
+- `native_schema` uses provider JSON Schema response format; `json_object` uses strict JSON-object
+  response format. Both perform direct JSON decode, Workspace Pydantic validation, and scientific
+  reference validation without regex/prose repair or invalid-output retries.
+- Added synchronous AnalysisRun creation, frozen context persistence, diagnostic failure state
+  persistence, provider/model/prompt/output metadata, and optional Langfuse trace projection
+  (disabled by default and never authoritative).
+- Added API endpoints for profiles, prompt versions, AnalysisRun create/list/detail, Finding list/detail,
+  and append-only human review decisions.
 
-- [Phase 1 Handoff](PHASE_1_HANDOFF.md)
-- [Phase 2 Handoff](PHASE_2_HANDOFF.md)
+### Milestone 4 — Findings and Evidence Gate
 
-## 4. Planned Interfaces and Schema Changes
+- Findings persist model output separately from deterministic gate output and confidence.
+- Direct Structured Support is server-recomputed from frozen Measurement summaries, structured
+  Experiment differences, and Revision structured-property observations. Revision free text is not
+  used to infer support.
+- Curated EvidenceRecord links are project-scoped, role-checked, immutable, and snapshot-backed.
+- Gate states are `supported`, `partially_supported`, `insufficient_evidence`, and `contradicted`.
+  Direct support can support descriptive/comparative claims but cannot prove causality. The fixture
+  demonstration forces the KI+starch causal claim to `insufficient_evidence` and records the missing
+  isolating control.
+- Suggested next experiments are normalized, template-validated, non-authoritative JSON proposals;
+  no endpoint creates or mutates an Experiment.
 
-These are planned implementation changes, not current runtime endpoints or tables:
-
-- `findings.structured_support_json` and typed `structured_support_assertions[]`.
-- `evaluation_cases.case_type`, `case_tags_json`, expanded expected-behavior fields, and a controlled Reference Case creation path.
-- `structured_output_mode` on model profiles, AnalysisRun, and EvaluationRun.
-- Analysis request `evidence_ids` cardinality 0–25.
-- `POST /findings/{finding_id}/evaluation-cases/reference` and `case_type` list filtering.
-- Single-worker Evaluation runner contract using FastAPI `BackgroundTasks` and PostgreSQL-persisted status.
-
-The plan explicitly keeps Phase 1 immutable template-version binding, append-only revisions, revision snapshot compatibility, and Phase 2 Measurement/import/Literature/Evidence provenance unchanged.
-
-## 5. Verification Performed
+## 3. Verification Performed
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Plan file present and complete | PASS | `docs/exec-plans/03-scientific-ai.md` |
-| Milestone structure | PASS | 10 milestones retained |
-| Markdown whitespace check | PASS | `git diff --no-index --check /dev/null docs/exec-plans/03-scientific-ai.md` |
-| Product code changes | NONE | No `api/` or `web/` files changed |
-| Phase 3 migrations/tests/CI/browser audit | NOT RUN | Intentionally deferred until implementation |
-| PostgreSQL 17 Phase 3 acceptance | NOT RUN | No Phase 3 runtime exists yet |
+| API formatter/lint | PASS | `uv run ruff format app tests && uv run ruff check app tests` |
+| API regression and Phase 3 tests | PASS | `uv run pytest -q` — 24 tests |
+| Blank-database Alembic upgrade | PASS locally | SQLite fallback smoke to `0005_scientific_analysis` |
+| PostgreSQL 17 Phase 3 acceptance | NOT RUN | reserved for the later complete Phase 3/M10 closeout |
+| Frontend gates/browser audit | NOT RUN | no M5 UI was implemented |
+| Live LiteLLM/Langfuse calls | NOT RUN | tests use FixtureProvider; Langfuse disabled |
 
-## 6. Known Issues and Deferred Work
+The repository remains additive to Phase 1/2. Existing immutable template-version rows, revision
+snapshots, Measurement/import provenance, Literature/Evidence semantics, and attachment storage
+contracts were not rewritten.
 
-### Intentional non-blocking scope
+## 4. Intentionally Deferred
 
-- Phase 3 implementation, migrations `0005`/`0006`, provider adapters, Evaluation runner, UI, CI, seed fixtures, and browser audit remain to be built according to the plan.
-- LiteLLM and Langfuse exact versions must be re-verified during implementation preflight and locked in `uv.lock`.
-- LangGraph, LiteLLM Gateway, RAG, embeddings, pgvector, MCP, autonomous retrieval, and self-hosted Langfuse remain deferred.
+M5 analysis/review UX; M6–M7 EvaluationCase/EvaluationRun/runner and evaluation UI; M8 gated prefilled
+draft Experiment provenance flow; M9 demo fixtures/browser story; M10 PostgreSQL 17 CI, full audit and
+release handoff. Multi-worker evaluation is unsupported by design and no queue was introduced.
 
-### Not accepted yet
-
-- No `PHASE 3 PASS` verdict.
-- No PostgreSQL 17 Phase 3 acceptance.
-- No live-provider smoke result.
-- No `v0.1-demo` release tag.
-
-## 7. Next Action
-
-Begin Phase 3 implementation only after using this plan as the approved contract; complete each milestone's acceptance criteria and the final PostgreSQL 17/browser audit before claiming `PHASE 3 PASS`.
+Phase 3 remains **IN PROGRESS**, not passed. Continue from the approved execution plan and preserve
+the Phase 1/2 contracts above.

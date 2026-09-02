@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.routers import (
+    analysis,
     attachments,
     compare,
     experiments,
@@ -37,3 +38,4 @@ app.include_router(revisions.router, prefix="/api/v1")
 app.include_router(measurements.router, prefix="/api/v1")
 app.include_router(compare.router, prefix="/api/v1")
 app.include_router(literature.router, prefix="/api/v1")
+app.include_router(analysis.router, prefix="/api/v1")

@@ -147,6 +147,11 @@ Experiment 某个可追溯时间点的 snapshot。
 - Benchmark/Regression view
 - final demo polish
 
+当前实现进度：Phase 3 M1–M4 已实现并通过后端回归测试；M5 及之后的评审 UI、Evaluation、
+单 worker runner 和 gated draft Experiment 尚未开始。AI 仅产生冻结上下文上的结构化 Finding
+与非权威建议，Evidence Gate 由服务端确定性策略计算，不能直接修改 Experiment、Measurement、
+Evidence、Literature、Revision 或 ReviewDecision。
+
 ## 6. Phase 1 P0 User Stories
 
 ### US-01 Project list

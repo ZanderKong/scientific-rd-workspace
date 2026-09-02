@@ -115,6 +115,24 @@ repository / storage
 - repository：DB persistence
 - storage：binary persistence
 
+### 4.1 Phase 3 scientific analysis boundary (M1–M4)
+
+Scientific Analysis is an additive backend capability. The router delegates to explicit Python
+services that build a frozen, canonical context in PostgreSQL, make one structured provider call,
+recompute scientific references, apply the deterministic Evidence Gate, and persist Findings.
+`AIProvider` is the only model boundary: `FixtureProvider` is deterministic for tests and demos;
+`LiteLLMProvider` embeds the LiteLLM SDK without the LiteLLM Gateway. Profiles declare exactly one
+structured-output mode (`native_schema` or `json_object`), and both modes are validated again by
+Workspace-owned Pydantic and scientific-reference checks. Prompt text is versioned and hashed in
+the repository.
+
+PostgreSQL remains authoritative for AnalysisRun, immutable context snapshots, Findings, Evidence
+links, and append-only ReviewDecisions. Direct Structured Support is limited to server-verified
+Measurement comparisons, structured Experiment differences, and immutable Revision observations;
+it can support descriptive/comparative claims but never proves causality. Curated EvidenceRecords
+remain an explicit, project-scoped selection. The model cannot write Experiments or other scientific
+records. Phase 3 M5+ UI and Evaluation capabilities are not implemented in this batch.
+
 ## 5. Data Storage
 
 ### 5.1 PostgreSQL

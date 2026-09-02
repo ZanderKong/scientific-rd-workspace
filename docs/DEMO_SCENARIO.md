@@ -115,4 +115,14 @@ starch amount：
 
 则 Phase 1 不算完整。
 
+## 4. Phase 3 M1–M4 API checkpoint
+
+The current implementation batch stops before the Phase 3 browser UX milestone. Its backend
+checkpoint is intentionally API-level: select exact revisions and Measurements for PRJ-001, run the
+deterministic FixtureProvider analysis with zero curated EvidenceRecords, inspect the frozen context
+hash and Direct Structured Support, then verify that the EXP-041/EXP-045 KI+starch causal claim is
+`insufficient_evidence` with a missing isolating control. A human may append Accept/Reject/Needs
+Evidence through the review API. M5 UI, Evaluation, and draft-Experiment screens are not yet part of
+the runnable browser demo.
+
 Seed data 可以自动生成，但 Demo 中的编辑和 clone 必须真实持久化。

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -464,6 +464,292 @@ class CompareOut(BaseModel):
     experiments: list[CompareExperimentOut]
     structured_differences: list[CompareDifferenceOut]
     measurements: list[CompareMeasurementOut]
+
+
+AnalysisPurpose = Literal["interactive", "evaluation_replay"]
+AnalysisRunStatus = Literal["building_context", "running", "completed", "failed", "interrupted"]
+StructuredOutputMode = Literal["native_schema", "json_object"]
+FindingClaimType = Literal[
+    "scientific_observation", "hypothesis", "comparative_finding", "causal_claim", "recommendation"
+]
+EvidenceGateStatus = Literal[
+    "supported", "partially_supported", "insufficient_evidence", "contradicted"
+]
+ReviewDecisionType = Literal["accept", "reject", "needs_evidence"]
+ReviewStatus = Literal["pending_review", "accepted", "rejected", "needs_evidence"]
+EvidenceLinkRole = Literal["supporting", "contradicting", "contextual"]
+
+
+class ExperimentSelection(BaseModel):
+    experiment_id: uuid.UUID
+    revision_number: int = Field(ge=1)
+
+
+class AnalysisRunCreate(BaseModel):
+    experiment_selections: list[ExperimentSelection] = Field(min_length=2, max_length=5)
+    measurement_ids: list[uuid.UUID] = Field(min_length=1, max_length=10)
+    literature_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
+    evidence_ids: list[uuid.UUID] = Field(default_factory=list, max_length=25)
+    model_profile_key: str = Field(default="analysis-default", min_length=1, max_length=120)
+    prompt_version: int = Field(default=1, ge=1)
+
+    @field_validator("experiment_selections")
+    @classmethod
+    def unique_experiment_selections(
+        cls, values: list[ExperimentSelection]
+    ) -> list[ExperimentSelection]:
+        ids = [item.experiment_id for item in values]
+        if len(set(ids)) != len(ids):
+            raise ValueError("experiment_selections must be unique")
+        return values
+
+    @field_validator("measurement_ids", "literature_ids", "evidence_ids")
+    @classmethod
+    def unique_ids(cls, values: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(values)) != len(values):
+            raise ValueError("selected IDs must be unique")
+        return values
+
+
+class MeasurementComparisonAssertion(BaseModel):
+    kind: Literal["measurement_comparison"]
+    left_measurement_id: uuid.UUID
+    right_measurement_id: uuid.UUID
+    metric: Literal["x_min", "x_max", "y_min", "y_max", "y_mean"]
+    relation: Literal["greater_than", "less_than", "approximately_equal"]
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class ExperimentDifferenceAssertion(BaseModel):
+    kind: Literal["experiment_difference"]
+    left_experiment_id: uuid.UUID
+    left_revision_number: int = Field(ge=1)
+    right_experiment_id: uuid.UUID
+    right_revision_number: int = Field(ge=1)
+    path: str = Field(min_length=1, max_length=500)
+    relation: Literal["added", "removed", "changed", "equal"]
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class RevisionObservationAssertion(BaseModel):
+    kind: Literal["revision_observation"]
+    experiment_id: uuid.UUID
+    revision_number: int = Field(ge=1)
+    path: str = Field(min_length=1, max_length=500)
+    operator: Literal["equals", "present", "absent"]
+    expected_value: Any | None = None
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+StructuredSupportAssertion = Annotated[
+    MeasurementComparisonAssertion | ExperimentDifferenceAssertion | RevisionObservationAssertion,
+    Field(discriminator="kind"),
+]
+
+
+class ComparisonAssertion(BaseModel):
+    left_measurement_id: uuid.UUID
+    right_measurement_id: uuid.UUID
+    metric: Literal["x_min", "x_max", "y_min", "y_max", "y_mean"]
+    relation: Literal["greater_than", "less_than", "approximately_equal"]
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class FindingLimitation(BaseModel):
+    code: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=2000)
+
+
+class SuggestedChangeOperation(BaseModel):
+    op: Literal["set", "remove"]
+    path: str = Field(min_length=1, max_length=500)
+    value: Any | None = None
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class SuggestedNextExperiment(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    objective: str = Field(min_length=1, max_length=10000)
+    base_experiment_id: uuid.UUID
+    control_strategy: str = Field(min_length=1, max_length=2000)
+    change_operations: list[SuggestedChangeOperation] = Field(max_length=25)
+    addresses_missing_evidence_codes: list[str] = Field(default_factory=list, max_length=25)
+
+
+class CausalTarget(BaseModel):
+    factor_paths: list[str] = Field(min_length=1, max_length=25)
+    baseline_experiment_id: uuid.UUID
+    outcome_experiment_id: uuid.UUID
+    outcome_measurement_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
+
+
+class ProposedGate(BaseModel):
+    status: EvidenceGateStatus
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class FindingCandidateV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim: str = Field(min_length=1, max_length=4000)
+    claim_type: FindingClaimType
+    confidence_label: Literal["low", "medium", "high"]
+    confidence_rationale: str = Field(min_length=1, max_length=2000)
+    applicability_scope: str = Field(min_length=1, max_length=2000)
+    evidence_links: list[dict[str, Any]] = Field(default_factory=list, max_length=25)
+    structured_support_assertions: list[StructuredSupportAssertion] = Field(
+        default_factory=list, max_length=25
+    )
+    limitations: list[FindingLimitation] = Field(default_factory=list, max_length=25)
+    risks: list[FindingLimitation] = Field(default_factory=list, max_length=25)
+    missing_evidence: list[FindingLimitation] = Field(default_factory=list, max_length=25)
+    comparison_assertions: list[ComparisonAssertion] = Field(default_factory=list, max_length=25)
+    causal_target: CausalTarget | None = None
+    suggested_next_experiment: SuggestedNextExperiment | None = None
+    proposed_gate: ProposedGate
+
+    @model_validator(mode="after")
+    def causal_target_shape(self) -> FindingCandidateV1:
+        if self.claim_type == "causal_claim" and self.causal_target is None:
+            raise ValueError("causal_claim requires causal_target")
+        if self.claim_type != "causal_claim" and self.causal_target is not None:
+            raise ValueError("causal_target is only valid for causal_claim")
+        return self
+
+
+class ScientificAnalysisResponseV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_summary: str = Field(min_length=1, max_length=4000)
+    findings: list[FindingCandidateV1] = Field(min_length=1, max_length=5)
+
+
+class ModelProfileOut(BaseModel):
+    key: str
+    provider: str
+    model: str
+    label: str
+    structured_output_mode: StructuredOutputMode
+    available: bool
+    capability_reason: str | None = None
+
+
+class PromptVersionOut(BaseModel):
+    key: str
+    version: int
+    sha256: str
+
+
+class EvidenceLinkOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    evidence_record_id: uuid.UUID
+    role: EvidenceLinkRole
+    rationale: str
+    evidence_snapshot_json: dict[str, Any]
+    created_at: datetime
+
+
+class ReviewDecisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    finding_id: uuid.UUID
+    sequence_number: int
+    decision: ReviewDecisionType
+    reviewer_name: str
+    reason_code: str | None
+    comment: str | None
+    supersedes_review_id: uuid.UUID | None
+    created_at: datetime
+
+
+class ReviewDecisionCreate(BaseModel):
+    decision: ReviewDecisionType
+    reviewer_name: str = Field(min_length=1, max_length=240)
+    reason_code: str | None = Field(default=None, max_length=64)
+    comment: str | None = Field(default=None, max_length=10000)
+    supersedes_review_id: uuid.UUID | None = None
+
+    _reviewer = field_validator("reviewer_name")(non_blank)
+
+    @model_validator(mode="after")
+    def decision_requirements(self) -> ReviewDecisionCreate:
+        if self.decision == "reject" and (not self.reason_code or not self.comment):
+            raise ValueError("reject requires reason_code and comment")
+        if self.decision == "needs_evidence" and not self.comment:
+            raise ValueError("needs_evidence requires comment")
+        return self
+
+
+class FindingOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    ordinal: int
+    claim: str
+    claim_type: FindingClaimType
+    confidence_label: Literal["low", "medium", "high"]
+    confidence_rationale: str
+    applicability_scope: str
+    limitations_json: list[dict[str, Any]]
+    risks_json: list[dict[str, Any]]
+    missing_evidence_json: list[dict[str, Any]]
+    comparison_assertions_json: list[dict[str, Any]]
+    structured_support_json: list[dict[str, Any]]
+    causal_target_json: dict[str, Any] | None
+    suggested_next_experiment_json: dict[str, Any] | None
+    model_proposed_gate_status: EvidenceGateStatus
+    model_proposed_gate_rationale: str
+    evidence_gate_status: EvidenceGateStatus
+    evidence_gate_rationale_json: dict[str, Any]
+    gate_policy_version: int
+    review_status: ReviewStatus
+    evidence_links: list[EvidenceLinkOut] = Field(default_factory=list)
+    reviews: list[ReviewDecisionOut] = Field(default_factory=list)
+    created_at: datetime
+
+
+class AnalysisContextOut(BaseModel):
+    id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    schema_version: int
+    snapshot_json: dict[str, Any]
+    snapshot_sha256: str
+    size_bytes: int
+    created_at: datetime
+
+
+class AnalysisRunOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    purpose: AnalysisPurpose
+    status: AnalysisRunStatus
+    provider_key: Literal["litellm", "fixture"]
+    model_profile_key: str
+    structured_output_mode: StructuredOutputMode
+    requested_model: str
+    resolved_model: str | None
+    provider_response_id: str | None
+    provider_model_version: str | None
+    prompt_key: str
+    prompt_version: int
+    prompt_sha256: str
+    output_schema_version: int
+    workflow_version: int
+    generation_parameters_json: dict[str, Any]
+    model_metadata_json: dict[str, Any]
+    validated_output_json: dict[str, Any] | None
+    error_code: str | None
+    error_message: str | None
+    langfuse_trace_id: str | None
+    langfuse_sync_status: str
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+    context_snapshot: AnalysisContextOut | None = None
+    findings: list[FindingOut] = Field(default_factory=list)
 
 
 ImportCommitMapping.model_rebuild()

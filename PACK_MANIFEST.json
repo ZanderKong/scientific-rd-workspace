@@ -1,9 +1,9 @@
 {
   "package": "scientific-rd-workspace-codex-pack",
   "version": "0.1",
-  "active_phase": "01-foundation-eln",
-  "execution_plan": "docs/exec-plans/01-foundation-eln.md",
-  "phase_2": "scope-only",
-  "phase_3": "scope-only",
+  "active_phase": "03-scientific-ai-m1-m4",
+  "execution_plan": "docs/exec-plans/03-scientific-ai.md",
+  "phase_2": "closed-pass",
+  "phase_3": "m1-m4-implemented-stop-before-m5",
   "recommended_entrypoint": "AGENTS.md"
 }

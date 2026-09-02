@@ -1,8 +1,8 @@
 # Execution Plan 03 — Scientific AI + Evaluation
 
-**Status:** READY FOR EXECUTION — documentation-only plan revision; no Phase 3 implementation has started
+**Status:** IN PROGRESS — Milestones 1–4 implemented; Milestone 5 and later are not started
 
-**Stable baseline:** Phase 1 and Phase 2 PASS at commit `fc0a944`; Phase 2 product implementation is `b916292`
+**Stable baseline:** Phase 1 and Phase 2 PASS; Phase 3 implementation baseline is commit `4384191`
 
 **Release target:** `v0.1-demo`
 
@@ -1463,7 +1463,30 @@ Do not use downgrade/re-upgrade on the authoritative test database. Do not call 
 
 ---
 
-# 16. Final v0.1-demo Browser Scenario
+# 16. Implementation Notes (M1–M4)
+
+The first implementation batch stopped after Milestone 4 as required. It is additive to the Phase
+1/2 schema and keeps PostgreSQL as the source of truth.
+
+- **M1:** Added `0005_scientific_analysis`, immutable AnalysisContextSnapshot/Finding/EvidenceLink/
+  ReviewDecision records, typed request/response schemas, versioned prompts, model profiles, and
+  the `AIProvider` boundary with deterministic FixtureProvider plus embedded LiteLLM dependency.
+- **M2:** Added deterministic context construction for exact revisions, immutable template/schema
+  hashes, Measurement/import provenance and bounded point samples, explicit 0–25 EvidenceRecords,
+  Compare output, and name-addressable factor differences.
+- **M3:** Added synchronous AnalysisRun orchestration, native-schema and JSON-object provider modes,
+  direct JSON/Pydantic/scientific validation, diagnostic failure persistence, and optional Langfuse
+  trace projection (disabled by default). No live provider call is used by tests.
+- **M4:** Added Finding persistence, server-recomputed Direct Structured Support, curated Evidence
+  links, conservative four-state Evidence Gate, causal confounding safeguards, and append-only
+  human ReviewDecision endpoints. Suggested next experiments remain non-authoritative JSON only.
+- **Verification:** `uv run ruff check app tests` and `uv run pytest -q` pass in the API. SQLite is
+  used only for local test fallback; PostgreSQL 17 migration/CI acceptance remains a later M10 gate.
+
+M5 (analysis/review UX), M6–M10 (Evaluation, draft Experiment flow, CI/browser closeout) are not
+implemented in this batch and must not be inferred from the current API.
+
+# 17. Final v0.1-demo Browser Scenario
 
 1. Open PRJ-001 and Compare EXP-041, EXP-044, and EXP-045.
 2. Inspect structured factor differences and compatible Measurement overlays.
@@ -1483,7 +1506,7 @@ The scenario must not require terminal edits, manual database changes, a mock HT
 
 ---
 
-# 17. Explicitly Deferred
+# 18. Explicitly Deferred
 
 - LangGraph and multi-agent personas;
 - autonomous research/tool loops;
@@ -1505,7 +1528,7 @@ Any future inclusion requires a separately reviewed plan.
 
 ---
 
-# 18. Documentation and Handoff Deliverables
+# 19. Documentation and Handoff Deliverables
 
 During implementation, update:
 
@@ -1523,7 +1546,7 @@ The handoff must record migrations, model/profile/prompt versions, CI runs, brow
 
 ---
 
-# 19. Planning Review Outcome
+# 20. Planning Review Outcome
 
 **Recommended Phase 3 architecture:** FastAPI services + PostgreSQL scientific source of truth + embedded LiteLLM SDK behind a small internal provider interface + deterministic Evidence Gate + append-only human review + local Evaluation domain + optional Langfuse Cloud projection.
 
