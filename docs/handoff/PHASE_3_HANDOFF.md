@@ -4,6 +4,7 @@
 
 - **Implementation status:** Milestones 1–4 corrective closeout fixes complete; work intentionally
   stops before Milestone 5. This is not a Phase 3 release closeout or `PHASE 3 PASS` claim.
+- **Corrective closeout verdict:** `M1–M4 ACCEPTED — M5 UNBLOCKED`.
 - **Implementation baseline:** Phase 3 work started from `4384191` (approved plan and handoff).
 - **Implementation commit:** the commit containing this handoff (`Implement Phase 3 milestones 1-4`);
   use `git log -1` for its final hash.
@@ -89,8 +90,9 @@
 | API formatter/lint | PASS | `uv run ruff format app tests && uv run ruff check app tests` |
 | API regression and Phase 3 tests | PASS | `uv run pytest -q` — 28 tests |
 | Blank-database Alembic upgrade | PASS locally | SQLite fallback smoke to `0005_scientific_analysis` |
-| PostgreSQL 17 blank/populated migration acceptance | PENDING | CI workflow includes blank head, populated `0004` upgrade, hash parity and `alembic check` |
-| Frontend gates/browser audit | NOT RUN | no M5 UI was implemented |
+| PostgreSQL 17 blank/populated migration acceptance | PASS | GitHub Actions run [33584109673](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33584109673) on corrective commit `0b5ffc4`; blank head, populated `0004` upgrade, hash parity and `alembic check` |
+| Backend regression against PostgreSQL 17 | PASS | Same run; full pytest suite (28 tests) |
+| Frontend gates/browser audit | PASS for existing Phase 1/2 gates | Same run; lint, format check, typecheck, Vitest and production build; M5 UI remains unimplemented |
 | Live LiteLLM/Langfuse calls | NOT RUN | tests use FixtureProvider/mocks; Langfuse content capture is disabled |
 
 The repository remains additive to Phase 1/2. Existing immutable template-version rows, revision
@@ -103,5 +105,6 @@ M5 analysis/review UX; M6–M7 EvaluationCase/EvaluationRun/runner and evaluatio
 draft Experiment provenance flow; M9 demo fixtures/browser story; M10 PostgreSQL 17 CI, full audit and
 release handoff. Multi-worker evaluation is unsupported by design and no queue was introduced.
 
-Phase 3 remains **IN PROGRESS**, not passed until the PostgreSQL 17 corrective acceptance is green.
-Continue from the approved execution plan and preserve the Phase 1/2 contracts above.
+The M1–M4 corrective acceptance is complete and PostgreSQL 17 is green. Overall Phase 3 remains
+**IN PROGRESS** because M5–M10 are intentionally outside this batch; no `PHASE 3 PASS` or release tag
+is claimed. Continue from the approved execution plan and preserve the Phase 1/2 contracts above.

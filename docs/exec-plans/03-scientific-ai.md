@@ -1,6 +1,6 @@
 # Execution Plan 03 — Scientific AI + Evaluation
 
-**Status:** IN PROGRESS — Milestones 1–4 implemented; Milestone 5 and later are not started
+**Status:** M1–M4 ACCEPTED — M5 UNBLOCKED; Milestone 5 and later are not started
 
 **Stable baseline:** Phase 1 and Phase 2 PASS; Phase 3 implementation baseline is commit `4384191`
 
@@ -1481,7 +1481,12 @@ The first implementation batch stopped after Milestone 4 as required. It is addi
   links, conservative four-state Evidence Gate, causal confounding safeguards, and append-only
   human ReviewDecision endpoints. Suggested next experiments remain non-authoritative JSON only.
 - **Verification:** `uv run ruff check app tests` and `uv run pytest -q` pass in the API. SQLite is
-  used only for local test fallback; PostgreSQL 17 migration/CI acceptance remains a later M10 gate.
+  used only for local fallback; PostgreSQL 17 blank/populated migration and full backend acceptance
+  passed in GitHub Actions run `33584109673` on corrective commit `0b5ffc4`.
+- **Corrective audit:** provider-context limits now count sampled points, deterministic sampling
+  preserves endpoints/full hashes, Langfuse uses the v4 observation API with opt-in content capture,
+  run provenance is immutable after context building, capability preflight distinguishes native schema
+  from JSON-object mode, and exactly one transient retry is recorded in run metadata.
 
 M5 (analysis/review UX), M6–M10 (Evaluation, draft Experiment flow, CI/browser closeout) are not
 implemented in this batch and must not be inferred from the current API.

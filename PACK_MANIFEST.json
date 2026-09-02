@@ -4,6 +4,6 @@
   "active_phase": "03-scientific-ai-m1-m4",
   "execution_plan": "docs/exec-plans/03-scientific-ai.md",
   "phase_2": "closed-pass",
-  "phase_3": "m1-m4-implemented-stop-before-m5",
+  "phase_3": "m1-m4-accepted-m5-unblocked",
   "recommended_entrypoint": "AGENTS.md"
 }
