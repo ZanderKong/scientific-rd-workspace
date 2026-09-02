@@ -10,6 +10,7 @@ Plan 2 was executed as one frontend plan. Checkpoints are recorded here as accep
 
 - Starting commit: `c093a6f31f9aa21962d840e2030f0de4d651bc66`
 - Final frontend implementation commit: `150485f4d2138b6326e49839706474e3f76b1e67`
+- 1024px evidence fix commit: `bdfdb0d85220d99b31526fcabc91e193b0a16021`
 - Backend/API/schema change count: `0`
 - Database migrations, API routes, canonical enums, scientific content, model/provider keys, uploads, environment variables and API keys: unchanged.
 - No new dependency, React Flow package, graph endpoint, design-system package, backend feature or scientific product feature was added.
@@ -41,7 +42,8 @@ Plan 2 was executed as one frontend plan. Checkpoints are recorded here as accep
 ### Checkpoint 4 — polish, i18n, responsive behavior and delivery
 
 - Empty, loading and error states continue to use the existing shared page state; selected/disabled/focus/hover/destructive/tab/scroll states were checked on the critical surfaces.
-- Real local app route sweep passed at 1280px in zh-CN and en with no page-level horizontal overflow or runtime error. Dark mode passed on Evaluation Detail. The browser viewport service exposed 1280px for the desktop sweep; the 1024px responsive target was checked through the existing breakpoint styles and local overflow containment for tables/tabs (the connected browser surface did not expose a 1024px viewport override).
+- Real local app route sweep passed at 1280px in zh-CN and en with no page-level horizontal overflow or runtime error. The 1024px supplement used the Codex In-app Browser (`iab`, Chromium-backed) with an explicit `1024×720` viewport at DPR 2 against the running local app and demo seed. Overview, Experiment Detail, Compare, Analysis Detail and Evaluation Detail were each opened in both zh-CN and en; Experiment Detail's Measurements tab and Compare's three real overlays/charts were also exercised. `document.documentElement` and `body` reported no page-level horizontal overflow on every checked route; sidebar/header/main were present and usable, visible long-label collision checks were clear, charts stayed within the viewport, action bars exposed wrapping containers, and no unbounded tab/table scroll was needed (any horizontal containment remains local to the component). After closing the external TanStack Query Devtools overlay, all route checks reported zero console errors, zero hydration errors and zero runtime/application errors.
+- Light mode was checked across all five routes in zh-CN and en. Dark mode was checked across all five routes in en and with an additional Evaluation Detail spot-check in zh-CN; the same overflow/header/chart/runtime checks passed.
 - `<html lang>` changed correctly between `zh-CN` and `en`; the route stayed unchanged when switching locale. Translation catalogs remain parity-checked.
 - Curated real-data screenshots are in `docs/assets/ui/`: Overview, Experiment Detail, Compare, Analysis Detail and Evaluation Detail. The README presents them as the finished product.
 - `docs/UI_SPEC.md` records the final UI contract. This handoff records exact dependencies, tests, browser evidence and limitations.
@@ -51,6 +53,7 @@ Plan 2 was executed as one frontend plan. Checkpoints are recorded here as accep
 - `web/src/features/workspace/components/scientific-ui.tsx`: minimal scientific UI primitives and traceability timeline.
 - `web/src/features/workspace/presentation.ts`: bounded selection, readable structured value formatting, score normalization and traceability node normalization.
 - Updated presentation surfaces: Overview, ProjectList, ExperimentCreate, ExperimentDetail, MeasurementData, CompareView, LiteratureView, AnalysisList, AnalysisDetail, EvaluationList and EvaluationDetail.
+- 1024px audit fix: canonical measurement types now map to existing locale keys (`spectralResponse`, `timeSeries`, `otherXY`), removing the missing `Measurements.spectral_response` runtime message without changing the scientific enum.
 - Updated catalogs: `web/messages/zh-CN.json` and `web/messages/en.json`.
 
 ## Dependencies and i18n
@@ -72,7 +75,7 @@ Local frontend gates run from `web/`:
 - `npm run format:check` — passed.
 - `npm run lint` — passed; only pre-existing baseline warnings remain in calendar, kbar render-result and info-button.
 - `npm run typecheck` — passed.
-- `npm run test -- --run` — passed: 4 files, 14 tests, including bounded selection, structured value/score rendering and traceability normalization.
+- `npm run test` — passed: 4 files, 14 tests, including bounded selection, structured value/score rendering and traceability normalization.
 - `npm run build` — passed locally with Next.js 16.2.12/Turbopack; all 12 app routes compiled.
 
 CI evidence retained from the project baseline:
@@ -86,11 +89,11 @@ CI evidence retained from the project baseline:
 
 | Surface | zh-CN | en | 1280 | 1024 | dark | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| Overview / Projects / Project Detail | checked | checked | checked | CSS breakpoint | checked via shared shell | pass |
-| Experiment Detail / New Experiment | checked | checked | checked | CSS breakpoint | checked via shared shell | pass |
-| Measurements / Compare / Literature | checked | checked | checked | CSS breakpoint | checked via shared shell | pass |
-| Analysis List / Analysis Detail | checked | checked | checked | CSS breakpoint | checked via shared shell | pass |
-| Evaluations / Evaluation Detail | checked | checked | checked | CSS breakpoint | checked | pass |
+| Overview / Projects / Project Detail | checked | checked | checked | real `1024×720` | checked via shared shell | pass |
+| Experiment Detail / New Experiment | checked | checked | checked | real `1024×720` | checked via shared shell | pass |
+| Measurements / Compare / Literature | checked | checked | checked | real `1024×720` | checked via shared shell | pass |
+| Analysis List / Analysis Detail | checked | checked | checked | real `1024×720` | checked via shared shell | pass |
+| Evaluations / Evaluation Detail | checked | checked | checked | real `1024×720` | checked | pass |
 
 Critical path used real local seed data: `Overview → Projects → PRJ-001 → EXP-041/044/045 → Compare → Analysis → human review → Evaluations → Evaluation Detail → Suggested Draft Experiment`.
 
