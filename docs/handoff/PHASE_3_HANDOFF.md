@@ -8,7 +8,8 @@
 - **Phase 1 baseline:** `9bb494d`; **Phase 2 accepted commit:** `939bf82`.
 - **Implementation baseline before this batch:** `4680dad` (M1–M4 accepted).
 - **Accepted implementation commit:** `6162dc3` (`Implement Phase 3 M5-M7 analysis evaluation workflow`).
-- **Corrective closeout commit:** `ee11930` (`Fix Phase 3 M5-M7 evaluation closeout issues`).
+- **Corrective closeout commits:** `ee11930` (`Fix Phase 3 M5-M7 evaluation closeout issues`) and
+  `42c95a3` (`Handle normalized suggestion path variants`).
 - **Closeout date:** 2026-09-02.
 - No `v0.1-demo` release tag is claimed; M9/M10 final fixtures, browser audit and release gate remain.
 
@@ -95,15 +96,16 @@
 | Browser workflow | PASS | Local fixture flow at 1024px/1280px: Compare → Analyse → Accept/Reject → Bad Case expectation form → Reference Case → mixed Evaluation `202` run → terminal results and replay/source links; no console errors |
 | Live model/Langfuse | NOT REQUIRED | FixtureProvider/mocks only; Langfuse disabled by default and projection is best-effort |
 
-PostgreSQL 17 is the authoritative acceptance database. The corrective closeout passed the
-[Phase 2 Scientific Workflow CI run #33592081341](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592081341)
-on commit `ee11930aba696afd9c3986fda4967f480aa2dc88` (`completed / success`, 2026-09-02 UTC).
+PostgreSQL 17 is the authoritative acceptance database. The final corrective closeout passed the
+[Phase 2 Scientific Workflow CI run #33592432099](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592432099)
+on commit `42c95a3` (`completed / success`, 2026-09-02 UTC).
 Its `Backend / PostgreSQL 17` job passed blank migration, migration/model parity, populated Phase 2
 upgrade to the `0006` M7 head, seed idempotency, Ruff checks and all 43 backend tests; its Frontend job
 passed lint, format check, typecheck, 6 tests and production build. The parallel [Phase 1 CI run
-#33592081336](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592081336)
-also completed successfully on the same commit, preserving the Phase 1 regression gate. The earlier M5–M7
-CI evidence remains recorded in [run #33587413638](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33587413638).
+#33592432038](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592432038)
+also completed successfully on the same commit, preserving the Phase 1 regression gate. The preceding
+documentation closeout runs [#33592256505](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592256505)
+and [#33592256583](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592256583) also passed.
 
 ## 7. Files changed
 
