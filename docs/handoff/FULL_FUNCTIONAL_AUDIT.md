@@ -11,6 +11,7 @@ new product feature was introduced.
 
 - Host: macOS, local repository checkout.
 - Starting repository SHA: `cb2fff118eed0a1a1fcc599964a2da911735b3ae` (clean after `git fetch origin`).
+- Implementation commit pushed to `origin/main`: `55f0beb7823079df02bc41bdc3dfae2ff18c2a75`.
 - Browser: real Chromium-backed local browser, viewport matrix `1024×720` and `1280×720`.
 - Local frontend actually audited: `http://127.0.0.1:3000`.
 - Local backend actually audited: `http://127.0.0.1:8000`.
@@ -24,13 +25,13 @@ new product feature was introduced.
 
 ```text
 Total audit items: 52
-PASS: 40
+PASS: 42
 FIXED: 4
 BLOCKED: 3
-NOT TESTED: 5
+NOT TESTED: 3
 ```
 
-The audit is not a PASS because the three BLOCKED and five NOT TESTED items are
+The audit is not a PASS because the three BLOCKED and three NOT TESTED items are
 not all existing P0 flows with browser evidence. In particular, the current UI
 does not expose Literature search, Evidence withdraw, or experiment-list
 filters, and the two attachment deletions are awaiting action-time confirmation.
@@ -89,8 +90,8 @@ filters, and the two attachment deletions are awaiting action-time confirmation.
 | F-05 | Final 1024 matrix | Opened five required routes at 1024×720 in zh-CN/en light; Overview in zh-CN dark | No page overflow, loading, chart overflow, or console errors | All 10 light rows plus dark Overview had `body=1024`, `document=1024`, loading false, error logs 0; headings present | PASS | — | — | Overview; Experiment Detail; Compare; Analysis Detail; Evaluation Detail |
 | F-06 | Final 1280 matrix | Opened 12 existing routes at 1280×720 in zh-CN light | Full route set renders without page overflow/errors | All 12 had `body=1280`, `document=1280`, loading false, error logs 0 | PASS | — | — | Overview, Projects, Project Detail, Experiments, Experiment Detail, Compare, Literature, Analysis, Analysis Detail, Evaluations, Evaluation Detail, New Experiment |
 | G-01 | Local gates | Ran required web gates after final code changes | All required local commands pass | Test, lint, typecheck, build and format:check pass; backend pytest not required because backend untouched | PASS | — | — | Commands/results below |
-| G-02 | CI Phase 1 and Phase 3 | Push final handoff commit and observe both CI phases | Both phases pass on final SHA | Pending until final handoff commit is pushed | NOT TESTED | — | — | CI result to be recorded at closeout |
-| G-03 | Final push/clean tree | Commit handoff, push `main`, check status | Final handoff commit is on origin/main and tree is clean | Pending until closeout commit/push | NOT TESTED | — | — | Final SHA to be recorded at closeout |
+| G-02 | CI Phase 1 and Phase 3 | Pushed implementation handoff and observed both CI phases | Both phases pass on final SHA | Phase 1 run `33663986281` and Phase 3 run `33663986247` passed, including PostgreSQL backend and frontend jobs | PASS | — | — | GitHub Actions runs for `55f0beb7823079df02bc41bdc3dfae2ff18c2a75` |
+| G-03 | Final push/clean tree | Pushed `main`; checked repository status | Final handoff is on origin/main and tree is clean | `55f0beb` is on `origin/main`; tree was clean after push before this evidence-only update | PASS | — | — | `git push origin main`; final evidence update is this handoff commit |
 
 ## Bugs found
 
@@ -159,8 +160,8 @@ Local gates after the final frontend changes:
 - `npm run build`: PASS — Next production build completed.
 - `npm run format:check`: PASS.
 - Backend pytest: NOT RUN — no backend files were changed.
-- CI Phase 1: pending final push.
-- CI Phase 3: pending final push.
+- CI Phase 1: PASS — run `33663986281` on `55f0beb7823079df02bc41bdc3dfae2ff18c2a75`.
+- CI Phase 3: PASS — run `33663986247` on `55f0beb7823079df02bc41bdc3dfae2ff18c2a75`.
 
 ## Remaining limitations
 
