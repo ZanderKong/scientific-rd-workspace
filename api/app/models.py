@@ -769,6 +769,18 @@ def _reject_delete(_mapper: Any, _connection: Any, target: Any) -> None:
     raise ValueError(f"{target.__class__.__name__} is immutable")
 
 
+def _meaningful_changes(state: Any) -> set[str]:
+    changed: set[str] = set()
+    for attribute in state.attrs:
+        history = attribute.history
+        if not history.has_changes():
+            continue
+        if history.deleted and history.added and history.deleted[-1] == history.added[-1]:
+            continue
+        changed.add(attribute.key)
+    return changed
+
+
 RUN_PROVENANCE_FIELDS = {
     "project_id",
     "purpose",
@@ -792,7 +804,7 @@ def _reject_run_provenance_update(
     if target.status == "building_context":
         return
     state = inspect(target)
-    changed = {attribute.key for attribute in state.attrs if attribute.history.has_changes()}
+    changed = _meaningful_changes(state)
     if changed & RUN_PROVENANCE_FIELDS:
         raise ValueError("ScientificAnalysisRun provenance is immutable after context building")
 
@@ -836,7 +848,7 @@ def prevent_evaluation_run_provenance_mutation(
     _mapper: Any, _connection: Any, target: EvaluationRun
 ) -> None:
     state = inspect(target)
-    changed = {attribute.key for attribute in state.attrs if attribute.history.has_changes()}
+    changed = _meaningful_changes(state)
     if changed & EVALUATION_RUN_PROVENANCE_FIELDS:
         raise ValueError("EvaluationRun provenance is immutable")
 
@@ -850,11 +862,23 @@ def prevent_completed_result_mutation(
 ) -> None:
     state = inspect(target)
     previous_status = state.attrs.status.history.deleted
+    if not previous_status:
+        persisted_status = _connection.execute(
+            EvaluationResult.__table__.select()
+            .with_only_columns(EvaluationResult.__table__.c.status)
+            .where(EvaluationResult.__table__.c.id == target.id)
+        ).scalar_one_or_none()
+        if persisted_status is not None:
+            previous_status = (persisted_status,)
     was_terminal = bool(
         previous_status and previous_status[0] in {"passed", "failed", "error", "cancelled"}
+    ) or (
+        not previous_status
+        and target.status in {"passed", "failed", "error", "cancelled"}
+        and target.completed_at is not None
     )
     if was_terminal:
-        changed = {attribute.key for attribute in state.attrs if attribute.history.has_changes()}
+        changed = _meaningful_changes(state)
         if changed - {"langfuse_trace_id", "langfuse_sync_status"}:
             raise ValueError("completed EvaluationResult is immutable")
         return

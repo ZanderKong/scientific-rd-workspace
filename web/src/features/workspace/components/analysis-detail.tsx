@@ -21,6 +21,13 @@ const reasonCodes = [
   'incorrect_reasoning',
   'other'
 ];
+const safeBadCaseReasonCodes = new Set([
+  'unsupported_causal_claim',
+  'incorrect_citation',
+  'missed_limitation',
+  'insufficient_evidence',
+  'incorrect_experiment_comparison'
+]);
 
 function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: () => void }) {
   const [reviewer, setReviewer] = useState('R&D Scientist');
@@ -29,7 +36,16 @@ function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: ()
   const [busy, setBusy] = useState(false);
   const [caseBusy, setCaseBusy] = useState(false);
   const [caseMessage, setCaseMessage] = useState('');
+  const [caseFormOpen, setCaseFormOpen] = useState(false);
+  const [expectedGate, setExpectedGate] = useState('');
+  const [requiredLimitationCode, setRequiredLimitationCode] = useState('');
+  const [expectedBehaviorNotes, setExpectedBehaviorNotes] = useState('');
+  const [requireValidCitations, setRequireValidCitations] = useState(false);
   const [error, setError] = useState('');
+  const latestReview = finding.reviews.at(-1);
+  const requiresExplicitExpectedBehavior =
+    latestReview?.decision === 'reject' &&
+    !safeBadCaseReasonCodes.has(latestReview.reason_code ?? '');
   async function review(decision: 'accept' | 'reject' | 'needs_evidence') {
     if (
       !reviewer.trim() ||
@@ -59,13 +75,31 @@ function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: ()
     setCaseBusy(true);
     setCaseMessage('');
     try {
+      const expectedBehavior =
+        caseType === 'bad'
+          ? {
+              ...(expectedGate ? { expected_gate_status: expectedGate } : {}),
+              ...(requiredLimitationCode
+                ? { required_limitation_codes: [requiredLimitationCode] }
+                : {}),
+              ...(expectedBehaviorNotes ? { reviewer_notes: expectedBehaviorNotes } : {}),
+              ...(requireValidCitations ? { must_have_valid_citations: true } : {}),
+              ...(latestReview?.reason_code === 'unsupported_causal_claim'
+                ? { must_avoid_unsupported_causal_conclusion: true }
+                : {}),
+              ...(latestReview?.reason_code === 'incorrect_experiment_comparison'
+                ? { direct_structured_support_required: true, comparison_assertions_correct: true }
+                : {})
+            }
+          : undefined;
       const evaluationCase =
         caseType === 'bad'
-          ? await api.createBadCase(finding.id)
+          ? await api.createBadCase(finding.id, { expected_behavior: expectedBehavior })
           : await api.createReferenceCase(finding.id);
       setCaseMessage(
         `${caseType === 'bad' ? 'Bad' : 'Reference'} Case ready: ${evaluationCase.id}`
       );
+      setCaseFormOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to create Evaluation Case.');
     } finally {
@@ -216,9 +250,12 @@ function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: ()
                 size='sm'
                 variant='outline'
                 disabled={caseBusy}
-                onClick={() => void createEvaluationCase('bad')}
+                onClick={() => {
+                  setCaseFormOpen((value) => !value);
+                  setCaseMessage('');
+                }}
               >
-                Create Bad Case
+                {caseFormOpen ? 'Close Bad Case form' : 'Create Bad Case'}
               </Button>
             )}
             {finding.review_status === 'accepted' && (
@@ -232,6 +269,64 @@ function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: ()
               </Button>
             )}
           </div>
+          {finding.review_status === 'rejected' && caseFormOpen && (
+            <div className='grid gap-2 rounded border border-dashed p-3 text-sm'>
+              <p className='font-medium'>Expected Bad Case behavior</p>
+              <p className='text-muted-foreground'>
+                The rejected output is stored as observed behavior. Confirm only the bounded
+                expectations that the replay must satisfy.
+              </p>
+              <label className='grid gap-1'>
+                Expected gate (optional unless the reason is insufficient_evidence)
+                <select
+                  className='h-8 rounded-lg border bg-background px-2 text-sm'
+                  value={expectedGate}
+                  onChange={(e) => setExpectedGate(e.target.value)}
+                >
+                  <option value=''>Do not assert a gate state</option>
+                  <option value='supported'>supported</option>
+                  <option value='partially_supported'>partially_supported</option>
+                  <option value='insufficient_evidence'>insufficient_evidence</option>
+                  <option value='contradicted'>contradicted</option>
+                </select>
+              </label>
+              {finding.reviews.at(-1)?.reason_code === 'missed_limitation' && (
+                <Input
+                  value={requiredLimitationCode}
+                  onChange={(e) => setRequiredLimitationCode(e.target.value)}
+                  placeholder='Required limitation code'
+                />
+              )}
+              {requiresExplicitExpectedBehavior && (
+                <Textarea
+                  value={expectedBehaviorNotes}
+                  onChange={(e) => setExpectedBehaviorNotes(e.target.value)}
+                  placeholder='Expected behavior statement (required for this rejection reason)'
+                />
+              )}
+              <label className='flex items-center gap-2'>
+                <input
+                  type='checkbox'
+                  checked={requireValidCitations}
+                  onChange={(e) => setRequireValidCitations(e.target.checked)}
+                />
+                Require valid citations
+              </label>
+              <Button
+                size='sm'
+                disabled={
+                  caseBusy ||
+                  (finding.reviews.at(-1)?.reason_code === 'missed_limitation' &&
+                    !requiredLimitationCode.trim()) ||
+                  (requiresExplicitExpectedBehavior && !expectedBehaviorNotes.trim()) ||
+                  (finding.reviews.at(-1)?.reason_code === 'insufficient_evidence' && !expectedGate)
+                }
+                onClick={() => void createEvaluationCase('bad')}
+              >
+                Save Bad Case expectations
+              </Button>
+            </div>
+          )}
           {caseMessage && <p className='text-sm text-muted-foreground'>{caseMessage}</p>}
           {finding.reviews.length > 0 && (
             <div className='grid gap-1 text-xs text-muted-foreground'>

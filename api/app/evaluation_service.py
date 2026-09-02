@@ -58,7 +58,57 @@ def _latest_review(db: Session, finding_id: uuid.UUID) -> ReviewDecision | None:
     )
 
 
-def _expected_behavior(finding: Finding, payload: EvaluationCaseCreate) -> dict[str, Any]:
+class GlobalEvaluationFailure(RuntimeError):
+    """A provider/configuration failure that makes the rest of a run unsafe to execute."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ReplayTargetFailure(ValueError):
+    """The frozen source Finding target cannot be matched by a replay."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+GLOBAL_PROVIDER_FAILURE_CODES = {
+    "model_profile_not_found",
+    "provider_auth",
+    "provider_unavailable",
+    "unsupported_structured_output",
+    "provider_configuration",
+}
+
+
+def _is_global_provider_failure(exc: ProviderFailure) -> bool:
+    return exc.code in GLOBAL_PROVIDER_FAILURE_CODES
+
+
+def _suggestion_change_paths(suggestion: Any) -> list[str]:
+    """Read paths from the normalized suggestion without assuming one storage wrapper."""
+    if not isinstance(suggestion, dict):
+        return []
+    containers = [suggestion]
+    prefill = suggestion.get("prefill")
+    if isinstance(prefill, dict):
+        containers.insert(0, prefill)
+    for container in containers:
+        operations = container.get("change_operations")
+        if isinstance(operations, list):
+            return sorted(
+                {
+                    str(item.get("path"))
+                    for item in operations
+                    if isinstance(item, dict) and item.get("path")
+                }
+            )
+    return []
+
+
+def _reference_expected_behavior(finding: Finding, payload: EvaluationCaseCreate) -> dict[str, Any]:
     expected = dict(payload.expected_behavior)
     expected.setdefault("expected_gate_status", finding.evidence_gate_status)
     expected.setdefault("required_claim_types", [finding.claim_type])
@@ -79,13 +129,7 @@ def _expected_behavior(finding: Finding, payload: EvaluationCaseCreate) -> dict[
     )
     expected.setdefault(
         "required_suggestion_change_paths",
-        [
-            item.get("path")
-            for item in (finding.suggested_next_experiment_json or {})
-            .get("prefill", {})
-            .get("change_operations", [])
-            if item.get("path")
-        ],
+        _suggestion_change_paths(finding.suggested_next_experiment_json),
     )
     expected.setdefault("must_have_valid_citations", True)
     expected.setdefault(
@@ -98,14 +142,49 @@ def _expected_behavior(finding: Finding, payload: EvaluationCaseCreate) -> dict[
     return expected
 
 
+def _bad_expected_behavior(
+    finding: Finding, review: ReviewDecision, payload: EvaluationCaseCreate
+) -> dict[str, Any]:
+    """Build only safe, rejection-taxonomy defaults; disputed Finding fields stay observed."""
+    user_expected = dict(payload.expected_behavior)
+    expected = dict(user_expected)
+    reason = review.reason_code or ""
+    expected["source_rejection_reason"] = reason
+    if reason == "unsupported_causal_claim":
+        expected.setdefault("must_avoid_unsupported_causal_conclusion", True)
+    elif reason == "incorrect_citation":
+        expected.setdefault("must_have_valid_citations", True)
+    elif reason == "missed_limitation":
+        if not expected.get("required_limitation_codes"):
+            raise ValueError(
+                "missed_limitation Bad Case requires expected_behavior.required_limitation_codes"
+            )
+    elif reason == "insufficient_evidence":
+        if "expected_gate_status" not in expected:
+            raise ValueError(
+                "insufficient_evidence Bad Case requires explicit expected_gate_status"
+            )
+    elif reason == "incorrect_experiment_comparison":
+        expected.setdefault("direct_structured_support_required", True)
+        expected.setdefault("comparison_assertions_correct", True)
+    elif not any(key != "source_rejection_reason" for key in user_expected):
+        raise ValueError(
+            "ambiguous Bad Case rejection requires reviewer-provided expected_behavior"
+        )
+    if not expected:
+        raise ValueError("Bad Case requires expected_behavior")
+    return expected
+
+
 def _case_payload(
     finding: Finding,
     review: ReviewDecision,
     run: ScientificAnalysisRun,
     payload: EvaluationCaseCreate,
+    case_type: str,
 ) -> dict[str, Any]:
     context = run.context_snapshot.snapshot_json if run.context_snapshot else {}
-    finding_snapshot = {
+    observed_behavior = {
         "id": str(finding.id),
         "project_id": str(finding.project_id),
         "analysis_run_id": str(finding.analysis_run_id),
@@ -124,6 +203,13 @@ def _case_payload(
         "suggested_next_experiment_json": copy.deepcopy(finding.suggested_next_experiment_json),
         "evidence_gate_status": finding.evidence_gate_status,
         "review_status": finding.review_status,
+    }
+    finding_snapshot = copy.deepcopy(observed_behavior)
+    finding_snapshot["observed_behavior"] = copy.deepcopy(observed_behavior)
+    finding_snapshot["replay_target"] = {
+        "source_ordinal": finding.ordinal,
+        "allowed_claim_types": [finding.claim_type],
+        "causal_target": copy.deepcopy(finding.causal_target_json),
     }
     gate_snapshot = {
         "status": finding.evidence_gate_status,
@@ -148,10 +234,14 @@ def _case_payload(
         "output_schema_version": run.output_schema_version,
         "workflow_version": run.workflow_version,
     }
-    expected = _expected_behavior(finding, payload)
+    expected = (
+        _reference_expected_behavior(finding, payload)
+        if case_type == "reference_case"
+        else _bad_expected_behavior(finding, review, payload)
+    )
     body = {
         "project_id": str(finding.project_id),
-        "case_type": "pending",
+        "case_type": case_type,
         "source_finding_id": str(finding.id),
         "source_review_decision_id": str(review.id),
         "context_schema_version": run.context_snapshot.schema_version
@@ -203,8 +293,7 @@ def create_evaluation_case(
     run = finding.analysis_run
     if run is None or run.context_snapshot is None:
         raise ValueError("finding has no frozen analysis context")
-    body = _case_payload(finding, latest, run, payload)
-    body["case_type"] = case_type
+    body = _case_payload(finding, latest, run, payload, case_type)
     case_hash = _canonical_hash(body)
     case = EvaluationCase(
         project_id=finding.project_id,
@@ -261,7 +350,7 @@ def create_evaluation_run(
                 EvaluationCase.project_id == project_id,
                 EvaluationCase.id.in_(payload.evaluation_case_ids),
             )
-            .order_by(EvaluationCase.created_at.asc())
+            .order_by(EvaluationCase.case_type.asc(), EvaluationCase.id.asc())
         ).all()
     )
     if len(cases) != len(payload.evaluation_case_ids):
@@ -418,11 +507,65 @@ def _build_replay(
         replay.completed_at = _now()
         db.commit()
         raise
-    finding = db.scalar(
-        select(Finding).where(Finding.analysis_run_id == replay.id).order_by(Finding.ordinal.asc())
+    target = case.finding_snapshot_json.get("replay_target", {})
+    expected_ordinal = target.get("source_ordinal", case.finding_snapshot_json.get("ordinal"))
+    if not isinstance(expected_ordinal, int) or expected_ordinal < 0:
+        raise ReplayTargetFailure(
+            "replay_target_missing_ordinal", "replay target ordinal is missing"
+        )
+    replay_findings = list(
+        db.scalars(
+            select(Finding)
+            .where(
+                Finding.analysis_run_id == replay.id,
+                Finding.ordinal == expected_ordinal,
+            )
+            .options(selectinload(Finding.evidence_links))
+        ).all()
     )
+    finding = replay_findings[0] if replay_findings else None
     if finding is None:
-        raise ValueError("replay produced no findings")
+        raise ReplayTargetFailure(
+            "replay_target_missing", f"replay produced no Finding at ordinal {expected_ordinal}"
+        )
+    allowed_claim_types = target.get("allowed_claim_types") or [
+        case.finding_snapshot_json.get("claim_type")
+    ]
+    if finding.claim_type not in allowed_claim_types:
+        raise ReplayTargetFailure(
+            "replay_target_incompatible_claim_type",
+            f"expected {allowed_claim_types}, got {finding.claim_type}",
+        )
+    expected_causal_target = target.get("causal_target")
+    if expected_causal_target is not None:
+        actual_causal_target = finding.causal_target_json
+        if actual_causal_target is None:
+            raise ReplayTargetFailure(
+                "replay_target_incompatible_causal_target", "replay target is missing"
+            )
+        for key in ("baseline_experiment_id", "outcome_experiment_id"):
+            if str(actual_causal_target.get(key)) != str(expected_causal_target.get(key)):
+                raise ReplayTargetFailure(
+                    "replay_target_incompatible_causal_target",
+                    f"replay target differs at {key}",
+                )
+        if sorted(actual_causal_target.get("factor_paths", [])) != sorted(
+            expected_causal_target.get("factor_paths", [])
+        ):
+            raise ReplayTargetFailure(
+                "replay_target_incompatible_causal_target", "replay target differs at factor_paths"
+            )
+        if sorted(map(str, actual_causal_target.get("outcome_measurement_ids", []))) != sorted(
+            map(str, expected_causal_target.get("outcome_measurement_ids", []))
+        ):
+            raise ReplayTargetFailure(
+                "replay_target_incompatible_causal_target",
+                "replay target differs at outcome_measurement_ids",
+            )
+    elif finding.causal_target_json is not None:
+        raise ReplayTargetFailure(
+            "replay_target_incompatible_causal_target", "replay returned an unexpected target"
+        )
     return replay, finding
 
 
@@ -498,13 +641,12 @@ def deterministic_metrics(
         "all_evidence_ids_allowed"
     ] and required_evidence.issubset(evidence_ids)
     required_paths = set(expected.get("required_suggestion_change_paths", []))
-    actual_paths = {
-        item.get("path")
-        for item in (finding.suggested_next_experiment_json or {})
-        .get("prefill", {})
-        .get("change_operations", [])
-    }
+    actual_paths = set(_suggestion_change_paths(finding.suggested_next_experiment_json))
     scores["required_suggestion_paths_present"] = required_paths.issubset(actual_paths)
+    if expected.get("direct_structured_support_required"):
+        scores["direct_structured_support_required"] = (
+            bool(finding.structured_support_json) and scores["direct_structured_support_valid"]
+        )
     boolean_values = [value for value in scores.values() if isinstance(value, bool)]
     scores["overall_pass"] = all(boolean_values)
     return scores
@@ -535,6 +677,36 @@ def _run_case(
             result.langfuse_sync_status = "failed"
         if run.judge_enabled:
             _run_optional_judge(db, run, result, case, finding, settings)
+    except ProviderFailure as exc:
+        if _is_global_provider_failure(exc):
+            db.rollback()
+            persisted = db.get(EvaluationResult, result.id)
+            if persisted is None:
+                raise GlobalEvaluationFailure(exc.code, str(exc)) from exc
+            persisted.status = "error"
+            persisted.error_code = exc.code
+            persisted.error_message = str(exc)[:2000]
+            persisted.failure_tags_json = [exc.code]
+            persisted.deterministic_scores_json = {
+                "structured_output_valid": False,
+                "overall_pass": False,
+            }
+            persisted.completed_at = _now()
+            db.commit()
+            raise GlobalEvaluationFailure(exc.code, str(exc)) from exc
+        db.rollback()
+        persisted = db.get(EvaluationResult, result.id)
+        if persisted is None:
+            raise
+        persisted.status = "error"
+        persisted.error_code = exc.code
+        persisted.error_message = str(exc)[:2000]
+        persisted.failure_tags_json = [exc.code]
+        persisted.deterministic_scores_json = {
+            "structured_output_valid": False,
+            "overall_pass": False,
+        }
+        persisted.completed_at = _now()
     except Exception as exc:
         db.rollback()
         result = db.get(EvaluationResult, result.id)
@@ -629,6 +801,7 @@ def run_evaluation(
     run.status = "running"
     run.started_at = _now()
     db.commit()
+    global_failure: GlobalEvaluationFailure | None = None
     for result in sorted(run.results, key=lambda item: item.ordinal):
         db.refresh(run)
         if run.status == "cancel_requested":
@@ -638,7 +811,11 @@ def run_evaluation(
             continue
         if result.status != "pending":
             continue
-        _run_case(db, run, result, result.evaluation_case, settings)
+        try:
+            _run_case(db, run, result, result.evaluation_case, settings)
+        except GlobalEvaluationFailure as exc:
+            global_failure = exc
+            break
         run.completed_cases = sum(
             item.status in {"passed", "failed", "error", "cancelled"} for item in run.results
         )
@@ -646,7 +823,25 @@ def run_evaluation(
         run.failed_cases = sum(item.status == "failed" for item in run.results)
         run.error_cases = sum(item.status == "error" for item in run.results)
         db.commit()
-    if run.status == "cancel_requested":
+    if global_failure is not None:
+        for pending in run.results:
+            if pending.status == "pending":
+                pending.status = "error"
+                pending.error_code = f"run_aborted_{global_failure.code}"[:120]
+                pending.error_message = (
+                    "Evaluation stopped because a run-wide provider/configuration failure "
+                    f"occurred: {str(global_failure)[:1800]}"
+                )
+                pending.failure_tags_json = [pending.error_code]
+                pending.deterministic_scores_json = {
+                    "structured_output_valid": False,
+                    "overall_pass": False,
+                }
+                pending.completed_at = _now()
+        run.error_code = global_failure.code
+        run.error_message = str(global_failure)[:2000]
+        run.status = "failed"
+    elif run.status == "cancel_requested":
         run.status = "cancelled"
     elif run.error_cases:
         run.status = "completed_with_errors"
@@ -654,6 +849,12 @@ def run_evaluation(
         run.status = "completed_with_errors"
     else:
         run.status = "completed"
+    run.completed_cases = sum(
+        item.status in {"passed", "failed", "error", "cancelled"} for item in run.results
+    )
+    run.passed_cases = sum(item.status == "passed" for item in run.results)
+    run.failed_cases = sum(item.status == "failed" for item in run.results)
+    run.error_cases = sum(item.status == "error" for item in run.results)
     run.aggregate_scores_json = {
         "total": run.total_cases,
         "passed": run.passed_cases,
