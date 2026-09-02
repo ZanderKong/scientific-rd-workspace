@@ -11,7 +11,14 @@ import type {
   Literature,
   LiteratureLink,
   Evidence,
-  CompareResult
+  CompareResult,
+  AnalysisRun,
+  Finding,
+  ModelProfile,
+  ReviewDecision,
+  EvaluationCase,
+  EvaluationRun,
+  EvaluationResult
 } from './domain';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1').replace(
@@ -216,5 +223,91 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    })
+    }),
+  listModelProfiles: () => request<ModelProfile[]>('/ai/model-profiles'),
+  listPromptVersions: () =>
+    request<Array<{ key: string; version: number; sha256: string }>>('/ai/prompt-versions'),
+  createAnalysisRun: (
+    projectId: string,
+    payload: {
+      experiment_selections: Array<{ experiment_id: string; revision_number: number }>;
+      measurement_ids: string[];
+      literature_ids?: string[];
+      evidence_ids?: string[];
+      model_profile_key?: string;
+      prompt_version?: number;
+    }
+  ) =>
+    request<AnalysisRun>(`/projects/${projectId}/analysis-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }),
+  listAnalysisRuns: (projectId: string) =>
+    request<AnalysisRun[]>(`/projects/${projectId}/analysis-runs`),
+  getAnalysisRun: (id: string) => request<AnalysisRun>(`/analysis-runs/${id}`),
+  listFindings: (projectId: string) => request<Finding[]>(`/projects/${projectId}/findings`),
+  getFinding: (id: string) => request<Finding>(`/findings/${id}`),
+  listReviews: (findingId: string) => request<ReviewDecision[]>(`/findings/${findingId}/reviews`),
+  createReview: (
+    findingId: string,
+    payload: {
+      decision: 'accept' | 'reject' | 'needs_evidence';
+      reviewer_name: string;
+      reason_code?: string | null;
+      comment?: string | null;
+      supersedes_review_id?: string | null;
+    }
+  ) =>
+    request<ReviewDecision>(`/findings/${findingId}/reviews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }),
+  createBadCase: (
+    findingId: string,
+    payload?: { expected_behavior?: JsonObject; case_tags?: string[] }
+  ) =>
+    request<EvaluationCase>(`/findings/${findingId}/evaluation-cases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload ?? {})
+    }),
+  createReferenceCase: (
+    findingId: string,
+    payload?: { expected_behavior?: JsonObject; case_tags?: string[] }
+  ) =>
+    request<EvaluationCase>(`/findings/${findingId}/evaluation-cases/reference`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload ?? {})
+    }),
+  listEvaluationCases: (projectId: string, caseType?: 'bad_case' | 'reference_case') =>
+    request<EvaluationCase[]>(
+      `/projects/${projectId}/evaluation-cases${caseType ? `?case_type=${caseType}` : ''}`
+    ),
+  getEvaluationCase: (id: string) => request<EvaluationCase>(`/evaluation-cases/${id}`),
+  createEvaluationRun: (
+    projectId: string,
+    payload: {
+      evaluation_case_ids: string[];
+      model_profile_key?: string;
+      prompt_version?: number;
+      judge_enabled?: boolean;
+      judge_model_profile_key?: string;
+      baseline_run_id?: string | null;
+    }
+  ) =>
+    request<EvaluationRun>(`/projects/${projectId}/evaluation-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }),
+  listEvaluationRuns: (projectId: string) =>
+    request<EvaluationRun[]>(`/projects/${projectId}/evaluation-runs`),
+  getEvaluationRun: (id: string) => request<EvaluationRun>(`/evaluation-runs/${id}`),
+  listEvaluationResults: (id: string) =>
+    request<EvaluationResult[]>(`/evaluation-runs/${id}/results`),
+  cancelEvaluationRun: (id: string) =>
+    request<EvaluationRun>(`/evaluation-runs/${id}/cancel`, { method: 'POST' })
 };

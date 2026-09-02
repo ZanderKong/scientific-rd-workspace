@@ -44,7 +44,7 @@ jobs:
         run: uv run alembic upgrade head
       - name: Verify migration/model parity
         run: uv run alembic check
-      - name: Verify populated Phase 2 upgrade to Phase 3 M1 head
+      - name: Verify populated Phase 2 upgrade to Phase 3 M7 head
         env:
           PHASE2_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd_phase2
         run: |

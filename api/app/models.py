@@ -581,6 +581,181 @@ class ReviewDecision(Base):
     supersedes: Mapped[ReviewDecision | None] = relationship(remote_side=[id])
 
 
+class EvaluationCase(Base):
+    __tablename__ = "evaluation_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "case_type in ('bad_case', 'reference_case')", name="ck_evaluation_cases_case_type"
+        ),
+        CheckConstraint("context_schema_version > 0", name="ck_evaluation_cases_context_version"),
+        CheckConstraint(
+            "langfuse_sync_status in ('disabled', 'pending', 'synced', 'failed')",
+            name="ck_evaluation_cases_langfuse_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), index=True)
+    case_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    source_finding_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("findings.id"), index=True)
+    source_review_decision_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("review_decisions.id"), unique=True
+    )
+    context_schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    context_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    model_output_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    finding_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    gate_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    review_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    expected_behavior_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    case_tags_json: Mapped[list[str]] = mapped_column(JsonColumn, default=list)
+    source_model_config_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    source_prompt_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    case_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    langfuse_dataset_item_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    langfuse_sync_status: Mapped[str] = mapped_column(String(32), default="disabled")
+    langfuse_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project: Mapped[Project] = relationship()
+    source_finding: Mapped[Finding] = relationship()
+    source_review_decision: Mapped[ReviewDecision] = relationship()
+    results: Mapped[list[EvaluationResult]] = relationship(back_populates="evaluation_case")
+
+
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('queued', 'running', 'completed', 'completed_with_errors', 'failed', "
+            "'interrupted', 'cancel_requested', 'cancelled')",
+            name="ck_evaluation_runs_status",
+        ),
+        CheckConstraint(
+            "structured_output_mode in ('native_schema', 'json_object')",
+            name="ck_evaluation_runs_output_mode",
+        ),
+        CheckConstraint("total_cases >= 0", name="ck_evaluation_runs_total_cases"),
+        CheckConstraint("completed_cases >= 0", name="ck_evaluation_runs_completed_cases"),
+        CheckConstraint("passed_cases >= 0", name="ck_evaluation_runs_passed_cases"),
+        CheckConstraint("failed_cases >= 0", name="ck_evaluation_runs_failed_cases"),
+        CheckConstraint("error_cases >= 0", name="ck_evaluation_runs_error_cases"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    dataset_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_profile_key: Mapped[str] = mapped_column(String(120))
+    structured_output_mode: Mapped[str] = mapped_column(String(32))
+    requested_model: Mapped[str] = mapped_column(String(255))
+    prompt_key: Mapped[str] = mapped_column(String(120))
+    prompt_version: Mapped[int] = mapped_column(Integer)
+    prompt_sha256: Mapped[str] = mapped_column(String(64))
+    prompt_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    workflow_version: Mapped[int] = mapped_column(Integer, default=1)
+    output_schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    generation_parameters_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    judge_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    judge_model_profile_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    judge_structured_output_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    judge_prompt_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("evaluation_runs.id"), nullable=True
+    )
+    total_cases: Mapped[int] = mapped_column(Integer, default=0)
+    completed_cases: Mapped[int] = mapped_column(Integer, default=0)
+    passed_cases: Mapped[int] = mapped_column(Integer, default=0)
+    failed_cases: Mapped[int] = mapped_column(Integer, default=0)
+    error_cases: Mapped[int] = mapped_column(Integer, default=0)
+    aggregate_scores_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    regression_summary_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    langfuse_experiment_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    langfuse_sync_status: Mapped[str] = mapped_column(String(32), default="disabled")
+    langfuse_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped[Project] = relationship()
+    baseline_run: Mapped[EvaluationRun | None] = relationship(remote_side=[id])
+    results: Mapped[list[EvaluationResult]] = relationship(
+        back_populates="evaluation_run",
+        cascade="all, delete-orphan",
+        order_by="EvaluationResult.ordinal",
+    )
+
+
+class EvaluationResult(Base):
+    __tablename__ = "evaluation_results"
+    __table_args__ = (
+        UniqueConstraint("evaluation_run_id", "evaluation_case_id"),
+        UniqueConstraint("evaluation_run_id", "ordinal"),
+        CheckConstraint(
+            "status in ('pending', 'running', 'passed', 'failed', 'error', 'cancelled')",
+            name="ck_evaluation_results_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    evaluation_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("evaluation_runs.id"), index=True
+    )
+    evaluation_case_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("evaluation_cases.id"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    replay_analysis_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("scientific_analysis_runs.id"), nullable=True
+    )
+    deterministic_scores_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    judge_scores_json: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
+    judge_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
+    failure_tags_json: Mapped[list[str]] = mapped_column(JsonColumn, default=list)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    langfuse_trace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    langfuse_sync_status: Mapped[str] = mapped_column(String(32), default="disabled")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    evaluation_run: Mapped[EvaluationRun] = relationship(back_populates="results")
+    evaluation_case: Mapped[EvaluationCase] = relationship(back_populates="results")
+    replay_analysis_run: Mapped[ScientificAnalysisRun | None] = relationship()
+
+
+class ExperimentProvenanceLink(Base):
+    __tablename__ = "experiment_provenance_links"
+    __table_args__ = (
+        UniqueConstraint("experiment_id"),
+        CheckConstraint(
+            "relation_type = 'suggested_from_finding'", name="ck_experiment_provenance_relation"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    experiment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("experiments.id"), unique=True)
+    finding_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("findings.id"), index=True)
+    analysis_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scientific_analysis_runs.id"), index=True
+    )
+    enabling_review_decision_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("review_decisions.id"), index=True
+    )
+    relation_type: Mapped[str] = mapped_column(String(64), default="suggested_from_finding")
+    suggestion_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    submitted_values_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    experiment: Mapped[Experiment] = relationship()
+    finding: Mapped[Finding] = relationship()
+    analysis_run: Mapped[ScientificAnalysisRun] = relationship()
+    enabling_review_decision: Mapped[ReviewDecision] = relationship()
+
+
 def _reject_update(
     _mapper: Any, _connection: Any, target: Any, allowed: tuple[str, ...] = ()
 ) -> None:
@@ -632,3 +807,77 @@ event.listen(FindingEvidenceLink, "before_update", _reject_update)
 event.listen(FindingEvidenceLink, "before_delete", _reject_delete)
 event.listen(ReviewDecision, "before_update", _reject_update)
 event.listen(ReviewDecision, "before_delete", _reject_delete)
+event.listen(EvaluationCase, "before_update", _reject_update)
+event.listen(EvaluationCase, "before_delete", _reject_delete)
+
+EVALUATION_RUN_PROVENANCE_FIELDS = {
+    "project_id",
+    "dataset_version",
+    "model_profile_key",
+    "structured_output_mode",
+    "requested_model",
+    "prompt_key",
+    "prompt_version",
+    "prompt_sha256",
+    "prompt_snapshot_json",
+    "workflow_version",
+    "output_schema_version",
+    "generation_parameters_json",
+    "judge_enabled",
+    "judge_model_profile_key",
+    "judge_structured_output_mode",
+    "judge_prompt_version",
+    "baseline_run_id",
+}
+
+
+@event.listens_for(EvaluationRun, "before_update")
+def prevent_evaluation_run_provenance_mutation(
+    _mapper: Any, _connection: Any, target: EvaluationRun
+) -> None:
+    state = inspect(target)
+    changed = {attribute.key for attribute in state.attrs if attribute.history.has_changes()}
+    if changed & EVALUATION_RUN_PROVENANCE_FIELDS:
+        raise ValueError("EvaluationRun provenance is immutable")
+
+
+event.listen(EvaluationRun, "before_delete", _reject_delete)
+
+
+@event.listens_for(EvaluationResult, "before_update")
+def prevent_completed_result_mutation(
+    _mapper: Any, _connection: Any, target: EvaluationResult
+) -> None:
+    state = inspect(target)
+    previous_status = state.attrs.status.history.deleted
+    was_terminal = bool(
+        previous_status and previous_status[0] in {"passed", "failed", "error", "cancelled"}
+    )
+    if was_terminal:
+        changed = {attribute.key for attribute in state.attrs if attribute.history.has_changes()}
+        if changed - {"langfuse_trace_id", "langfuse_sync_status"}:
+            raise ValueError("completed EvaluationResult is immutable")
+        return
+    _reject_update(
+        _mapper,
+        _connection,
+        target,
+        (
+            "status",
+            "deterministic_scores_json",
+            "judge_scores_json",
+            "judge_metadata_json",
+            "failure_tags_json",
+            "error_code",
+            "error_message",
+            "replay_analysis_run_id",
+            "langfuse_trace_id",
+            "langfuse_sync_status",
+            "completed_at",
+        ),
+    )
+
+
+event.listen(EvaluationResult, "before_delete", _reject_delete)
+event.listen(ExperimentProvenanceLink, "before_update", _reject_update)
+event.listen(ExperimentProvenanceLink, "before_delete", _reject_delete)

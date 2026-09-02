@@ -207,7 +207,7 @@ ExperimentRevision 之一，并保留 immutable source snapshot。
 ### Relation
 通用 provenance relation 未来可引入，但 Phase 1 不为了「通用图」重构所有 FK。
 
-## 5. Phase 3 Implemented Concepts (M1–M4)
+## 5. Phase 3 Implemented Concepts (M1–M7)
 
 ### ScientificAnalysisRun
 一次同步、单 provider-call 的科学分析，记录 project、冻结 context、provider/model profile、
@@ -232,10 +232,10 @@ Finding 到项目内 EvidenceRecord 的不可变链接，并保存当时的 Evid
 Accept、Reject、Needs Evidence 的 append-only、有序人工评审。后续决定必须 supersede 当前最新
 决定；Finding 仅允许更新 review_status。
 
-Phase 3 M5+ 的 EvaluationCase、EvaluationRun、EvaluationResult、ExperimentProvenanceLink 等
-仍按执行计划保留为后续里程碑，尚未实现。
-
-M5+ 的 Evaluation 实体仍不会以空表方式提前加入。
+M6–M7 additionally implement immutable `EvaluationCase` (bad/reference), `EvaluationRun`,
+`EvaluationResult`, deterministic metric snapshots, and optional judge/Langfuse projection. Evaluation
+execution is sequential inside one API process/worker; PostgreSQL stores status but is not a queue.
+`ExperimentProvenanceLink` remains reserved for M8 and is not created by Evaluation.
 
 ## 6. Experiment Template Seed
 

@@ -423,3 +423,65 @@ class LangfuseAdapter:
             return sdk_trace_id
         except Exception as exc:
             raise ProviderFailure("langfuse_sync_failed", str(exc)[:1000]) from exc
+
+    def sync_evaluation_case(self, case: Any) -> str | None:
+        """Best-effort evaluation dataset projection; PostgreSQL remains authoritative."""
+        if not self.enabled:
+            return None
+        try:
+            from langfuse import Langfuse
+
+            client = Langfuse(
+                public_key=self.settings.langfuse_public_key,
+                secret_key=self.settings.langfuse_secret_key,
+                base_url=self.settings.langfuse_base_url,
+            )
+            # SDK versions expose slightly different dataset APIs. Keep the adapter narrow and
+            # avoid sending scientific content unless explicitly enabled.
+            if hasattr(client, "create_dataset_item"):
+                item = client.create_dataset_item(
+                    dataset_name=f"scientific-rd/project/{case.project_id}",
+                    item_id=str(case.id),
+                    input=(
+                        case.context_snapshot_json
+                        if self.settings.langfuse_capture_content
+                        else {"case_hash": case.case_hash}
+                    ),
+                    metadata={
+                        "case_id": str(case.id),
+                        "case_type": case.case_type,
+                        "case_hash": case.case_hash,
+                        "project_id": str(case.project_id),
+                        "source_finding_id": str(case.source_finding_id),
+                    },
+                )
+                client.flush()
+                return getattr(item, "id", None) or str(case.id)
+            return str(case.id)
+        except Exception as exc:
+            raise ProviderFailure("langfuse_sync_failed", str(exc)[:1000]) from exc
+
+    def record_evaluation_scores(self, result: Any, scores: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        try:
+            from langfuse import Langfuse
+
+            client = Langfuse(
+                public_key=self.settings.langfuse_public_key,
+                secret_key=self.settings.langfuse_secret_key,
+                base_url=self.settings.langfuse_base_url,
+            )
+            if hasattr(client, "score"):
+                for key, value in scores.items():
+                    if isinstance(value, bool):
+                        client.score(
+                            trace_id=result.langfuse_trace_id,
+                            name=key,
+                            value=1 if value else 0,
+                            data_type="BOOLEAN",
+                            comment=f"evaluation_result:{result.id}",
+                        )
+                client.flush()
+        except Exception as exc:
+            raise ProviderFailure("langfuse_sync_failed", str(exc)[:1000]) from exc

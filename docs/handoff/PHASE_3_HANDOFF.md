@@ -2,109 +2,112 @@
 
 ## 1. Status
 
-- **Implementation status:** Milestones 1–4 corrective closeout fixes complete; work intentionally
-  stops before Milestone 5. This is not a Phase 3 release closeout or `PHASE 3 PASS` claim.
-- **Corrective closeout verdict:** `M1–M4 ACCEPTED — M5 UNBLOCKED`.
-- **Implementation baseline:** Phase 3 work started from `4384191` (approved plan and handoff).
-- **Implementation commit:** the commit containing this handoff (`Implement Phase 3 milestones 1-4`);
-  use `git log -1` for its final hash.
+- **Verdict:** `M5–M7 ACCEPTED — M8 UNBLOCKED`.
+- **Scope completed:** Analysis/Review UX, Evaluation schema and runner, Evaluation UI and optional
+  Langfuse projection. M8 gated draft Experiment was not started.
 - **Phase 1 baseline:** `9bb494d`; **Phase 2 accepted commit:** `939bf82`.
-- **Release tag:** no `v0.1-demo` tag has been created.
+- **Implementation baseline before this batch:** `4680dad` (M1–M4 accepted).
+- **Closeout date:** 2026-09-02.
+- No `v0.1-demo` release tag is claimed; M9/M10 final fixtures, browser audit and release gate remain.
 
-## 2. What Was Delivered
+## 2. M5 — Analysis and human review UX
 
-### Milestone 1 — contracts and persistence
+- Compare now exposes `Analyse selected experiments` with explicit latest Revision, compatible
+  Measurement, Literature, active EvidenceRecord, model profile, structured-output mode and prompt
+  configuration. The API remains authoritative for ownership and revision-drift validation.
+- `/dashboard/analysis` lists runs; `/dashboard/analysis/[analysisRunId]` exposes run status, provider,
+  model/profile, mode, prompt hash, frozen context hash/size, full provenance disclosure, Compare data,
+  Measurement provenance and Finding cards.
+- Finding cards visibly separate claim type, confidence, authoritative Evidence Gate, Direct Structured
+  Support, Curated Evidence roles, limitations, risks, missing evidence, applicability and suggestions.
+- Accept/Reject/Needs Evidence are append-only; Reject requires reason/comment, Needs Evidence requires
+  comment, and stale supersession is returned as `409` by the existing review API. No scientific record
+  mutation or chat-first UI was introduced.
 
-- Added additive Alembic migration `0005_scientific_analysis`.
-- Added `ScientificAnalysisRun`, immutable `AnalysisContextSnapshot`, immutable `Finding`, immutable
-  `FindingEvidenceLink`, and append-only `ReviewDecision` ORM records.
-- Added typed Pydantic contracts for analysis selection, five Finding types, typed Direct Structured
-  Support assertions, gate/review states, and the two structured-output modes.
-- Added versioned `scientific_analysis/v1` and `evaluation_judge/v1` prompts, model-profile capability
-  metadata, and exact LiteLLM `1.99.0` / Langfuse `4.15.1` lockfile entries after implementation-time
-  dependency verification.
+## 3. M6 — Evaluation schema and single-worker runner
 
-### Milestone 2 — frozen scientific context
+- Additive Alembic migration `0006_scientific_evaluation` creates `evaluation_cases`,
+  `evaluation_runs`, `evaluation_results`, and the reserved `experiment_provenance_links` table.
+  M8 does not use the provenance table yet.
+- EvaluationCase is immutable, project-scoped and carries case type (`bad_case`/`reference_case`), frozen
+  context/output/Finding/Gate/review/config snapshots, expected behavior, tags and `case_hash`.
+  Bad Cases require the latest rejected review; Reference Cases require the latest accepted review via
+  the separate controlled endpoint. Creation is idempotent for a source review.
+- Dataset versions hash a canonical UUID-sorted list of `{case_type, case_id, case_hash}` entries, so
+  request order does not change the version.
+- `POST /projects/{project_id}/evaluation-runs` commits the run and pending result rows before returning
+  `202`. A single in-process FastAPI background worker executes cases sequentially, persists progress,
+  isolates per-case failures, supports cancellation, and marks stale queued/running runs `interrupted`
+  on startup. PostgreSQL stores state; it is not a cross-worker queue. Multi-worker deployment remains
+  unsupported (`uvicorn ... --workers 1`).
+- Deterministic scores include structured output, evidence IDs/roles, Direct Structured Support scope,
+  comparison correctness, causal guard/non-upgrade, expected Gate, limitations, missing evidence and
+  suggestion checks. Optional judge invocation is separate and never changes deterministic pass/fail.
 
-- Context builder requires 2–5 same-Project Experiment revisions and explicit 1–10 Measurements.
-- It rejects revision drift, cross-Project records, unselected Evidence sources, withdrawn Evidence,
-  and oversized/non-finite data before a provider call.
-- Context snapshots include exact revision/template identity and schema hashes, Measurement → Import →
-  Attachment provenance, full point hashes with bounded samples, Literature/Evidence snapshots,
-  server-side Compare output, lineage, and name-addressable factor differences such as
-  `/additives/@KI` and `/additives/@starch`.
-- Evidence selection is explicitly 0–25; valid direct structured comparisons do not require an
-  EvidenceRecord.
+## 4. M7 — Evaluation UI and Langfuse projection
 
-### Milestone 3 — provider and analysis workflow
+- `/dashboard/evaluations` supports project and case-type filters, source Finding links and run launch.
+- `/dashboard/evaluations/[evaluationRunId]` shows dataset hash, model/prompt/judge configuration,
+  progress, terminal states, deterministic score JSON, optional judge JSON, case tags, errors, source
+  links, replay AnalysisRun links and cancellation while active. Polling stops for completed,
+  completed-with-errors, failed, interrupted and cancelled states.
+- Langfuse projection is best-effort and optional. Dataset-item and score metadata use Workspace IDs and
+  hashes; when `LANGFUSE_CAPTURE_CONTENT=false`, scientific content is not sent. Local PostgreSQL
+  EvaluationCase/Run/Result state never depends on Langfuse availability, and automated tests make no
+  external Langfuse calls.
 
-- Added the small `AIProvider` boundary with deterministic `FixtureProvider` and embedded
-  `LiteLLMProvider`; no LiteLLM Gateway, LangGraph, queue, RAG, embeddings, pgvector, or MCP was added.
-- `native_schema` uses provider JSON Schema response format; `json_object` uses strict JSON-object
-  response format. Both perform direct JSON decode, Workspace Pydantic validation, and scientific
-  reference validation without regex/prose repair or invalid-output retries.
-- Added synchronous AnalysisRun creation, frozen context persistence, diagnostic failure state
-  persistence, provider/model/prompt/output metadata, and optional Langfuse trace projection
-  (disabled by default and never authoritative).
-- Added API endpoints for profiles, prompt versions, AnalysisRun create/list/detail, Finding list/detail,
-  and append-only human review decisions.
+## 5. API surface added
 
-### Milestone 4 — Findings and Evidence Gate
+- `POST /findings/{finding_id}/evaluation-cases` (Bad Case)
+- `POST /findings/{finding_id}/evaluation-cases/reference` (Reference Case)
+- `GET /projects/{project_id}/evaluation-cases[?case_type=...]`
+- `GET /evaluation-cases/{case_id}`
+- `POST /projects/{project_id}/evaluation-runs` → `202`
+- `GET /projects/{project_id}/evaluation-runs`
+- `GET /evaluation-runs/{run_id}`
+- `GET /evaluation-runs/{run_id}/results`
+- `GET /evaluation-results/{result_id}`
+- `POST /evaluation-runs/{run_id}/cancel`
 
-- Findings persist model output separately from deterministic gate output and confidence.
-- Direct Structured Support is server-recomputed from frozen Measurement summaries, structured
-  Experiment differences, and Revision structured-property observations. Revision free text is not
-  used to infer support.
-- Curated EvidenceRecord links are project-scoped, role-checked, immutable, and snapshot-backed.
-- Gate states are `supported`, `partially_supported`, `insufficient_evidence`, and `contradicted`.
-  Direct support can support descriptive/comparative claims but cannot prove causality. The fixture
-  demonstration forces the KI+starch causal claim to `insufficient_evidence` and records the missing
-  isolating control.
-- Suggested next experiments are normalized, template-validated, non-authoritative JSON proposals;
-  no endpoint creates or mutates an Experiment.
+## 6. Verification evidence
 
-## 3. Corrective closeout fixes
-
-- Provider context limits now count sampled points (maximum 200 per Measurement and 2,000 total),
-  while retaining original row counts, endpoint-preserving sampling metadata, and the full immutable
-  `points_sha256`.
-- Langfuse 4.15.1 now uses the v4 `create_trace_id(seed=...)` and `start_observation(...,
-  as_type="generation")` APIs with `base_url`. `LANGFUSE_CAPTURE_CONTENT=false` is the default;
-  disabled capture sends only IDs/hashes, model/profile, prompt/version metadata, usage, latency and
-  status, never context, notes, abstracts, rendered prompts, or model output.
-- ScientificAnalysisRun configuration/provenance fields are ORM-guarded once the run leaves
-  `building_context`; named lifecycle/result fields remain writable by the run service.
-- Capability preflight no longer treats generic `response_format` as native-schema proof:
-  `native_schema` requires explicit profile smoke verification, while `json_object` may use provider
-  response-format support. Unsupported profiles report an unavailable reason.
-- Exactly one retry is allowed for timeout, rate-limit, unavailable, or retryable 5xx provider
-  failures. Authentication, bad request, unsupported capability, invalid JSON/schema, and scientific
-  reference failures are never retried; attempt/retry counts are recorded in run metadata.
-- The PostgreSQL 17 populated-Phase-2-upgrade/parity check is now part of the Phase 2 CI workflow so
-  the M1 acceptance can be evidenced on GitHub without live model or Langfuse calls.
-
-## 4. Verification Performed
-
-| Check | Result | Evidence |
+| Gate | Result | Evidence |
 | --- | --- | --- |
-| API formatter/lint | PASS | `uv run ruff format app tests && uv run ruff check app tests` |
-| API regression and Phase 3 tests | PASS | `uv run pytest -q` — 28 tests |
-| Blank-database Alembic upgrade | PASS locally | SQLite fallback smoke to `0005_scientific_analysis` |
-| PostgreSQL 17 blank/populated migration acceptance | PASS | GitHub Actions run [33584333549](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33584333549) on synchronized `main` (`086efc1`); blank head, populated `0004` upgrade, hash parity and `alembic check` |
-| Backend regression against PostgreSQL 17 | PASS | Same run; full pytest suite (28 tests) |
-| Frontend gates/browser audit | PASS for existing Phase 1/2 gates | Same run; lint, format check, typecheck, Vitest and production build; M5 UI remains unimplemented |
-| Live LiteLLM/Langfuse calls | NOT RUN | tests use FixtureProvider/mocks; Langfuse content capture is disabled |
+| Backend formatting/lint | PASS | `cd api && uv run ruff format --check app tests && uv run ruff check app tests` |
+| Backend tests | PASS | `cd api && uv run pytest -q` — 31 tests, including M1–M4 regression and M6 case/runner coverage |
+| Blank migration/parity | PASS locally | `DATABASE_URL=sqlite+pysqlite:///... uv run alembic upgrade head`; `uv run alembic check` reports no new operations at `0006` |
+| Evaluation smoke | PASS locally | Fixture analysis → Accept/Reject → controlled case → `202` run → sequential result and deterministic score |
+| Frontend format/type/tests/build | PASS | `cd web && npm run format:check && npm run typecheck && npm run test && npm run build` |
+| Frontend lint | PASS | `cd web && npm run lint`; only inherited starter warnings remain |
+| Browser route compilation | PASS | Next production build includes `/dashboard/analysis`, `/dashboard/analysis/[analysisRunId]`, `/dashboard/evaluations`, `/dashboard/evaluations/[evaluationRunId]` |
+| Live model/Langfuse | NOT REQUIRED | FixtureProvider/mocks only; Langfuse disabled by default and projection is best-effort |
 
-The repository remains additive to Phase 1/2. Existing immutable template-version rows, revision
-snapshots, Measurement/import provenance, Literature/Evidence semantics, and attachment storage
-contracts were not rewritten.
+PostgreSQL 17 remains the authoritative acceptance database. The existing Phase 2 GitHub Actions run
+`33522448986` and Phase 3 M1–M4 run `33584333549` remain green baselines; a new CI workflow run for this
+M5–M7 batch must be recorded before M10 release closeout.
 
-## 5. Intentionally Deferred
+## 7. Files changed
 
-M5 analysis/review UX; M6–M7 EvaluationCase/EvaluationRun/runner and evaluation UI; M8 gated prefilled
-draft Experiment provenance flow; M9 demo fixtures/browser story; M10 PostgreSQL 17 CI, full audit and
-release handoff. Multi-worker evaluation is unsupported by design and no queue was introduced.
+- API: `api/alembic/versions/0006_scientific_evaluation.py`, `api/app/models.py`,
+  `api/app/schemas.py`, `api/app/evaluation_service.py`, `api/app/routers/evaluation.py`,
+  `api/app/ai_provider.py`, `api/app/main.py`, `api/app/scientific_ai_service.py`, and M6 tests.
+- Web: typed Analysis/Evaluation domain and client contracts, Compare analysis configuration,
+  `/dashboard/analysis*`, `/dashboard/evaluations*`, navigation and components.
+- Source-of-truth docs: `README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `docs/DATA_MODEL.md`,
+  `docs/UI_SPEC.md`, `docs/PRODUCT_SPEC.md`, `docs/DEMO_SCENARIO.md`, and the Phase 3 execution plan.
 
-The M1–M4 corrective acceptance is complete and PostgreSQL 17 is green. Overall Phase 3 remains
-**IN PROGRESS** because M5–M10 are intentionally outside this batch; no `PHASE 3 PASS` or release tag
-is claimed. Continue from the approved execution plan and preserve the Phase 1/2 contracts above.
+## 8. Remaining scope and risks
+
+- M8 gated prefilled draft Experiment and `ExperimentProvenanceLink` write path remain deferred.
+- M9 deterministic six-case seed/demo polish and M10 PostgreSQL 17 CI consolidation, complete browser
+  audit, live LiteLLM smoke and release tag remain.
+- Optional judge is intentionally allowed to be unavailable; deterministic results remain authoritative.
+- Multi-worker/durable Evaluation execution is unsupported by design; do not deploy v0.1 with more than
+  one API worker.
+- No LangGraph, RAG, embeddings, pgvector, MCP, queue, automatic Experiment mutation or other Phase 2/3
+  deferred functionality was added.
+
+## 9. Handoff decision
+
+`M5–M7 ACCEPTED — M8 UNBLOCKED`. Continue with M8 only under the approved execution plan; do not infer
+full `PHASE 3 PASS` until M9/M10 criteria and PostgreSQL/browser evidence are complete.

@@ -216,6 +216,16 @@ P0：
 
 Mobile 不是 Phase 1 acceptance blocker。
 
+## 13. Phase 3 Analysis and Evaluation surfaces
+
+Phase 3 adds `/dashboard/analysis`, `/dashboard/analysis/[analysisRunId]`, `/dashboard/evaluations`,
+and `/dashboard/evaluations/[evaluationRunId]`. Compare exposes `Analyse selected experiments` with
+explicit revision/Measurement/Literature/Evidence selection. Finding cards keep confidence, the
+authoritative Evidence Gate, Direct Structured Support, Curated Evidence, limitations, risks, and
+review history visually separate. Evaluation screens distinguish Bad Case/Reference Case, deterministic
+scores, optional judge scores, progress, cancellation, errors, and source/replay links. The supported
+v0.1 runner is one API process with one worker; multi-worker execution is unsupported.
+
 ## 12. Demo Polish
 
 Phase 1 最后：

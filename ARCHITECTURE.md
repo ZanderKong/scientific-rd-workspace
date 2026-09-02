@@ -115,7 +115,7 @@ repository / storage
 - repository：DB persistence
 - storage：binary persistence
 
-### 4.1 Phase 3 scientific analysis boundary (M1–M4)
+### 4.1 Phase 3 scientific analysis boundary (M1–M7)
 
 Scientific Analysis is an additive backend capability. The router delegates to explicit Python
 services that build a frozen, canonical context in PostgreSQL, make one structured provider call,
@@ -131,7 +131,8 @@ links, and append-only ReviewDecisions. Direct Structured Support is limited to 
 Measurement comparisons, structured Experiment differences, and immutable Revision observations;
 it can support descriptive/comparative claims but never proves causality. Curated EvidenceRecords
 remain an explicit, project-scoped selection. The model cannot write Experiments or other scientific
-records. Phase 3 M5+ UI and Evaluation capabilities are not implemented in this batch.
+records. M5 Analysis/Review and M6–M7 Evaluation capabilities are implemented with a single
+in-process worker boundary; M8 gated draft Experiment remains deferred.
 
 ## 5. Data Storage
 

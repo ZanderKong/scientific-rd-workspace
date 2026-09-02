@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,10 +15,20 @@ import {
   TableRow
 } from '@/components/ui/table';
 import { api } from '@/lib/api-client';
-import type { CompareResult, Experiment, MeasurementPoint, Project } from '@/lib/domain';
+import type {
+  CompareResult,
+  Experiment,
+  MeasurementPoint,
+  Project,
+  ModelProfile,
+  Revision,
+  Literature,
+  Evidence
+} from '@/lib/domain';
 import { PageHeader, PageState, StatusBadge } from './shared';
 
 export function CompareView() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projectId, setProjectId] = useState('');
@@ -26,11 +37,24 @@ export function CompareView() {
   const [points, setPoints] = useState<Record<string, MeasurementPoint[]>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [profiles, setProfiles] = useState<ModelProfile[]>([]);
+  const [profileKey, setProfileKey] = useState('analysis-default');
+  const [revisions, setRevisions] = useState<Record<string, Revision | null>>({});
+  const [literature, setLiterature] = useState<Literature[]>([]);
+  const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [selectedEvidence, setSelectedEvidence] = useState<string[]>([]);
+  const [selectedLiterature, setSelectedLiterature] = useState<string[]>([]);
   useEffect(() => {
     void api
       .listProjects()
       .then(setProjects)
       .catch((e) => setError(e instanceof Error ? e.message : 'Unable to load projects.'));
+  }, []);
+  useEffect(() => {
+    void api
+      .listModelProfiles()
+      .then(setProfiles)
+      .catch(() => undefined);
   }, []);
   useEffect(() => {
     if (!projectId) {
@@ -61,6 +85,21 @@ export function CompareView() {
         experiment_ids: selectedIds
       });
       setResult(value);
+      const revisionEntries = await Promise.all(
+        selectedIds.map(async (id) => {
+          const items = await api.listRevisions(id);
+          return [id, items[0] ?? null] as const;
+        })
+      );
+      setRevisions(Object.fromEntries(revisionEntries));
+      if (projectId) {
+        const [lit, ev] = await Promise.all([
+          api.listLiterature(projectId),
+          api.listEvidence(projectId)
+        ]);
+        setLiterature(lit);
+        setEvidence(ev.filter((item) => item.status === 'active'));
+      }
       const compatible = value.measurements.filter((item) => item.compatible);
       const loaded = await Promise.all(
         compatible.map(async (item) => [item.id, await api.listMeasurementPoints(item.id)] as const)
@@ -68,6 +107,33 @@ export function CompareView() {
       setPoints(Object.fromEntries(loaded));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to compare experiments.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function analyse() {
+    if (!result || selectedIds.length < 2) return;
+    setBusy(true);
+    setError('');
+    try {
+      const selections = selectedIds.map((id) => ({
+        experiment_id: id,
+        revision_number: revisions[id]?.revision_number ?? 1
+      }));
+      const measurements = result.measurements
+        .filter((item) => item.compatible)
+        .map((item) => item.id);
+      const run = await api.createAnalysisRun(projectId, {
+        experiment_selections: selections,
+        measurement_ids: measurements,
+        literature_ids: selectedLiterature,
+        evidence_ids: selectedEvidence,
+        model_profile_key: profileKey,
+        prompt_version: 1
+      });
+      router.push(`/dashboard/analysis/${run.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to run scientific analysis.');
     } finally {
       setBusy(false);
     }
@@ -134,6 +200,94 @@ export function CompareView() {
       ) : null}
       {result ? (
         <div className='grid gap-6'>
+          <Card>
+            <CardHeader>
+              <CardTitle>Scientific analysis configuration</CardTitle>
+            </CardHeader>
+            <CardContent className='grid gap-4'>
+              <p className='text-sm text-muted-foreground'>
+                Frozen revisions and compatible Measurements are sent to the server for validation.
+                Curated Evidence is optional when direct structured support is sufficient.
+              </p>
+              <div className='grid gap-2 md:grid-cols-2'>
+                <div>
+                  <p className='mb-2 text-sm font-medium'>Experiment revisions</p>
+                  {selectedIds.map((id) => (
+                    <p key={id} className='text-xs text-muted-foreground'>
+                      {experiments.find((item) => item.id === id)?.code}: Revision{' '}
+                      {revisions[id]?.revision_number ?? 'missing'}
+                    </p>
+                  ))}
+                </div>
+                <div className='grid gap-2'>
+                  <label className='text-sm font-medium' htmlFor='analysis-profile'>
+                    Model profile
+                  </label>
+                  <select
+                    id='analysis-profile'
+                    className='h-8 rounded-lg border bg-background px-2 text-sm'
+                    value={profileKey}
+                    onChange={(event) => setProfileKey(event.target.value)}
+                  >
+                    {profiles.map((profile) => (
+                      <option key={profile.key} value={profile.key} disabled={!profile.available}>
+                        {profile.label} · {profile.structured_output_mode}
+                        {profile.available ? '' : ` (${profile.capability_reason})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className='grid gap-2 md:grid-cols-2'>
+                <div>
+                  <p className='mb-1 text-sm font-medium'>Literature (optional)</p>
+                  {literature.map((item) => (
+                    <label key={item.id} className='flex items-center gap-2 text-xs'>
+                      <input
+                        type='checkbox'
+                        checked={selectedLiterature.includes(item.id)}
+                        onChange={() =>
+                          setSelectedLiterature((current) =>
+                            current.includes(item.id)
+                              ? current.filter((id) => id !== item.id)
+                              : [...current, item.id]
+                          )
+                        }
+                      />
+                      {item.title}
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <p className='mb-1 text-sm font-medium'>Curated Evidence (0–25, optional)</p>
+                  {evidence.map((item) => (
+                    <label key={item.id} className='flex items-center gap-2 text-xs'>
+                      <input
+                        type='checkbox'
+                        checked={selectedEvidence.includes(item.id)}
+                        onChange={() =>
+                          setSelectedEvidence((current) =>
+                            current.includes(item.id)
+                              ? current.filter((id) => id !== item.id)
+                              : [...current, item.id]
+                          )
+                        }
+                      />
+                      {item.claim_text}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <Button
+                onClick={analyse}
+                disabled={
+                  busy || !profiles.some((item) => item.key === profileKey && item.available)
+                }
+              >
+                {busy ? 'Running analysis…' : 'Analyse selected experiments'}
+              </Button>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle>Structured property differences</CardTitle>

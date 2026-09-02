@@ -238,6 +238,9 @@ def _normalize_suggestion(
         "structured_data": structured,
         "control_strategy": suggestion.control_strategy,
         "addresses_missing_evidence_codes": suggestion.addresses_missing_evidence_codes,
+        "change_operations": [
+            item.model_dump(mode="json") for item in suggestion.change_operations
+        ],
     }
     return {
         "validation_status": "valid",

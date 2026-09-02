@@ -1,6 +1,6 @@
 # Execution Plan 03 — Scientific AI + Evaluation
 
-**Status:** M1–M4 ACCEPTED — M5 UNBLOCKED; Milestone 5 and later are not started
+**Status:** M5–M7 IMPLEMENTED — M8 UNBLOCKED; Milestone 8 and later are not started
 
 **Stable baseline:** Phase 1 and Phase 2 PASS; Phase 3 implementation baseline is commit `4384191`
 
@@ -1463,7 +1463,7 @@ Do not use downgrade/re-upgrade on the authoritative test database. Do not call 
 
 ---
 
-# 16. Implementation Notes (M1–M4)
+# 16. Implementation Notes (M1–M7)
 
 The first implementation batch stopped after Milestone 4 as required. It is additive to the Phase
 1/2 schema and keeps PostgreSQL as the source of truth.
@@ -1489,8 +1489,23 @@ The first implementation batch stopped after Milestone 4 as required. It is addi
   run provenance is immutable after context building, capability preflight distinguishes native schema
   from JSON-object mode, and exactly one transient retry is recorded in run metadata.
 
-M5 (analysis/review UX), M6–M10 (Evaluation, draft Experiment flow, CI/browser closeout) are not
-implemented in this batch and must not be inferred from the current API.
+## M5–M7 implementation record
+
+- **M5:** Added typed frontend Analysis/Review routes, Compare → Analyse configuration, frozen
+  context/provenance inspection, Finding cards with separate confidence/Gate/Direct Structured
+  Support/Curated Evidence sections, and append-only Accept/Reject/Needs Evidence actions.
+- **M6:** Added additive migration `0006_scientific_evaluation`, immutable Bad/Reference EvaluationCase
+  snapshots, deterministic order-independent dataset hashes, persisted EvaluationRun/Result records,
+  sequential one-process/one-worker execution, progress/cancel/interrupted handling, deterministic
+  metric matrix, baseline compatibility checks, and isolated optional judge invocation.
+- **M7:** Added Evaluation index/detail routes with case-type badges/filters, progress polling,
+  deterministic versus judge score presentation, errors and replay/source links, plus best-effort
+  Langfuse dataset/score projection that never gates local PostgreSQL results.
+- **Verification:** API Ruff and pytest pass (31 tests), SQLite migration/parity reaches `0006`, and
+  Web lint (inherited starter warnings only), format, typecheck, Vitest (6 tests), and production build
+  pass. Browser routes compile and are reachable through the existing shell; live provider/Langfuse
+  calls are intentionally not required. M8 gated draft-Experiment, M9 fixtures, and M10 release audit
+  remain outside this batch.
 
 # 17. Final v0.1-demo Browser Scenario
 

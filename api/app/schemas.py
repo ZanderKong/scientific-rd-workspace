@@ -752,4 +752,120 @@ class AnalysisRunOut(BaseModel):
     findings: list[FindingOut] = Field(default_factory=list)
 
 
+EvaluationCaseType = Literal["bad_case", "reference_case"]
+EvaluationCaseStatus = Literal[
+    "queued",
+    "running",
+    "completed",
+    "completed_with_errors",
+    "failed",
+    "interrupted",
+    "cancel_requested",
+    "cancelled",
+]
+EvaluationResultStatus = Literal["pending", "running", "passed", "failed", "error", "cancelled"]
+
+
+class EvaluationCaseCreate(BaseModel):
+    expected_behavior: dict[str, Any] = Field(default_factory=dict)
+    case_tags: list[str] = Field(default_factory=list, max_length=25)
+
+
+class EvaluationCaseOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    case_type: EvaluationCaseType
+    source_finding_id: uuid.UUID
+    source_review_decision_id: uuid.UUID
+    context_schema_version: int
+    context_snapshot_json: dict[str, Any]
+    model_output_snapshot_json: dict[str, Any]
+    finding_snapshot_json: dict[str, Any]
+    gate_snapshot_json: dict[str, Any]
+    review_snapshot_json: dict[str, Any]
+    expected_behavior_json: dict[str, Any]
+    case_tags_json: list[str]
+    source_model_config_json: dict[str, Any]
+    source_prompt_snapshot_json: dict[str, Any]
+    case_hash: str
+    langfuse_dataset_item_id: str | None
+    langfuse_sync_status: str
+    langfuse_error: str | None
+    created_at: datetime
+
+
+class EvaluationRunCreate(BaseModel):
+    evaluation_case_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+    model_profile_key: str = Field(default="analysis-default", min_length=1, max_length=120)
+    prompt_version: int = Field(default=1, ge=1)
+    judge_enabled: bool = False
+    judge_model_profile_key: str | None = Field(default=None, max_length=120)
+    baseline_run_id: uuid.UUID | None = None
+
+    @field_validator("evaluation_case_ids")
+    @classmethod
+    def unique_case_ids(cls, values: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(values)) != len(values):
+            raise ValueError("evaluation_case_ids must be unique")
+        return values
+
+
+class EvaluationResultOut(BaseModel):
+    id: uuid.UUID
+    evaluation_run_id: uuid.UUID
+    evaluation_case_id: uuid.UUID
+    ordinal: int
+    status: EvaluationResultStatus
+    replay_analysis_run_id: uuid.UUID | None
+    deterministic_scores_json: dict[str, Any]
+    judge_scores_json: dict[str, Any] | None
+    judge_metadata_json: dict[str, Any] | None
+    failure_tags_json: list[str]
+    error_code: str | None
+    error_message: str | None
+    langfuse_trace_id: str | None
+    langfuse_sync_status: str
+    created_at: datetime
+    completed_at: datetime | None
+    evaluation_case: EvaluationCaseOut | None = None
+
+
+class EvaluationRunOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: EvaluationCaseStatus
+    dataset_version: str
+    model_profile_key: str
+    structured_output_mode: StructuredOutputMode
+    requested_model: str
+    prompt_key: str
+    prompt_version: int
+    prompt_sha256: str
+    prompt_snapshot_json: dict[str, Any]
+    workflow_version: int
+    output_schema_version: int
+    generation_parameters_json: dict[str, Any]
+    judge_enabled: bool
+    judge_model_profile_key: str | None
+    judge_structured_output_mode: str | None
+    judge_prompt_version: int | None
+    baseline_run_id: uuid.UUID | None
+    total_cases: int
+    completed_cases: int
+    passed_cases: int
+    failed_cases: int
+    error_cases: int
+    aggregate_scores_json: dict[str, Any]
+    regression_summary_json: dict[str, Any]
+    error_code: str | None
+    error_message: str | None
+    langfuse_experiment_name: str | None
+    langfuse_sync_status: str
+    langfuse_error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    results: list[EvaluationResultOut] = Field(default_factory=list)
+
+
 ImportCommitMapping.model_rebuild()

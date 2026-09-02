@@ -38,6 +38,20 @@ export const navGroups: NavGroup[] = [
         icon: 'post',
         isActive: false,
         items: []
+      },
+      {
+        title: 'Analysis',
+        url: '/dashboard/analysis',
+        icon: 'sparkles',
+        isActive: false,
+        items: []
+      },
+      {
+        title: 'Evaluations',
+        url: '/dashboard/evaluations',
+        icon: 'trendingUp',
+        isActive: false,
+        items: []
       }
     ]
   }

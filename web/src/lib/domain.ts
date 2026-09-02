@@ -237,3 +237,207 @@ export interface CompareResult {
   }>;
   measurements: Array<Measurement & { compatible: boolean; incompatibility_reason: string | null }>;
 }
+
+export type StructuredOutputMode = 'native_schema' | 'json_object';
+export type FindingClaimType =
+  | 'scientific_observation'
+  | 'hypothesis'
+  | 'comparative_finding'
+  | 'causal_claim'
+  | 'recommendation';
+export type EvidenceGateStatus =
+  | 'supported'
+  | 'partially_supported'
+  | 'insufficient_evidence'
+  | 'contradicted';
+export type ReviewDecisionType = 'accept' | 'reject' | 'needs_evidence';
+
+export interface ModelProfile {
+  key: string;
+  provider: string;
+  model: string;
+  label: string;
+  structured_output_mode: StructuredOutputMode;
+  available: boolean;
+  capability_reason: string | null;
+}
+
+export interface AnalysisRun {
+  id: string;
+  project_id: string;
+  purpose: 'interactive' | 'evaluation_replay';
+  status: 'building_context' | 'running' | 'completed' | 'failed' | 'interrupted';
+  provider_key: 'litellm' | 'fixture';
+  model_profile_key: string;
+  structured_output_mode: StructuredOutputMode;
+  requested_model: string;
+  resolved_model: string | null;
+  provider_response_id: string | null;
+  provider_model_version: string | null;
+  prompt_key: string;
+  prompt_version: number;
+  prompt_sha256: string;
+  output_schema_version: number;
+  workflow_version: number;
+  generation_parameters_json: JsonObject;
+  model_metadata_json: JsonObject;
+  validated_output_json: JsonObject | null;
+  error_code: string | null;
+  error_message: string | null;
+  langfuse_trace_id: string | null;
+  langfuse_sync_status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  context_snapshot: AnalysisContext | null;
+  findings: Finding[];
+}
+
+export interface AnalysisContext {
+  id: string;
+  analysis_run_id: string;
+  schema_version: number;
+  snapshot_json: JsonObject;
+  snapshot_sha256: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface FindingEvidenceLink {
+  id: string;
+  evidence_record_id: string;
+  role: 'supporting' | 'contradicting' | 'contextual';
+  rationale: string;
+  evidence_snapshot_json: JsonObject;
+  created_at: string;
+}
+
+export interface ReviewDecision {
+  id: string;
+  finding_id: string;
+  sequence_number: number;
+  decision: ReviewDecisionType;
+  reviewer_name: string;
+  reason_code: string | null;
+  comment: string | null;
+  supersedes_review_id: string | null;
+  created_at: string;
+}
+
+export interface Finding {
+  id: string;
+  project_id: string;
+  analysis_run_id: string;
+  ordinal: number;
+  claim: string;
+  claim_type: FindingClaimType;
+  confidence_label: 'low' | 'medium' | 'high';
+  confidence_rationale: string;
+  applicability_scope: string;
+  limitations_json: Array<{ code: string; description: string }>;
+  risks_json: Array<{ code: string; description: string }>;
+  missing_evidence_json: Array<{ code: string; description: string }>;
+  comparison_assertions_json: Array<JsonObject>;
+  structured_support_json: Array<JsonObject>;
+  causal_target_json: JsonObject | null;
+  suggested_next_experiment_json: JsonObject | null;
+  model_proposed_gate_status: EvidenceGateStatus;
+  model_proposed_gate_rationale: string;
+  evidence_gate_status: EvidenceGateStatus;
+  evidence_gate_rationale_json: JsonObject;
+  gate_policy_version: number;
+  review_status: 'pending_review' | 'accepted' | 'rejected' | 'needs_evidence';
+  evidence_links: FindingEvidenceLink[];
+  reviews: ReviewDecision[];
+  created_at: string;
+}
+
+export type EvaluationCaseType = 'bad_case' | 'reference_case';
+export interface EvaluationCase {
+  id: string;
+  project_id: string;
+  case_type: EvaluationCaseType;
+  source_finding_id: string;
+  source_review_decision_id: string;
+  context_schema_version: number;
+  context_snapshot_json: JsonObject;
+  model_output_snapshot_json: JsonObject;
+  finding_snapshot_json: JsonObject;
+  gate_snapshot_json: JsonObject;
+  review_snapshot_json: JsonObject;
+  expected_behavior_json: JsonObject;
+  case_tags_json: string[];
+  source_model_config_json: JsonObject;
+  source_prompt_snapshot_json: JsonObject;
+  case_hash: string;
+  langfuse_dataset_item_id: string | null;
+  langfuse_sync_status: string;
+  langfuse_error: string | null;
+  created_at: string;
+}
+
+export interface EvaluationResult {
+  id: string;
+  evaluation_run_id: string;
+  evaluation_case_id: string;
+  ordinal: number;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'error' | 'cancelled';
+  replay_analysis_run_id: string | null;
+  deterministic_scores_json: JsonObject;
+  judge_scores_json: JsonObject | null;
+  judge_metadata_json: JsonObject | null;
+  failure_tags_json: string[];
+  error_code: string | null;
+  error_message: string | null;
+  langfuse_trace_id: string | null;
+  langfuse_sync_status: string;
+  created_at: string;
+  completed_at: string | null;
+  evaluation_case: EvaluationCase | null;
+}
+
+export interface EvaluationRun {
+  id: string;
+  project_id: string;
+  status:
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'completed_with_errors'
+    | 'failed'
+    | 'interrupted'
+    | 'cancel_requested'
+    | 'cancelled';
+  dataset_version: string;
+  model_profile_key: string;
+  structured_output_mode: StructuredOutputMode;
+  requested_model: string;
+  prompt_key: string;
+  prompt_version: number;
+  prompt_sha256: string;
+  prompt_snapshot_json: JsonObject;
+  workflow_version: number;
+  output_schema_version: number;
+  generation_parameters_json: JsonObject;
+  judge_enabled: boolean;
+  judge_model_profile_key: string | null;
+  judge_structured_output_mode: string | null;
+  judge_prompt_version: number | null;
+  baseline_run_id: string | null;
+  total_cases: number;
+  completed_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  error_cases: number;
+  aggregate_scores_json: JsonObject;
+  regression_summary_json: JsonObject;
+  error_code: string | null;
+  error_message: string | null;
+  langfuse_experiment_name: string | null;
+  langfuse_sync_status: string;
+  langfuse_error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  results: EvaluationResult[];
+}
