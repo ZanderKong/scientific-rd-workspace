@@ -9,7 +9,7 @@ Plan 2 was executed as one frontend plan. Checkpoints are recorded here as accep
 ## Commits and scope boundary
 
 - Starting commit: `c093a6f31f9aa21962d840e2030f0de4d651bc66`
-- Final commit: `acefb42` (will be replaced with the final amended SHA below)
+- Final frontend implementation commit: `150485f4d2138b6326e49839706474e3f76b1e67`
 - Backend/API/schema change count: `0`
 - Database migrations, API routes, canonical enums, scientific content, model/provider keys, uploads, environment variables and API keys: unchanged.
 - No new dependency, React Flow package, graph endpoint, design-system package, backend feature or scientific product feature was added.
@@ -102,7 +102,8 @@ Critical path used real local seed data: `Overview → Projects → PRJ-001 → 
 
 ## Closeout record
 
-- Final commit: `acefb42` (pre-amend closeout commit)
+- Final frontend implementation commit: `150485f4d2138b6326e49839706474e3f76b1e67`
+- Documentation closeout commit: the final `HEAD` after this handoff is committed.
 - Final CI run: `TBD`
 - Worktree clean after commit: `TBD`
 - No new tag created.
