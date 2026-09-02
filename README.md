@@ -42,7 +42,7 @@ Phase 2 已完成并通过：
 
 > Raw Attachment → Import → Measurement → Plot → Compare → Literature → Evidence
 
-Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在提交 `939bf82` 上通过；详情见 `docs/handoff/PHASE_2_HANDOFF.md`。Phase 3 已完成 Milestones 1–7（冻结分析上下文、AIProvider/双结构化输出模式、Finding、确定性 Evidence Gate、人工评审、Evaluation runner 与 UI）；M8 gated draft Experiment 及最终 M9/M10 审计仍未开始。详见 `docs/handoff/PHASE_3_HANDOFF.md`。
+Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在提交 `939bf82` 上通过；详情见 `docs/handoff/PHASE_2_HANDOFF.md`。Phase 3 M1–M7 已接受，M8 gated prefilled draft Experiment/provenance 与 M9 确定性演示数据已实现；M10 CI/浏览器审计已完成离线门禁，仍需一次配置凭据的 live LiteLLM smoke 才能发布。当前确切状态见 `docs/handoff/PHASE_3_HANDOFF.md`。
 
 ## 阶段执行记录
 
@@ -50,7 +50,7 @@ Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在
 2. Phase 2 基于冻结的 Phase 1 架构生成并执行 `docs/exec-plans/02-scientific-workflow.md`。
 3. Phase 2 的 PostgreSQL 17、后端和前端门禁已通过 GitHub Actions。
 4. Phase 1/2 的最终证据分别记录在 `docs/handoff/PHASE_1_HANDOFF.md` 和 `docs/handoff/PHASE_2_HANDOFF.md`。
-5. Phase 3 M1–M7 已按批准计划实现；M8–M10 保持未开始，不能据此宣称 Phase 3 PASS。
+5. Phase 3 M1–M9 已按批准计划实现；M10 的 PostgreSQL/前端/离线浏览器门禁已完成，但在 live LiteLLM smoke 通过前不得宣称 `PHASE 3 PASS` 或创建 `v0.1-demo` 标签。
 
 ## 核心原则
 

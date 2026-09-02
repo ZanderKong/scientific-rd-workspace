@@ -5,10 +5,13 @@ import uuid
 from io import BytesIO
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
+from app.ai_provider import FixtureProvider
+from app.context_builder import build_scientific_context
 from app.core.config import get_settings
 from app.db import SessionLocal
+from app.evaluation_service import create_evaluation_case
 from app.models import (
     Attachment,
     EvidenceRecord,
@@ -16,12 +19,17 @@ from app.models import (
     ExperimentLiteratureLink,
     ExperimentRevision,
     ExperimentTemplate,
+    Finding,
     LiteratureRecord,
     Measurement,
     MeasurementImport,
     MeasurementPoint,
     Project,
+    ReviewDecision,
+    ScientificAnalysisRun,
 )
+from app.schemas import AnalysisRunCreate, EvaluationCaseCreate, ReviewDecisionCreate
+from app.scientific_ai_service import create_analysis_run, create_review
 from app.services import _snapshot, attachment_storage_key
 from app.storage import LocalStorageAdapter
 
@@ -228,6 +236,146 @@ def ensure_measurement(db, experiment: Experiment, name: str, values: list[float
     return measurement
 
 
+def ensure_phase3_demo_cases(
+    db, project: Project, experiments: dict[str, Experiment], measurements: list[Measurement]
+) -> None:
+    """Create the six deterministic, provenance-backed Phase 3 demo cases once."""
+    if not inspect(db.bind).has_table("scientific_analysis_runs"):
+        return
+    settings = get_settings().model_copy(
+        update={"ai_provider": "fixture", "langfuse_enabled": False}
+    )
+    selections = [
+        {"experiment_id": experiment.id, "revision_number": 1}
+        for experiment in experiments.values()
+    ]
+    base_payload = AnalysisRunCreate(
+        experiment_selections=selections,
+        measurement_ids=[item.id for item in measurements],
+        evidence_ids=[],
+        model_profile_key="analysis-default",
+        prompt_version=1,
+    )
+    for index in range(3):
+        marker = f"phase3-demo-v1-{index + 1}"
+        runs = db.scalars(
+            select(ScientificAnalysisRun).where(ScientificAnalysisRun.project_id == project.id)
+        ).all()
+        run = next(
+            (
+                item
+                for item in runs
+                if (item.model_metadata_json or {}).get("demo_fixture_key") == marker
+            ),
+            None,
+        )
+        if run is None:
+            context, _context_hash, _context_size = build_scientific_context(
+                db, project.id, base_payload, settings
+            )
+            fixture_response = FixtureProvider._default_response(context)
+            fixture_response["findings"][0]["suggested_next_experiment"] = {
+                "title": f"Isolated temperature follow-up {index + 1}",
+                "objective": (
+                    "Test the proposed temperature change while holding formulation constant."
+                ),
+                "base_experiment_id": str(experiments["EXP-041"].id),
+                "control_strategy": (
+                    "Hold the base formulation constant and compare against EXP-041."
+                ),
+                "change_operations": [
+                    {
+                        "op": "set",
+                        "path": "/drying_temperature/value",
+                        "value": 70 + index * 5,
+                        "rationale": "Test one controlled process factor.",
+                    }
+                ],
+                "addresses_missing_evidence_codes": [],
+            }
+            run = create_analysis_run(
+                db, project.id, base_payload, settings, fixture_response=fixture_response
+            )
+            run.model_metadata_json = {
+                **(run.model_metadata_json or {}),
+                "demo_fixture_key": marker,
+                "fixture_label": "synthetic demo data",
+            }
+            db.commit()
+        findings = db.scalars(
+            select(Finding).where(Finding.analysis_run_id == run.id).order_by(Finding.ordinal.asc())
+        ).all()
+        if len(findings) < 2:
+            continue
+        reference_finding, bad_finding = findings[0], findings[1]
+        for finding, decision, reason, comment, case_type, tags, expected in (
+            (
+                reference_finding,
+                "accept",
+                None,
+                "Accepted deterministic comparison reference.",
+                "reference_case",
+                ["fixture", "synthetic", "demo", "reference"],
+                {
+                    "required_suggestion_change_paths": [],
+                    "must_distinguish_comparison_from_causality": True,
+                },
+            ),
+            (
+                bad_finding,
+                "reject",
+                ("unsupported_causal_claim", "incorrect_citation", "missed_limitation")[index],
+                "Rejected deterministic regression example.",
+                "bad_case",
+                [
+                    "fixture",
+                    "synthetic",
+                    "demo",
+                    "bad",
+                    ("unsupported-causality", "invented-evidence-id", "missed-isolating-control")[
+                        index
+                    ],
+                ],
+                {"required_limitation_codes": ["confounded_variables"]}
+                if index == 2
+                else {
+                    "must_have_valid_citations": True,
+                    "forbidden_evidence_ids": [
+                        str(uuid.uuid5(uuid.NAMESPACE_URL, "phase3-demo-invented-evidence"))
+                    ],
+                }
+                if index == 1
+                else {
+                    "must_avoid_unsupported_causal_conclusion": True,
+                    "must_distinguish_comparison_from_causality": True,
+                },
+            ),
+        ):
+            latest = db.scalar(
+                select(ReviewDecision)
+                .where(ReviewDecision.finding_id == finding.id)
+                .order_by(ReviewDecision.sequence_number.desc())
+            )
+            if latest is None:
+                latest = create_review(
+                    db,
+                    finding.id,
+                    ReviewDecisionCreate(
+                        decision=decision,
+                        reviewer_name="Demo reviewer",
+                        reason_code=reason,
+                        comment=comment,
+                    ),
+                )
+            create_evaluation_case(
+                db,
+                finding.id,
+                EvaluationCaseCreate(expected_behavior=expected, case_tags=tags),
+                case_type,
+                settings,
+            )
+
+
 def seed() -> None:
     with SessionLocal() as db:
         project = db.scalar(select(Project).where(Project.code == "PRJ-001"))
@@ -307,6 +455,7 @@ def seed() -> None:
             ),
         ]
         by_code: dict[str, Experiment] = {}
+        seeded_measurements: list[Measurement] = []
         for code, title, parent_code, structured_data in records:
             experiment = db.scalar(select(Experiment).where(Experiment.code == code))
             if experiment is None:
@@ -328,11 +477,13 @@ def seed() -> None:
                 experiment.parent_experiment_id = by_code[parent_code].id
         for index, code in enumerate(("EXP-041", "EXP-044", "EXP-045")):
             experiment = by_code[code]
-            ensure_measurement(
-                db,
-                experiment,
-                "Synthetic response",
-                [1.0 + index * 0.2, 1.4 + index * 0.25, 1.9 + index * 0.3, 2.3 + index * 0.35],
+            seeded_measurements.append(
+                ensure_measurement(
+                    db,
+                    experiment,
+                    "Synthetic response",
+                    [1.0 + index * 0.2, 1.4 + index * 0.25, 1.9 + index * 0.3, 2.3 + index * 0.35],
+                )
             )
             ensure_revision(db, experiment, "Seeded demo snapshot")
         literature = db.scalar(
@@ -397,6 +548,8 @@ def seed() -> None:
                     status="active",
                 )
             )
+        db.flush()
+        ensure_phase3_demo_cases(db, project, by_code, seeded_measurements)
         db.commit()
         print("Seeded PRJ-001, materials-formulation-v1, EXP-041, EXP-044, and EXP-045")
 

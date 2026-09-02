@@ -115,13 +115,17 @@ starch amount：
 
 则 Phase 1 不算完整。
 
-## 4. Phase 3 M5–M7 browser checkpoint
+## 4. Phase 3 browser checkpoint
 
-The M5–M7 browser checkpoint is now runnable: select exact revisions and Measurements in Compare,
+The Phase 3 browser checkpoint is runnable: select exact revisions and Measurements in Compare,
 launch FixtureProvider analysis with zero curated EvidenceRecords, inspect frozen provenance and the
 separate confidence/Evidence Gate/Direct Structured Support surfaces, append Accept/Reject/Needs
 Evidence, create controlled Bad/Reference Cases, and run the mixed dataset sequentially. Evaluation
 progress, deterministic metrics, optional judge state, and replay links are visible in Workspace.
-M8 draft-Experiment screens are intentionally not part of this batch.
+After a Finding receives Accept or Needs Evidence, the demo exposes the gated Create Draft Experiment
+action. The existing creation form is prefilled from the validated suggestion; the scientist edits the
+values and explicitly submits a draft. The resulting Experiment detail shows immutable Finding/
+AnalysisRun/review provenance. The deterministic PRJ-001 fixture set is visibly synthetic and contains
+exactly three Reference Cases plus three Bad Cases.
 
 Seed data 可以自动生成，但 Demo 中的编辑和 clone 必须真实持久化。

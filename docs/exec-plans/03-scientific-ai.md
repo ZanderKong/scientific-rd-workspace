@@ -1,8 +1,8 @@
 # Execution Plan 03 — Scientific AI + Evaluation
 
-**Status:** M5–M7 COMPLETE — M8 UNBLOCKED; Milestone 8 and later are not started
+**Status:** M8–M9 COMPLETE — M10 OFFLINE GATES COMPLETE; live LiteLLM smoke pending
 
-**Stable baseline:** Phase 1 and Phase 2 PASS; M1–M4 accepted at `4680dad`; M5–M7 accepted at `6162dc3`
+**Stable baseline:** Phase 1 and Phase 2 PASS; M1–M4 accepted at `4680dad`; M5–M7 accepted at `6162dc3`; final implementation head is recorded in the Phase 3 handoff
 
 **Release target:** `v0.1-demo`
 
@@ -1506,8 +1506,28 @@ The first implementation batch stopped after Milestone 4 as required. It is addi
   pass. The local browser flow was exercised at 1024px and 1280px. GitHub Actions run
   `33587413638` passed the PostgreSQL 17 blank/populated migration, parity, seed idempotency, backend
   tests, frontend gates, and M5–M7 head commit `6162dc3`; parallel Phase 1 regression run
-  `33587413676` also passed. Live provider/Langfuse calls are intentionally not required. M8 gated
-  draft-Experiment, M9 fixtures, and M10 release audit remain outside this batch.
+  `33587413676` also passed. Live provider/Langfuse calls were intentionally not required for that
+  earlier batch.
+
+## M8–M10 final implementation batch
+
+- **M8:** Added the gated `GET /findings/{finding_id}/suggested-experiment-prefill` contract. Only a
+  latest Accept/Needs Evidence review with a valid, hash-checked normalized suggestion can open the
+  prefill. The existing creation form lets the scientist edit title, objective and structured values;
+  submit is explicit and must remain `draft`. The server rechecks review, Finding/AnalysisRun,
+  suggestion hash, exact immutable template version, project and parent identity, then atomically
+  writes `ExperimentProvenanceLink` with suggestion and submitted-value snapshots. Stale inputs return
+  `409`; ordinary creation remains unchanged. Experiment detail renders provenance read-only.
+- **M9:** Extended the PRJ-001 seed with three deterministic fixture/synthetic/demo analysis runs,
+  three accepted Reference Cases and three rejected Bad Cases (unsupported causality, invented Evidence
+  ID regression, and missed isolating control). Source reviews/cases are immutable and idempotent;
+  case tags visibly identify the demo set. Added deterministic metric checks for forbidden Evidence IDs
+  and comparison/causality distinction.
+- **M10:** Consolidated the PostgreSQL 17 workflow as `.github/workflows/phase-3-ci.yml`; it runs blank
+  and populated Phase 2→head migrations, parity, seed twice with 3+3 case assertions, all backend
+  tests, frontend lint/format/typecheck/tests/build, and the one-process/one-worker contract. The
+  offline FixtureProvider/browser audit is complete. A live LiteLLM analysis smoke with configured
+  credentials remains mandatory before release; no `v0.1-demo` tag is permitted before it passes.
 
 # 17. Final v0.1-demo Browser Scenario
 

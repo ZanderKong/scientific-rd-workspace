@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import re
 import uuid
 from typing import Any
@@ -11,14 +13,19 @@ from sqlalchemy.orm import Session, selectinload
 from app.models import (
     Experiment,
     ExperimentLiteratureLink,
+    ExperimentProvenanceLink,
     ExperimentRevision,
     ExperimentTemplate,
+    Finding,
     Measurement,
     Project,
+    ReviewDecision,
 )
 from app.schemas import (
     CloneRequest,
     ExperimentCreate,
+    ExperimentPrefillOut,
+    ExperimentSuggestionOrigin,
     ExperimentUpdate,
     ProjectCreate,
     ProjectUpdate,
@@ -62,17 +69,143 @@ def get_template_or_raise(db: Session, template_id: uuid.UUID) -> ExperimentTemp
     return template
 
 
+def canonical_json_hash(value: Any) -> str:
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _suggestion_prefill_or_raise(
+    db: Session, finding_id: uuid.UUID, origin: ExperimentSuggestionOrigin | None = None
+) -> tuple[Finding, ReviewDecision, dict[str, Any], Experiment]:
+    finding = db.scalar(
+        select(Finding).where(Finding.id == finding_id).options(selectinload(Finding.analysis_run))
+    )
+    if finding is None:
+        raise LookupError("finding not found")
+    latest = db.scalar(
+        select(ReviewDecision)
+        .where(ReviewDecision.finding_id == finding_id)
+        .order_by(ReviewDecision.sequence_number.desc())
+    )
+    if latest is None or latest.decision not in {"accept", "needs_evidence"}:
+        raise ValueError("suggestion_review_not_eligible")
+    suggestion = finding.suggested_next_experiment_json
+    if not suggestion or suggestion.get("validation_status") != "valid":
+        raise ValueError("suggestion_invalid")
+    prefill = suggestion.get("prefill")
+    if not isinstance(prefill, dict):
+        raise ValueError("suggestion_invalid")
+    expected_hash = canonical_json_hash(prefill)
+    if suggestion.get("suggestion_hash") != expected_hash:
+        raise ValueError("suggestion_hash_mismatch")
+    if origin is not None:
+        try:
+            origin_template_id = uuid.UUID(str(prefill["template_id"]))
+            origin_parent_id = uuid.UUID(str(prefill["parent_experiment_id"]))
+            origin_template_version = int(prefill["template_version"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("suggestion_invalid") from exc
+        if (
+            origin.finding_id != finding.id
+            or origin.analysis_run_id != finding.analysis_run_id
+            or origin.enabling_review_decision_id != latest.id
+            or origin.suggestion_hash != expected_hash
+            or origin.template_id != origin_template_id
+            or origin.template_version != origin_template_version
+            or origin.parent_experiment_id != origin_parent_id
+        ):
+            raise ValueError("suggestion_review_changed")
+    try:
+        parent_id = uuid.UUID(str(prefill["parent_experiment_id"]))
+        template_id = uuid.UUID(str(prefill["template_id"]))
+        template_version = int(prefill["template_version"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("suggestion_invalid") from exc
+    parent = db.scalar(
+        select(Experiment)
+        .where(Experiment.id == parent_id)
+        .options(selectinload(Experiment.template))
+    )
+    if parent is None or parent.project_id != finding.project_id:
+        raise ValueError("suggestion_base_experiment_changed")
+    if parent.template_id != template_id or parent.template_version != template_version:
+        raise ValueError("suggestion_template_changed")
+    template = db.get(ExperimentTemplate, template_id)
+    if template is None or not template.is_active or template.version != template_version:
+        raise ValueError("suggestion_template_changed")
+    try:
+        validate_template_data(template.json_schema, prefill["structured_data"])
+    except ValueError as exc:
+        raise ValueError("suggestion_invalid") from exc
+    return finding, latest, prefill, parent
+
+
+def suggested_experiment_prefill(db: Session, finding_id: uuid.UUID) -> ExperimentPrefillOut:
+    finding, latest, prefill, _parent = _suggestion_prefill_or_raise(db, finding_id)
+    return ExperimentPrefillOut(
+        project_id=finding.project_id,
+        finding_id=finding.id,
+        analysis_run_id=finding.analysis_run_id,
+        enabling_review_decision_id=latest.id,
+        review_sequence_number=latest.sequence_number,
+        review_decision=latest.decision,
+        suggestion_hash=canonical_json_hash(prefill),
+        template_id=uuid.UUID(str(prefill["template_id"])),
+        template_version=int(prefill["template_version"]),
+        parent_experiment_id=uuid.UUID(str(prefill["parent_experiment_id"])),
+        title=prefill["title"],
+        objective=prefill["objective"],
+        structured_data=prefill["structured_data"],
+        control_strategy=prefill["control_strategy"],
+        addresses_missing_evidence_codes=prefill.get("addresses_missing_evidence_codes", []),
+        change_operations=prefill.get("change_operations", []),
+    )
+
+
 def create_experiment(db: Session, project: Project, payload: ExperimentCreate) -> Experiment:
     template = get_template_or_raise(db, payload.template_id)
     validate_template_data(template.json_schema, payload.structured_data)
+    origin = payload.suggestion_origin
+    finding = review = prefill = parent = None
+    if origin is not None:
+        if payload.status != "draft":
+            raise ValueError("suggested_experiment_must_be_draft")
+        finding, review, prefill, parent = _suggestion_prefill_or_raise(
+            db, origin.finding_id, origin
+        )
+        if finding.project_id != project.id or payload.template_id != template.id:
+            raise ValueError("suggestion_project_or_template_changed")
     experiment = Experiment(
         code=_next_code(db, Experiment, "EXP"),
         project_id=project.id,
         template_id=template.id,
         template_version=template.version,
-        **payload.model_dump(exclude={"template_id"}),
+        parent_experiment_id=parent.id if parent is not None else None,
+        **payload.model_dump(exclude={"template_id", "suggestion_origin"}),
     )
     db.add(experiment)
+    if origin is not None and finding is not None and review is not None and prefill is not None:
+        db.flush()
+        db.add(
+            ExperimentProvenanceLink(
+                experiment_id=experiment.id,
+                finding_id=finding.id,
+                analysis_run_id=finding.analysis_run_id,
+                enabling_review_decision_id=review.id,
+                suggestion_snapshot_json=copy.deepcopy(finding.suggested_next_experiment_json),
+                submitted_values_snapshot_json={
+                    "title": payload.title,
+                    "objective": payload.objective,
+                    "template_id": str(payload.template_id),
+                    "template_version": template.version,
+                    "status": payload.status,
+                    "structured_data": copy.deepcopy(payload.structured_data),
+                    "note_document": copy.deepcopy(payload.note_document),
+                },
+            )
+        )
     db.commit()
     db.refresh(experiment)
     return experiment

@@ -1,6 +1,8 @@
 import type {
   Attachment,
   Experiment,
+  ExperimentPrefill,
+  ExperimentProvenance,
   ExperimentTemplate,
   JsonObject,
   Project,
@@ -105,6 +107,15 @@ export const api = {
       objective?: string;
       structured_data?: JsonObject;
       note_document?: Array<JsonObject>;
+      suggestion_origin?: {
+        finding_id: string;
+        analysis_run_id: string;
+        enabling_review_decision_id: string;
+        suggestion_hash: string;
+        template_id: string;
+        template_version: number;
+        parent_experiment_id: string;
+      };
     }
   ) =>
     request<Experiment>(`/projects/${projectId}/experiments`, {
@@ -113,6 +124,8 @@ export const api = {
       body: JSON.stringify(payload)
     }),
   getExperiment: (id: string) => request<Experiment>(`/experiments/${id}`),
+  getExperimentProvenance: (id: string) =>
+    request<ExperimentProvenance>(`/experiments/${id}/provenance`),
   updateExperiment: (
     id: string,
     payload: Partial<
@@ -248,6 +261,8 @@ export const api = {
   getAnalysisRun: (id: string) => request<AnalysisRun>(`/analysis-runs/${id}`),
   listFindings: (projectId: string) => request<Finding[]>(`/projects/${projectId}/findings`),
   getFinding: (id: string) => request<Finding>(`/findings/${id}`),
+  getSuggestedExperimentPrefill: (id: string) =>
+    request<ExperimentPrefill>(`/findings/${id}/suggested-experiment-prefill`),
   listReviews: (findingId: string) => request<ReviewDecision[]>(`/findings/${findingId}/reviews`),
   createReview: (
     findingId: string,

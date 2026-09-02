@@ -7,8 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import Experiment, Project
-from app.schemas import CloneRequest, ExperimentCreate, ExperimentOut, ExperimentUpdate
+from app.models import Experiment, ExperimentProvenanceLink, Project
+from app.schemas import (
+    CloneRequest,
+    ExperimentCreate,
+    ExperimentOut,
+    ExperimentProvenanceOut,
+    ExperimentUpdate,
+)
 from app.services import clone_experiment, create_experiment, update_experiment
 
 router = APIRouter(tags=["experiments"])
@@ -52,7 +58,19 @@ def create_experiment_route(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        status_code = (
+            409
+            if str(exc)
+            in {
+                "suggestion_review_changed",
+                "suggestion_hash_mismatch",
+                "suggestion_base_experiment_changed",
+                "suggestion_template_changed",
+                "suggestion_project_or_template_changed",
+            }
+            else 422
+        )
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("/experiments/{experiment_id}", response_model=ExperimentOut)
@@ -61,6 +79,22 @@ def get_experiment(experiment_id: uuid.UUID, db: Session = Depends(get_db)) -> E
     if experiment is None:
         raise HTTPException(status_code=404, detail="experiment not found")
     return experiment
+
+
+@router.get("/experiments/{experiment_id}/provenance", response_model=ExperimentProvenanceOut)
+def get_experiment_provenance(
+    experiment_id: uuid.UUID, db: Session = Depends(get_db)
+) -> ExperimentProvenanceLink:
+    if db.get(Experiment, experiment_id) is None:
+        raise HTTPException(status_code=404, detail="experiment not found")
+    link = db.scalar(
+        select(ExperimentProvenanceLink).where(
+            ExperimentProvenanceLink.experiment_id == experiment_id
+        )
+    )
+    if link is None:
+        raise HTTPException(status_code=404, detail="experiment provenance not found")
+    return link
 
 
 @router.patch("/experiments/{experiment_id}", response_model=ExperimentOut)

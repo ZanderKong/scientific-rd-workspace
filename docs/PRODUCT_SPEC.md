@@ -147,10 +147,14 @@ Experiment 某个可追溯时间点的 snapshot。
 - Benchmark/Regression view
 - final demo polish
 
-当前实现进度：Phase 3 M1–M7 已实现并通过后端/前端回归测试；M8 gated draft Experiment、
-M9/M10 demo/发布审计尚未开始。AI 仅产生冻结上下文上的结构化 Finding
+当前实现进度：Phase 3 M1–M9 已实现并通过本地回归门禁；M10 的 PostgreSQL/前端/离线浏览器
+审计已完成，仍需一次配置凭据的 live LiteLLM smoke 才能发布。AI 仅产生冻结上下文上的结构化 Finding
 与非权威建议，Evidence Gate 由服务端确定性策略计算，不能直接修改 Experiment、Measurement、
 Evidence、Literature、Revision 或 ReviewDecision。
+
+通过 Accept 或 Needs Evidence 的 Finding 才能打开 gated prefilled Experiment creation。科学家可
+检查并编辑所有预填值，显式提交后才创建 `draft` Experiment；服务端重新验证 exact immutable
+template version、review/suggestion hash 与 parent lineage，并原子写入 `ExperimentProvenanceLink`。
 
 ## 6. Phase 1 P0 User Stories
 

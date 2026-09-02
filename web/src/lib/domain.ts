@@ -41,6 +41,36 @@ export interface Experiment {
   updated_at: string;
 }
 
+export interface ExperimentPrefill {
+  project_id: string;
+  finding_id: string;
+  analysis_run_id: string;
+  enabling_review_decision_id: string;
+  review_sequence_number: number;
+  review_decision: 'accept' | 'needs_evidence';
+  suggestion_hash: string;
+  template_id: string;
+  template_version: number;
+  parent_experiment_id: string;
+  title: string;
+  objective: string;
+  structured_data: JsonObject;
+  control_strategy: string;
+  addresses_missing_evidence_codes: string[];
+  change_operations: Array<JsonObject>;
+}
+
+export interface ExperimentProvenance {
+  experiment_id: string;
+  finding_id: string;
+  analysis_run_id: string;
+  enabling_review_decision_id: string;
+  relation_type: string;
+  suggestion_snapshot_json: JsonObject;
+  submitted_values_snapshot_json: JsonObject;
+  created_at: string;
+}
+
 export interface Attachment {
   id: string;
   experiment_id: string;

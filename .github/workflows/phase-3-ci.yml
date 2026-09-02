@@ -1,4 +1,4 @@
-name: Phase 2 Scientific Workflow CI
+name: Phase 3 Scientific AI CI
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
         run: uv run alembic upgrade head
       - name: Verify migration/model parity
         run: uv run alembic check
-      - name: Verify populated Phase 2 upgrade to Phase 3 M7 head
+      - name: Verify populated Phase 2 upgrade to Phase 3 head
         env:
           PHASE2_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd_phase2
         run: |
@@ -100,19 +100,21 @@ jobs:
         run: |
           uv run ruff check app tests
           uv run ruff format --check app tests
-      - name: Verify idempotent Phase 2 seed
+      - name: Verify idempotent Phase 3 demo seed
         run: |
           uv run python -m app.seed
           uv run python -m app.seed
           uv run python - <<'PY'
           from sqlalchemy import func, select
           from app.db import SessionLocal
-          from app.models import EvidenceRecord, LiteratureRecord, Measurement, MeasurementImport
+          from app.models import EvidenceRecord, EvaluationCase, LiteratureRecord, Measurement, MeasurementImport
           with SessionLocal() as db:
               assert db.scalar(select(func.count()).select_from(Measurement)) == 3
               assert db.scalar(select(func.count()).select_from(MeasurementImport)) == 3
               assert db.scalar(select(func.count()).select_from(LiteratureRecord)) == 1
               assert db.scalar(select(func.count()).select_from(EvidenceRecord)) == 1
+              assert db.scalar(select(func.count()).select_from(EvaluationCase).where(EvaluationCase.case_type == "reference_case")) == 3
+              assert db.scalar(select(func.count()).select_from(EvaluationCase).where(EvaluationCase.case_type == "bad_case")) == 3
           PY
       - name: Run backend tests against PostgreSQL
         run: uv run pytest

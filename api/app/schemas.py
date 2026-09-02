@@ -66,6 +66,7 @@ class ExperimentCreate(BaseModel):
     objective: str | None = Field(default=None, max_length=10000)
     structured_data: dict[str, Any] = Field(default_factory=dict)
     note_document: list[dict[str, Any]] = Field(default_factory=list)
+    suggestion_origin: ExperimentSuggestionOrigin | None = None
 
     _title = field_validator("title")(non_blank)
 
@@ -96,6 +97,50 @@ class ExperimentOut(BaseModel):
     note_document: list[dict[str, Any]]
     created_at: datetime
     updated_at: datetime
+
+
+class ExperimentSuggestionOrigin(BaseModel):
+    """Immutable client echo of the gated Finding suggestion being submitted."""
+
+    finding_id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    enabling_review_decision_id: uuid.UUID
+    suggestion_hash: str = Field(min_length=64, max_length=64)
+    template_id: uuid.UUID
+    template_version: int = Field(ge=1)
+    parent_experiment_id: uuid.UUID
+
+
+class ExperimentPrefillOut(BaseModel):
+    project_id: uuid.UUID
+    finding_id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    enabling_review_decision_id: uuid.UUID
+    review_sequence_number: int
+    review_decision: Literal["accept", "needs_evidence"]
+    suggestion_hash: str
+    template_id: uuid.UUID
+    template_version: int
+    parent_experiment_id: uuid.UUID
+    title: str
+    objective: str
+    structured_data: dict[str, Any]
+    control_strategy: str
+    addresses_missing_evidence_codes: list[str]
+    change_operations: list[dict[str, Any]]
+
+
+class ExperimentProvenanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    experiment_id: uuid.UUID
+    finding_id: uuid.UUID
+    analysis_run_id: uuid.UUID
+    enabling_review_decision_id: uuid.UUID
+    relation_type: str
+    suggestion_snapshot_json: dict[str, Any]
+    submitted_values_snapshot_json: dict[str, Any]
+    created_at: datetime
 
 
 class CloneRequest(BaseModel):
@@ -869,3 +914,4 @@ class EvaluationRunOut(BaseModel):
 
 
 ImportCommitMapping.model_rebuild()
+ExperimentCreate.model_rebuild()

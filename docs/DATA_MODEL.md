@@ -235,7 +235,13 @@ Accept、Reject、Needs Evidence 的 append-only、有序人工评审。后续�
 M6–M7 additionally implement immutable `EvaluationCase` (bad/reference), `EvaluationRun`,
 `EvaluationResult`, deterministic metric snapshots, and optional judge/Langfuse projection. Evaluation
 execution is sequential inside one API process/worker; PostgreSQL stores status but is not a queue.
-`ExperimentProvenanceLink` remains reserved for M8 and is not created by Evaluation.
+
+M8 uses `ExperimentProvenanceLink` only for a human-submitted gated suggestion. Its immutable link
+stores the source Finding, AnalysisRun, enabling ReviewDecision, normalized suggestion hash/snapshot,
+and the submitted values. The linked Experiment is always `draft`, uses the exact immutable template
+version and normal parent lineage, and cannot be created when the review or suggestion has changed.
+The PRJ-001 deterministic demo set is three Reference Cases plus three Bad Cases, all carrying
+fixture/synthetic/demo tags and immutable review provenance.
 
 ## 6. Experiment Template Seed
 

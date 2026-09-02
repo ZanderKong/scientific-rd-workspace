@@ -132,7 +132,15 @@ Measurement comparisons, structured Experiment differences, and immutable Revisi
 it can support descriptive/comparative claims but never proves causality. Curated EvidenceRecords
 remain an explicit, project-scoped selection. The model cannot write Experiments or other scientific
 records. M5 Analysis/Review and M6–M7 Evaluation capabilities are implemented with a single
-in-process worker boundary; M8 gated draft Experiment remains deferred.
+in-process worker boundary. After an eligible Finding review, M8 exposes a read-only suggested-
+experiment prefill. The scientist must edit and explicitly submit through the normal Experiment
+template validation path; the AI never creates an Experiment directly. The submit transaction creates
+a draft Experiment, preserves normal parent lineage, and writes one immutable
+`ExperimentProvenanceLink` containing Finding, AnalysisRun, enabling ReviewDecision, suggestion hash/
+snapshot and submitted values. Stale review, suggestion hash or template identity returns `409`
+without creating either record. The deterministic PRJ-001 seed contains exactly three fixture/synthetic
+Reference Cases and three Bad Cases with immutable review provenance. Evaluation remains sequential in
+one API process/worker; multi-worker deployment is unsupported.
 
 ## 5. Data Storage
 

@@ -16,6 +16,7 @@ from app.schemas import (
     AnalysisRunCreate,
     AnalysisRunOut,
     EvidenceGateStatus,
+    ExperimentPrefillOut,
     FindingClaimType,
     FindingOut,
     ModelProfileOut,
@@ -32,6 +33,7 @@ from app.scientific_ai_service import (
     finding_out,
     list_profiles,
 )
+from app.services import suggested_experiment_prefill
 
 router = APIRouter(tags=["scientific-analysis"])
 
@@ -178,6 +180,21 @@ def get_finding(finding_id: uuid.UUID, db: Session = Depends(get_db)) -> Finding
     if finding is None:
         raise HTTPException(status_code=404, detail="finding not found")
     return finding_out(finding)
+
+
+@router.get(
+    "/findings/{finding_id}/suggested-experiment-prefill",
+    response_model=ExperimentPrefillOut,
+)
+def get_suggested_experiment_prefill(
+    finding_id: uuid.UUID, db: Session = Depends(get_db)
+) -> ExperimentPrefillOut:
+    try:
+        return suggested_experiment_prefill(db, finding_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/findings/{finding_id}/reviews", response_model=list[ReviewDecisionOut])

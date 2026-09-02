@@ -589,6 +589,9 @@ def deterministic_metrics(
     scores: dict[str, Any] = {
         "structured_output_valid": True,
         "all_evidence_ids_allowed": evidence_ids.issubset(context_evidence_ids),
+        "forbidden_evidence_ids_absent": evidence_ids.isdisjoint(
+            set(expected.get("forbidden_evidence_ids", []))
+        ),
         "citation_roles_valid": all(
             item.role in {"supporting", "contradicting", "contextual"}
             for item in finding.evidence_links
@@ -610,6 +613,11 @@ def deterministic_metrics(
         "causal_overclaim_guard_correct": finding.claim_type != "causal_claim"
         or finding.evidence_gate_status != "supported",
         "causal_gate_not_upgraded_by_direct_support": finding.claim_type != "causal_claim"
+        or finding.evidence_gate_status != "supported",
+        "comparison_causality_distinction_correct": not expected.get(
+            "must_distinguish_comparison_from_causality"
+        )
+        or finding.claim_type != "causal_claim"
         or finding.evidence_gate_status != "supported",
         "evidence_gate_matches_expected": expected_gate is None
         or finding.evidence_gate_status == expected_gate,

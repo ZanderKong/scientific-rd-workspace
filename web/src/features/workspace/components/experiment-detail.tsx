@@ -13,6 +13,7 @@ import type {
   Attachment,
   Experiment,
   ExperimentTemplate,
+  ExperimentProvenance,
   JsonObject,
   Revision
 } from '@/lib/domain';
@@ -46,6 +47,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
   const [template, setTemplate] = useState<ExperimentTemplate | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [revisions, setRevisions] = useState<Revision[]>([]);
+  const [provenance, setProvenance] = useState<ExperimentProvenance | null>(null);
   const [tab, setTab] = useState<
     'overview' | 'record' | 'files' | 'data' | 'literature' | 'revisions'
   >('overview');
@@ -78,6 +80,11 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
       setTemplate(t);
       setAttachments(a);
       setRevisions(r);
+      try {
+        setProvenance(await api.getExperimentProvenance(item.id));
+      } catch {
+        setProvenance(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load experiment.');
     }
@@ -269,6 +276,35 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
               </Button>
             </CardContent>
           </Card>
+          {provenance && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Creation provenance</CardTitle>
+              </CardHeader>
+              <CardContent className='grid gap-2 text-sm'>
+                <p>
+                  Gated suggestion from Finding <code>{provenance.finding_id}</code> · Analysis Run{' '}
+                  <code>{provenance.analysis_run_id}</code>
+                </p>
+                <p>
+                  Enabling review decision <code>{provenance.enabling_review_decision_id}</code>
+                </p>
+                <details className='rounded border p-3 text-xs'>
+                  <summary className='cursor-pointer font-medium'>Inspect immutable snapshots</summary>
+                  <pre className='mt-2 max-h-72 overflow-auto'>
+                    {JSON.stringify(
+                      {
+                        suggestion: provenance.suggestion_snapshot_json,
+                        submitted_values: provenance.submitted_values_snapshot_json
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                </details>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Structured properties</CardTitle>

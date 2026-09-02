@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,7 +30,16 @@ const safeBadCaseReasonCodes = new Set([
   'incorrect_experiment_comparison'
 ]);
 
-function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: () => void }) {
+function FindingCard({
+  finding,
+  projectId,
+  onReviewed
+}: {
+  finding: Finding;
+  projectId: string;
+  onReviewed: () => void;
+}) {
+  const router = useRouter();
   const [reviewer, setReviewer] = useState('R&D Scientist');
   const [comment, setComment] = useState('');
   const [reason, setReason] = useState('');
@@ -258,6 +268,21 @@ function FindingCard({ finding, onReviewed }: { finding: Finding; onReviewed: ()
                 {caseFormOpen ? 'Close Bad Case form' : 'Create Bad Case'}
               </Button>
             )}
+            {finding.suggested_next_experiment_json &&
+              (latestReview?.decision === 'accept' || latestReview?.decision === 'needs_evidence') &&
+              finding.suggested_next_experiment_json.validation_status === 'valid' && (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  onClick={() =>
+                    router.push(
+                      `/dashboard/projects/${projectId}/experiments/new?finding_id=${finding.id}`
+                    )
+                  }
+                >
+                  Create Draft Experiment
+                </Button>
+              )}
             {finding.review_status === 'accepted' && (
               <Button
                 size='sm'
@@ -408,7 +433,12 @@ export function AnalysisDetail({ analysisRunId }: { analysisRunId: string }) {
       </Card>
       <div className='grid gap-6'>
         {run.findings.map((finding) => (
-          <FindingCard key={finding.id} finding={finding} onReviewed={() => void load()} />
+          <FindingCard
+            key={finding.id}
+            finding={finding}
+            projectId={run.project_id}
+            onReviewed={() => void load()}
+          />
         ))}
       </div>
     </div>

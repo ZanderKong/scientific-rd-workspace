@@ -7,7 +7,7 @@
 - Accepted source commit: `939bf82`; implementation commit: `b916292`.
 - PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
 - Phase 3 Milestones 1–7 are implemented from the approved plan; work stops before Milestone 8.
-  Current verdict: **M5–M7 ACCEPTED — M8 UNBLOCKED**. This is not an overall Phase 3
+  Current verdict: **M8–M9 COMPLETE — M10 live LiteLLM smoke pending**. This is not an overall Phase 3
   PASS or release closeout. PostgreSQL 17 evidence is GitHub Actions run `33587413638` on
   commit `6162dc3`. See
   [Phase 3 交接报告](PHASE_3_HANDOFF.md).
@@ -71,4 +71,6 @@ cd ../web && npm install && npm run dev
 
 ## 交接建议
 
-Phase 1 与 Phase 2 均已正式关闭并通过 PostgreSQL 17 CI。当前 Phase 3 批次必须保持现有不可变模板、revision 和 provenance 保证，并在 M7 后停止；M8 及后续里程碑需单独验收。
+Phase 1 与 Phase 2 均已正式关闭并通过 PostgreSQL 17 CI。Phase 3 M8–M9 已完成 gated draft
+Experiment provenance 与确定性六案例演示；M10 离线门禁完成，但 live LiteLLM smoke 仍是发布前
+必要条件。单进程/单 worker、immutable template/revision/provenance 保证继续有效。

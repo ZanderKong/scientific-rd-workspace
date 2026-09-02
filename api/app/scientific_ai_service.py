@@ -234,7 +234,7 @@ def _normalize_suggestion(
         "objective": suggestion.objective,
         "template_id": base["experiment_snapshot"].get("template_id"),
         "template_version": base["experiment_snapshot"].get("template_version"),
-        "parent_experiment_id": suggestion.base_experiment_id,
+        "parent_experiment_id": str(suggestion.base_experiment_id),
         "structured_data": structured,
         "control_strategy": suggestion.control_strategy,
         "addresses_missing_evidence_codes": suggestion.addresses_missing_evidence_codes,

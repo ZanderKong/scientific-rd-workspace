@@ -22,8 +22,8 @@
 
 ## 当前目标
 
-Phase 1 和 Phase 2 已关闭。当前执行批次是 **Phase 3 — Scientific AI，Milestones 5–7**；完成
-M7 后必须停止，不得开始 M8/draft-Experiment 里程碑。Phase 1/2 的 immutable
+Phase 1 和 Phase 2 已关闭。Phase 3 M1–M9 已实现，当前只允许完成 M10 的最终审计与 live
+LiteLLM smoke；在该 smoke 通过前不得创建 `v0.1-demo` 标签或宣称 Phase 3 PASS。Phase 1/2 的 immutable
 template、Revision、Measurement/import、Literature/Evidence 及存储契约保持不变。
 
 Phase 1 目标用户路径：
@@ -89,6 +89,13 @@ Phase 1 目标用户路径：
 - Revision 保存的是可追溯 snapshot，不覆盖历史 revision。
 - Experiment clone 创建新实体，并记录 `parent_experiment_id`，不得复制原 ID 或 revision history。
 - Phase 1 中 Project 和 Experiment 是一级业务实体。
+
+Phase 3 M8 adds a gated `suggested-experiment-prefill` route and immutable
+`ExperimentProvenanceLink`; AI suggestions remain non-authoritative and explicit human submit is
+required. The deterministic demo seed creates exactly three Reference and three Bad Cases for
+PRJ-001, visibly tagged fixture/synthetic/demo. Evaluation and local demo deployment support one API
+process and one worker only (`uvicorn ... --workers 1`); multi-worker coordination is unsupported.
+Do not report Phase 3 PASS or create `v0.1-demo` until the required live LiteLLM smoke is verified.
 
 ## 代码风格
 

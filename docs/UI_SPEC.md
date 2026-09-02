@@ -224,7 +224,11 @@ explicit revision/Measurement/Literature/Evidence selection. Finding cards keep 
 authoritative Evidence Gate, Direct Structured Support, Curated Evidence, limitations, risks, and
 review history visually separate. Evaluation screens distinguish Bad Case/Reference Case, deterministic
 scores, optional judge scores, progress, cancellation, errors, and source/replay links. The supported
-v0.1 runner is one API process with one worker; multi-worker execution is unsupported.
+v0.1 runner is one API process with one worker; multi-worker execution is unsupported. After Accept or
+Needs Evidence, a valid Finding suggestion exposes `Create Draft Experiment`, which opens the existing
+creation form with editable title, objective and structured JSON fields. The submit action is explicit;
+the Experiment detail then shows immutable Finding/AnalysisRun/review provenance. PRJ-001 fixture
+cases carry visible fixture/synthetic/demo labels and are split into Reference and Bad filters.
 
 ## 12. Demo Polish
 

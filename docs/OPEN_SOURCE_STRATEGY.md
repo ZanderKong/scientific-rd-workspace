@@ -91,7 +91,7 @@ MIT。
 
 ## 5. LiteLLM
 
-Phase 3 M1–M7 embeds the LiteLLM Python SDK behind the Workspace `AIProvider` interface. The
+Phase 3 M1–M9 embeds the LiteLLM Python SDK behind the Workspace `AIProvider` interface. The
 LiteLLM Gateway/Proxy service is deliberately not included. Exact dependency versions are verified
 at implementation time and locked in `api/uv.lock`; provider credentials remain server-side.
 
@@ -103,7 +103,7 @@ MIT (SDK; transitive licenses remain in lockfiles).
 
 ## 6. Langfuse
 
-Phase 3 M1–M7 optionally projects traces, evaluation dataset items and scores; it is disabled by
+Phase 3 M1–M9 optionally projects traces, evaluation dataset items and scores; it is disabled by
 default and never authoritative.
 
 用途：
