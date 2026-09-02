@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -10,12 +11,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api-client';
 import type { ExperimentPrefill, ExperimentTemplate, JsonObject } from '@/lib/domain';
-import { BackLink, PageHeader } from './shared';
+import { BackLink, PageHeader, StatusBadge } from './shared';
 
 export function ExperimentCreate({ projectId }: { projectId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const findingId = searchParams.get('finding_id');
+  const t = useTranslations('Experiments');
+  const statusT = useTranslations('Status');
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
@@ -49,7 +52,7 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
       try {
         structured_data = JSON.parse(structuredText) as JsonObject;
       } catch {
-        throw new Error('Structured properties must be valid JSON.');
+        throw new Error(t('invalidJson'));
       }
       const created = await api.createExperiment(projectId, {
         title,
@@ -73,50 +76,47 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
       });
       router.push(`/dashboard/experiments/${created.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create experiment.');
+      setError(err instanceof Error ? err.message : t('errorCreate'));
     } finally {
       setBusy(false);
     }
   }
   return (
     <div className='flex flex-1 flex-col px-4 pt-3 pb-8 md:px-6'>
-      <BackLink href={`/dashboard/projects/${projectId}`} children='Project' />
+      <BackLink href={`/dashboard/projects/${projectId}`} children={t('project')} />
       <PageHeader
-        title='New experiment'
-        description={
-          prefill
-            ? 'Review the gated suggestion, edit every value, then explicitly submit a draft experiment.'
-            : 'Start with a template, then refine the record in the experiment workspace.'
-        }
+        title={t('new')}
+        description={prefill ? t('descriptionPrefill') : t('descriptionNew')}
       />
       <Card className='max-w-2xl'>
         <CardHeader>
-          <CardTitle>Experiment metadata</CardTitle>
+          <CardTitle>{t('metadata')}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className='grid gap-4'>
             <div className='grid gap-2'>
-              <Label htmlFor='experiment-title'>Title</Label>
+              <Label htmlFor='experiment-title'>{t('titleLabel')}</Label>
               <Input
                 id='experiment-title'
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder='e.g. 2% PVA film, 80°C dry'
+                placeholder={t('titlePlaceholder')}
               />
             </div>
             {prefill && (
               <div className='rounded-lg border border-dashed p-3 text-sm'>
-                <p className='font-medium'>Gated suggestion prefill</p>
+                <p className='font-medium'>{t('gatedSuggestion')}</p>
                 <p className='text-muted-foreground'>
-                  Human review #{prefill.review_sequence_number} ({prefill.review_decision}) ·{' '}
-                  parent experiment {prefill.parent_experiment_id}
+                  {t('enablingReview')} #{prefill.review_sequence_number}{' '}
+                  <StatusBadge status={prefill.review_decision} /> · {t('parentOrigin')}{' '}
+                  {prefill.parent_experiment_id}
                 </p>
                 <p className='mt-1 text-muted-foreground'>{prefill.control_strategy}</p>
               </div>
             )}
             <div className='grid gap-2'>
-              <Label htmlFor='experiment-template'>Template</Label>
+              <Label htmlFor='experiment-template'>{t('template')}</Label>
               <select
                 id='experiment-template'
                 required
@@ -132,7 +132,7 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
               </select>
             </div>
             <div className='grid gap-2'>
-              <Label htmlFor='experiment-structured-data'>Structured properties (JSON)</Label>
+              <Label htmlFor='experiment-structured-data'>{t('structuredData')}</Label>
               <Textarea
                 id='experiment-structured-data'
                 value={structuredText}
@@ -141,30 +141,30 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
               />
             </div>
             <div className='grid gap-2'>
-              <Label htmlFor='experiment-status'>Status</Label>
+              <Label htmlFor='experiment-status'>{t('statusLabel')}</Label>
               <select
                 id='experiment-status'
                 className='h-8 rounded-lg border border-input bg-background px-2 text-sm'
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
-                <option value='draft'>Draft</option>
-                <option value='planned'>Planned</option>
-                <option value='running'>Running</option>
+                <option value='draft'>{statusT('draft')}</option>
+                <option value='planned'>{statusT('planned')}</option>
+                <option value='running'>{statusT('running')}</option>
               </select>
             </div>
             <div className='grid gap-2'>
-              <Label htmlFor='experiment-objective'>Objective</Label>
+              <Label htmlFor='experiment-objective'>{t('objective')}</Label>
               <Textarea
                 id='experiment-objective'
                 value={objective}
                 onChange={(e) => setObjective(e.target.value)}
-                placeholder='What are you testing?'
+                placeholder={t('objectivePlaceholder')}
               />
             </div>
             {error && <p className='text-sm text-destructive'>{error}</p>}
             <Button type='submit' disabled={busy || !templateId}>
-              {busy ? 'Creating…' : 'Create experiment'}
+              {busy ? t('saving') : t('create')}
             </Button>
           </form>
         </CardContent>

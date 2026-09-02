@@ -8,8 +8,11 @@ import { api } from '@/lib/api-client';
 import type { Project } from '@/lib/domain';
 import { ButtonLink, PageHeader, PageState, StatusBadge } from './shared';
 import { ProjectForm } from './project-form';
+import { useTranslations } from 'next-intl';
 
 export function ProjectList() {
+  const t = useTranslations('Projects');
+  const statusT = useTranslations('Status');
   const [projects, setProjects] = useState<Project[]>([]);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
@@ -35,19 +38,19 @@ export function ProjectList() {
   return (
     <div className='flex flex-1 flex-col px-4 pt-4 pb-8 md:px-6'>
       <PageHeader
-        title='Projects'
-        description='Organize experiments into durable research programs.'
+        title={t('title')}
+        description={t('description')}
         action={
           <Button onClick={() => setShowForm((value) => !value)}>
-            {showForm ? 'Close' : 'New project'}
+            {showForm ? t('close') : t('newProject')}
           </Button>
         }
       />
       {showForm && (
         <Card className='mb-6'>
           <CardHeader>
-            <CardTitle>New project</CardTitle>
-            <CardDescription>Create a durable container for experiments.</CardDescription>
+            <CardTitle>{t('newProject')}</CardTitle>
+            <CardDescription>{t('createDescription')}</CardDescription>
           </CardHeader>
           <CardContent>
             <ProjectForm
@@ -65,34 +68,30 @@ export function ProjectList() {
           className='max-w-sm'
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder='Search projects…'
-          aria-label='Search projects'
+          placeholder={t('searchPlaceholder')}
+          aria-label={t('searchAria')}
         />
         <select
           className='h-8 rounded-lg border border-input bg-background px-2 text-sm'
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          aria-label='Filter project status'
+          aria-label={t('filterStatus')}
         >
-          <option value='all'>All statuses</option>
-          <option value='active'>Active</option>
-          <option value='paused'>Paused</option>
-          <option value='completed'>Completed</option>
-          <option value='archived'>Archived</option>
+          <option value='all'>{t('allStatuses')}</option>
+          <option value='active'>{statusT('active')}</option>
+          <option value='paused'>{statusT('paused')}</option>
+          <option value='completed'>{statusT('completed')}</option>
+          <option value='archived'>{statusT('archived')}</option>
         </select>
       </div>
       {loading || error ? (
         <PageState loading={loading} error={error} />
       ) : filtered.length === 0 ? (
         <PageState
-          empty={
-            projects.length === 0
-              ? 'No projects yet. Create the first research project.'
-              : 'No projects match these filters.'
-          }
+          empty={projects.length === 0 ? t('noProjects') : t('noMatch')}
           action={
             projects.length === 0 ? (
-              <Button onClick={() => setShowForm(true)}>Create project</Button>
+              <Button onClick={() => setShowForm(true)}>{t('createFirst')}</Button>
             ) : undefined
           }
         />
@@ -111,16 +110,16 @@ export function ProjectList() {
               </CardHeader>
               <CardContent>
                 <p className='line-clamp-2 min-h-10 text-sm text-muted-foreground'>
-                  {project.description || 'No description yet.'}
+                  {project.description || t('descriptionPlaceholder')}
                 </p>
                 <div className='mt-4 flex items-center justify-between text-xs text-muted-foreground'>
-                  <span>{project.experiment_count} experiments</span>
+                  <span>{t('experimentsCount', { count: project.experiment_count })}</span>
                   <ButtonLink
                     href={`/dashboard/projects/${project.id}`}
                     variant='outline'
                     size='sm'
                   >
-                    Open project
+                    {t('open')}
                   </ButtonLink>
                 </div>
               </CardContent>

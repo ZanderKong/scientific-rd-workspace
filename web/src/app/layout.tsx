@@ -8,6 +8,9 @@ import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import NextTopLoader from 'nextjs-toploader';
 import { NuqsAdapter } from 'nuqs/adapters/next/app';
+import { getLocale, getMessages, getTranslations } from 'next-intl/server';
+import { NextIntlClientProvider } from 'next-intl';
+import { parseLocale } from '@/i18n/config';
 import '../styles/globals.css';
 import '@blocknote/shadcn/style.css';
 
@@ -16,38 +19,26 @@ const META_THEME_COLORS = {
   dark: '#09090b'
 };
 
-export const metadata: Metadata = {
-  ...(process.env.NEXT_PUBLIC_APP_URL
-    ? { metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL) }
-    : {}),
-  title: {
-    default: 'Scientific R&D Workspace',
-    template: '%s | Scientific R&D Workspace'
-  },
-  description: 'A persistent workspace for structured experiments and traceable research records.',
-  openGraph: {
-    title: 'Scientific R&D Workspace',
-    description:
-      'A persistent workspace for structured experiments and traceable research records.',
-    siteName: 'Scientific R&D Workspace',
-    type: 'website',
-    images: [
-      {
-        url: '/shadcn-dashboard.png',
-        width: 3200,
-        height: 1600,
-        alt: 'Scientific R&D Workspace overview'
-      }
-    ]
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Scientific R&D Workspace',
-    description:
-      'A persistent workspace for structured experiments and traceable research records.',
-    images: ['/shadcn-dashboard.png']
-  }
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('Metadata');
+  const title = t('title');
+  const description = t('description');
+  return {
+    ...(process.env.NEXT_PUBLIC_APP_URL
+      ? { metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL) }
+      : {}),
+    title: { default: title, template: `%s | ${title}` },
+    description,
+    openGraph: {
+      title,
+      description,
+      siteName: title,
+      type: 'website',
+      images: [{ url: '/shadcn-dashboard.png', width: 3200, height: 1600, alt: t('imageAlt') }]
+    },
+    twitter: { card: 'summary_large_image', title, description, images: ['/shadcn-dashboard.png'] }
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: META_THEME_COLORS.light
@@ -58,9 +49,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const activeThemeValue = cookieStore.get('active_theme')?.value;
   const isValidTheme = THEMES.some((t) => t.value === activeThemeValue);
   const themeToApply = isValidTheme ? activeThemeValue! : DEFAULT_THEME;
+  const locale = parseLocale(await getLocale());
+  const messages = await getMessages();
 
   return (
-    <html lang='en' suppressHydrationWarning data-theme={themeToApply}>
+    <html lang={locale} suppressHydrationWarning data-theme={themeToApply}>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -90,10 +83,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             disableTransitionOnChange
             enableColorScheme
           >
-            <Providers activeThemeValue={themeToApply}>
-              <Toaster />
-              {children}
-            </Providers>
+            <NextIntlClientProvider locale={locale} messages={messages}>
+              <Providers activeThemeValue={themeToApply}>
+                <Toaster />
+                {children}
+              </Providers>
+            </NextIntlClientProvider>
           </ThemeProvider>
         </NuqsAdapter>
       </body>

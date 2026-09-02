@@ -5,8 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api-client';
 import type { Experiment, Literature, LiteratureLink } from '@/lib/domain';
+import { useTranslations } from 'next-intl';
 
 export function ExperimentLiterature({ experiment }: { experiment: Experiment }) {
+  const t = useTranslations('Literature');
   const [literature, setLiterature] = useState<Literature[]>([]);
   const [links, setLinks] = useState<LiteratureLink[]>([]);
   const [literatureId, setLiteratureId] = useState('');
@@ -21,10 +23,8 @@ export function ExperimentLiterature({ experiment }: { experiment: Experiment })
     setLinks(linked);
   }, [experiment.id, experiment.project_id]);
   useEffect(() => {
-    void load().catch((e) =>
-      setError(e instanceof Error ? e.message : 'Unable to load literature links.')
-    );
-  }, [load]);
+    void load().catch((e) => setError(e instanceof Error ? e.message : t('noLiterature')));
+  }, [load, t]);
   async function link() {
     if (!literatureId) return;
     try {
@@ -35,13 +35,13 @@ export function ExperimentLiterature({ experiment }: { experiment: Experiment })
       setLiteratureId('');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to link literature.');
+      setError(e instanceof Error ? e.message : t('noLiterature'));
     }
   }
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Literature links</CardTitle>
+        <CardTitle>{t('links')}</CardTitle>
       </CardHeader>
       <CardContent className='grid gap-4'>
         <div className='flex flex-wrap gap-2'>
@@ -50,7 +50,7 @@ export function ExperimentLiterature({ experiment }: { experiment: Experiment })
             value={literatureId}
             onChange={(e) => setLiteratureId(e.target.value)}
           >
-            <option value=''>Choose a literature record</option>
+            <option value=''>{t('chooseRecord')}</option>
             {literature.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.title}
@@ -62,14 +62,14 @@ export function ExperimentLiterature({ experiment }: { experiment: Experiment })
             value={relationship}
             onChange={(e) => setRelationship(e.target.value)}
           >
-            <option value='background'>Background</option>
-            <option value='method'>Method</option>
-            <option value='comparison'>Comparison</option>
-            <option value='supporting'>Supporting</option>
-            <option value='contradicting'>Contradicting</option>
+            <option value='background'>{t('background')}</option>
+            <option value='method'>{t('method')}</option>
+            <option value='comparison'>{t('comparison')}</option>
+            <option value='supporting'>{t('supporting')}</option>
+            <option value='contradicting'>{t('contradicting')}</option>
           </select>
           <Button onClick={link} disabled={!literatureId}>
-            Link
+            {t('link')}
           </Button>
         </div>
         {error ? <p className='text-sm text-destructive'>{error}</p> : null}
@@ -83,7 +83,7 @@ export function ExperimentLiterature({ experiment }: { experiment: Experiment })
             ))}
           </div>
         ) : (
-          <p className='text-sm text-muted-foreground'>No linked literature.</p>
+          <p className='text-sm text-muted-foreground'>{t('noLinked')}</p>
         )}
       </CardContent>
     </Card>

@@ -44,6 +44,8 @@ Phase 2 已完成并通过：
 
 Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在提交 `939bf82` 上通过；详情见 `docs/handoff/PHASE_2_HANDOFF.md`。Phase 3 M1–M10 已完成，外部 DeepSeek LiteLLM `json_object` smoke 已通过，发布标签为 `v0.1-demo`。当前确切状态与验证证据见 `docs/handoff/PHASE_3_HANDOFF.md`。
 
+当前 UI Plan 1 已完成：中文 `zh-CN` 为默认 locale，英文 `en` 可切换；locale 通过 first-party cookie 持久化，不改变 URL。UI direction、catalog contract、验收边界与交付证据见 `docs/UI_SPEC.md` 和 `docs/handoff/UI_I18N_PLAN_1_HANDOFF.md`。本批次在 Plan 1 停止，不进入 Plan 2。
+
 ## 阶段执行记录
 
 1. Phase 1 按 `docs/exec-plans/01-foundation-eln.md` 完成并关闭。
@@ -74,6 +76,7 @@ Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在
 - Kiranism `next-shadcn-dashboard-starter` 作为主壳
 - JSON Forms 用于结构化实验字段
 - BlockNote 用于实验富文本记录
+- `next-intl` 用于中文优先的 UI 国际化（无 URL locale prefix）
 
 后端：
 - Python
@@ -126,7 +129,7 @@ Quality checks:
 
 ```bash
 cd api && uv run pytest
-cd web && npm run test && npm run lint && npm run typecheck && npm run build
+cd web && npm run test && npm run lint && npm run typecheck && npm run build && npm run format:check
 ```
 
 The API persists PostgreSQL records through SQLAlchemy/Alembic and attachment bytes through the local adapter at `data/uploads` (configurable with `STORAGE_ROOT`). `NEXT_PUBLIC_API_URL` can point the web client at another API base, defaulting to `http://localhost:8000/api/v1`.

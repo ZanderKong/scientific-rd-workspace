@@ -25,6 +25,9 @@ import {
 } from '@/components/ui/table';
 import { ChartContainer } from '@/components/ui/chart';
 import { ApiError, api } from '@/lib/api-client';
+import { useLocale, useTranslations } from 'next-intl';
+import { parseLocale } from '@/i18n/config';
+import { formatNumber } from './shared';
 import type {
   Attachment,
   Experiment,
@@ -42,6 +45,8 @@ export function MeasurementData({
   attachments: Attachment[];
   onMessage: (message: string, error?: boolean) => void;
 }) {
+  const locale = parseLocale(useLocale());
+  const t = useTranslations('Measurements');
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selected, setSelected] = useState<Measurement | null>(null);
   const [points, setPoints] = useState<MeasurementPoint[]>([]);
@@ -71,12 +76,9 @@ export function MeasurementData({
   }, [experiment.id]);
   useEffect(() => {
     void loadMeasurements().catch((error) =>
-      onMessageRef.current(
-        error instanceof Error ? error.message : 'Unable to load measurements.',
-        true
-      )
+      onMessageRef.current(error instanceof Error ? error.message : t('errorLoad'), true)
     );
-  }, [loadMeasurements]);
+  }, [loadMeasurements, t]);
 
   async function startPreview() {
     if (!attachmentId) return;
@@ -95,9 +97,9 @@ export function MeasurementData({
         y: value.headers[1] ?? '',
         chart: current.chart
       }));
-      onMessage('Preview ready. Map one X and one Y column before committing.');
+      onMessage(t('previewReady'));
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : 'Unable to preview import.', true);
+      onMessage(error instanceof Error ? error.message : t('errorPreview'), true);
     } finally {
       setBusy(false);
     }
@@ -115,7 +117,7 @@ export function MeasurementData({
         y: { column: mapping.y, label: mapping.yLabel, unit: mapping.yUnit }
       });
       setPreview(null);
-      onMessage('Measurement imported.');
+      onMessage(t('imported'));
       await loadMeasurements();
     } catch (error) {
       if (
@@ -128,7 +130,7 @@ export function MeasurementData({
         const failed = await api.getMeasurementImport(error.details.import_id).catch(() => null);
         if (failed) setPreview(failed);
       }
-      onMessage(error instanceof Error ? error.message : 'Unable to commit import.', true);
+      onMessage(error instanceof Error ? error.message : t('errorImport'), true);
     } finally {
       setBusy(false);
     }
@@ -137,21 +139,18 @@ export function MeasurementData({
     <div className='grid gap-6'>
       <Card>
         <CardHeader>
-          <CardTitle>Import measurement</CardTitle>
+          <CardTitle>{t('import')}</CardTitle>
         </CardHeader>
         <CardContent className='grid gap-4'>
-          <p className='text-sm text-muted-foreground'>
-            Supported shape: UTF-8 comma-separated CSV or one visible worksheet in XLSX, with one
-            numeric X/Y series.
-          </p>
+          <p className='text-sm text-muted-foreground'>{t('uploadHint')}</p>
           <div className='grid gap-2'>
-            <Label>Raw Attachment</Label>
+            <Label>{t('attachment')}</Label>
             <select
               className='h-8 rounded-lg border bg-background px-2 text-sm'
               value={attachmentId}
               onChange={(event) => setAttachmentId(event.target.value)}
             >
-              <option value=''>Choose an attachment</option>
+              <option value=''>{t('chooseAttachment')}</option>
               {attachments.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.original_filename}
@@ -161,7 +160,7 @@ export function MeasurementData({
           </div>
           {preview?.available_sheets.length ? (
             <div className='grid gap-2'>
-              <Label>Worksheet</Label>
+              <Label>{t('worksheet')}</Label>
               <select
                 className='h-8 rounded-lg border bg-background px-2 text-sm'
                 value={sheet || preview.sheet_name || ''}
@@ -174,12 +173,13 @@ export function MeasurementData({
             </div>
           ) : null}
           <Button onClick={startPreview} disabled={busy || !attachmentId}>
-            {busy ? 'Preparing…' : 'Preview file'}
+            {busy ? t('preparing') : t('preview')}
           </Button>
           {preview ? (
             <div className='grid gap-4 rounded-lg border p-4'>
               <div className='text-sm text-muted-foreground'>
-                {preview.row_count} rows · {preview.column_count} columns · SHA-256{' '}
+                {t('previewRows', { count: preview.row_count ?? 0 })} ·{' '}
+                {t('previewColumns', { count: preview.column_count ?? 0 })} · {t('sha256')}{' '}
                 {preview.source_sha256}
               </div>
               <div className='overflow-x-auto'>
@@ -204,26 +204,26 @@ export function MeasurementData({
               </div>
               <div className='grid gap-3 md:grid-cols-2'>
                 <div className='grid gap-2'>
-                  <Label>Measurement name</Label>
+                  <Label>{t('measurementName')}</Label>
                   <Input
                     value={mapping.name}
                     onChange={(event) => setMapping({ ...mapping, name: event.target.value })}
                   />
                 </div>
                 <div className='grid gap-2'>
-                  <Label>Type</Label>
+                  <Label>{t('measurementType')}</Label>
                   <select
                     className='h-8 rounded-lg border bg-background px-2 text-sm'
                     value={mapping.type}
                     onChange={(event) => setMapping({ ...mapping, type: event.target.value })}
                   >
-                    <option value='spectral_response'>Spectral response</option>
-                    <option value='time_series'>Time series</option>
-                    <option value='other_xy'>Other X/Y</option>
+                    <option value='spectral_response'>{t('spectralResponse')}</option>
+                    <option value='time_series'>{t('timeSeries')}</option>
+                    <option value='other_xy'>{t('otherXY')}</option>
                   </select>
                 </div>
                 <div className='grid gap-2'>
-                  <Label>X column</Label>
+                  <Label>{t('xColumn')}</Label>
                   <select
                     className='h-8 rounded-lg border bg-background px-2 text-sm'
                     value={mapping.x}
@@ -235,7 +235,7 @@ export function MeasurementData({
                   </select>
                 </div>
                 <div className='grid gap-2'>
-                  <Label>Y column</Label>
+                  <Label>{t('yColumn')}</Label>
                   <select
                     className='h-8 rounded-lg border bg-background px-2 text-sm'
                     value={mapping.y}
@@ -247,7 +247,7 @@ export function MeasurementData({
                   </select>
                 </div>
                 <div className='grid gap-2'>
-                  <Label>X label / unit</Label>
+                  <Label>{t('xLabelUnit')}</Label>
                   <div className='flex gap-2'>
                     <Input
                       value={mapping.xLabel}
@@ -260,7 +260,7 @@ export function MeasurementData({
                   </div>
                 </div>
                 <div className='grid gap-2'>
-                  <Label>Y label / unit</Label>
+                  <Label>{t('yLabelUnit')}</Label>
                   <div className='flex gap-2'>
                     <Input
                       value={mapping.yLabel}
@@ -291,7 +291,7 @@ export function MeasurementData({
                 onClick={commit}
                 disabled={busy || mapping.x === mapping.y || !mapping.name.trim()}
               >
-                {busy ? 'Importing…' : 'Validate and import'}
+                {busy ? t('importing') : t('validateImport')}
               </Button>
             </div>
           ) : null}
@@ -300,7 +300,7 @@ export function MeasurementData({
       <div className='grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
         <Card>
           <CardHeader>
-            <CardTitle>Measurements</CardTitle>
+            <CardTitle>{t('title')}</CardTitle>
           </CardHeader>
           <CardContent className='p-0'>
             {measurements.length ? (
@@ -314,26 +314,26 @@ export function MeasurementData({
                       void api
                         .listMeasurementPoints(item.id)
                         .then(setPoints)
-                        .catch(() => onMessage('Unable to load points.', true));
+                        .catch(() => onMessage(t('errorPoints'), true));
                     }}
                     className='block w-full px-4 py-3 text-left hover:bg-muted'
                   >
                     <div className='font-medium'>{item.name}</div>
                     <div className='text-xs text-muted-foreground'>
-                      {item.measurement_type} · {item.row_count} rows · {item.x_unit} /{' '}
-                      {item.y_unit}
+                      {t(item.measurement_type)} · {t('rowCount', { count: item.row_count })} ·{' '}
+                      {item.x_unit} / {item.y_unit}
                     </div>
                   </button>
                 ))}
               </div>
             ) : (
-              <p className='p-4 text-sm text-muted-foreground'>No measurements yet.</p>
+              <p className='p-4 text-sm text-muted-foreground'>{t('noMeasurements')}</p>
             )}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>{selected ? selected.name : 'Select a measurement'}</CardTitle>
+            <CardTitle>{selected ? selected.name : t('selectMeasurement')}</CardTitle>
           </CardHeader>
           <CardContent>
             {selected ? (
@@ -342,7 +342,7 @@ export function MeasurementData({
                   {Object.entries(selected.summary_json).map(([key, value]) => (
                     <div key={key} className='rounded-lg border p-2'>
                       <div className='text-xs text-muted-foreground'>{key}</div>
-                      <div className='font-medium'>{Number(value).toPrecision(5)}</div>
+                      <div className='font-medium'>{formatNumber(Number(value), locale)}</div>
                     </div>
                   ))}
                 </div>
@@ -376,14 +376,16 @@ export function MeasurementData({
                   </>
                 </ChartContainer>
                 <p className='text-xs text-muted-foreground'>
-                  Provenance: import {selected.import_id} · attachment{' '}
-                  {selected.source_attachment_id} · SHA-256 {selected.source_sha256}
+                  {t('provenance', {
+                    importId: selected.import_id,
+                    attachmentId: selected.source_attachment_id
+                  })}
+                  {' · '}
+                  {t('sha256')} {selected.source_sha256}
                 </p>
               </div>
             ) : (
-              <p className='text-sm text-muted-foreground'>
-                Choose an imported measurement to inspect its immutable points and provenance.
-              </p>
+              <p className='text-sm text-muted-foreground'>{t('chooseMeasurement')}</p>
             )}
           </CardContent>
         </Card>

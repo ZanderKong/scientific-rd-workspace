@@ -5,6 +5,7 @@ import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useInfobar, type InfobarContent } from '@/components/ui/infobar';
 import { cn } from '@/lib/utils';
+import { useTranslations } from 'next-intl';
 
 interface InfoButtonProps extends Omit<React.ComponentProps<typeof Button>, 'content'> {
   content: InfobarContent;
@@ -20,6 +21,7 @@ export function InfoButton({
   ...props
 }: InfoButtonProps) {
   const { setContent, setOpen } = useInfobar();
+  const t = useTranslations('Common');
 
   // Set content on mount so the infobar has it ready, but don't force it open
   const contentRef = React.useRef(content);
@@ -41,11 +43,11 @@ export function InfoButton({
       size={size}
       className={cn('shrink-0', className)}
       onClick={handleClick}
-      aria-label='Show information'
+      aria-label={t('showInformation')}
       {...props}
     >
       <Icons.info className='h-4 w-4' />
-      <span className='sr-only'>Show information</span>
+      <span className='sr-only'>{t('showInformation')}</span>
     </Button>
   );
 }

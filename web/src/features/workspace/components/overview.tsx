@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api-client';
 import type { Experiment, Project } from '@/lib/domain';
 import { ExperimentTable } from './experiment-table';
 import { ButtonLink, PageHeader, PageState } from './shared';
+import { useTranslations } from 'next-intl';
 
 export function Overview() {
+  const t = useTranslations('Overview');
   const [projects, setProjects] = useState<Project[]>([]);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,44 +26,44 @@ export function Overview() {
   return (
     <div className='flex flex-1 flex-col px-4 pt-4 pb-8 md:px-6'>
       <PageHeader
-        title='Workspace overview'
-        description='A durable home for your projects, experiments, and evidence.'
-        action={<ButtonLink href='/dashboard/projects'>New project</ButtonLink>}
+        title={t('title')}
+        description={t('description')}
+        action={<ButtonLink href='/dashboard/projects'>{t('newProject')}</ButtonLink>}
       />
       {loading || error ? (
         <PageState loading={loading} error={error} />
       ) : (
         <>
-          <div className='mb-6 grid gap-4 sm:grid-cols-3'>
-            <Card>
-              <CardHeader>
-                <CardTitle className='text-sm text-muted-foreground'>Active projects</CardTitle>
-              </CardHeader>
-              <CardContent className='text-3xl font-semibold'>{active}</CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className='text-sm text-muted-foreground'>Experiments</CardTitle>
-              </CardHeader>
-              <CardContent className='text-3xl font-semibold'>{experiments.length}</CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className='text-sm text-muted-foreground'>Completed</CardTitle>
-              </CardHeader>
-              <CardContent className='text-3xl font-semibold'>
-                {experiments.filter((e) => e.status === 'completed').length}
-              </CardContent>
-            </Card>
+          <div className='mb-8 grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-3'>
+            {[
+              [t('activeProjects'), active],
+              [t('experiments'), experiments.length],
+              [t('completed'), experiments.filter((e) => e.status === 'completed').length]
+            ].map(([label, value]) => (
+              <div key={label} className='bg-card px-4 py-3'>
+                <p className='text-xs font-medium tracking-wide text-muted-foreground uppercase'>
+                  {label}
+                </p>
+                <p className='mt-1 text-2xl font-semibold tabular-nums'>{value}</p>
+              </div>
+            ))}
           </div>
-          <div className='mb-6 rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-3 text-sm text-muted-foreground'>
-            Synthetic seed data is enabled for this Phase 1 demo. Every edit, upload, clone, and
-            revision is persisted through the API.
+          <div className='mb-8 flex items-start gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-4 py-3 text-sm text-muted-foreground'>
+            <span className='mt-1 size-2 shrink-0 rounded-full bg-primary' aria-hidden='true' />
+            <p>
+              <span className='font-medium text-foreground'>{t('syntheticDemo')}</span> ·{' '}
+              {t('demoDescription')}
+            </p>
           </div>
-          <div className='mb-3 flex items-center justify-between'>
-            <h2 className='text-lg font-semibold'>Recent experiments</h2>
+          <div className='mb-3 flex items-center justify-between border-b pb-3'>
+            <div>
+              <p className='text-xs font-medium tracking-wide text-muted-foreground uppercase'>
+                {t('researchActivity')}
+              </p>
+              <h2 className='mt-1 text-lg font-semibold'>{t('recentExperiments')}</h2>
+            </div>
             <ButtonLink href='/dashboard/experiments' variant='ghost' size='sm'>
-              View all →
+              {t('viewAll')} →
             </ButtonLink>
           </div>
           <ExperimentTable

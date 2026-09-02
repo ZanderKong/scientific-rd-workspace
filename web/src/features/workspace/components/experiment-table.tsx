@@ -6,6 +6,8 @@ import { api } from '@/lib/api-client';
 import type { Experiment } from '@/lib/domain';
 import { formatDate, PageState, StatusBadge } from './shared';
 import { useEffect, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
+import { parseLocale } from '@/i18n/config';
 
 export function ExperimentTable({
   experiments,
@@ -16,18 +18,20 @@ export function ExperimentTable({
   loading?: boolean;
   error?: string;
 }) {
+  const locale = parseLocale(useLocale());
+  const t = useTranslations('Experiments');
   if (loading || error) return <PageState loading={loading} error={error} />;
-  if (!experiments.length) return <PageState empty='No experiments yet.' />;
+  if (!experiments.length) return <PageState empty={t('noExperiments')} />;
   return (
     <Card>
       <CardContent className='overflow-x-auto p-0'>
         <table className='w-full text-sm'>
           <thead className='border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground'>
             <tr>
-              <th className='px-4 py-3'>Experiment</th>
-              <th className='px-4 py-3'>Status</th>
-              <th className='px-4 py-3'>Updated</th>
-              <th className='px-4 py-3'>Lineage</th>
+              <th className='px-4 py-3'>{t('tableExperiment')}</th>
+              <th className='px-4 py-3'>{t('statusLabel')}</th>
+              <th className='px-4 py-3'>{t('tableUpdated')}</th>
+              <th className='px-4 py-3'>{t('lineage')}</th>
             </tr>
           </thead>
           <tbody>
@@ -46,10 +50,10 @@ export function ExperimentTable({
                   <StatusBadge status={experiment.status} />
                 </td>
                 <td className='whitespace-nowrap px-4 py-3 text-muted-foreground'>
-                  {formatDate(experiment.updated_at)}
+                  {formatDate(experiment.updated_at, locale)}
                 </td>
                 <td className='px-4 py-3 text-xs text-muted-foreground'>
-                  {experiment.parent_experiment_id ? 'Cloned experiment' : 'Original record'}
+                  {experiment.parent_experiment_id ? t('cloned') : t('original')}
                 </td>
               </tr>
             ))}

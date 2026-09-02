@@ -1,8 +1,9 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,27 +23,32 @@ import { BackLink, formatBytes, formatDate, PageHeader, PageState, StatusBadge }
 import { StructuredForm } from './structured-form';
 import { MeasurementData } from './measurement-data';
 import { ExperimentLiterature } from './experiment-literature';
+import { parseLocale } from '@/i18n/config';
 
 const RichNoteEditor = dynamic(
   () => import('./rich-note-editor').then((mod) => mod.RichNoteEditor),
   { ssr: false, loading: () => <div className='min-h-56 animate-pulse rounded-lg bg-muted' /> }
 );
-const defaultNote = [
-  {
-    type: 'heading',
-    props: { level: 2 },
-    content: [{ type: 'text', text: 'Experimental note', styles: {} }]
-  },
-  {
-    type: 'paragraph',
-    content: [
-      { type: 'text', text: 'Record your method, observations, and decisions here.', styles: {} }
-    ]
-  }
-];
+function createDefaultNote(title: string, placeholder: string) {
+  return [
+    {
+      type: 'heading',
+      props: { level: 2 },
+      content: [{ type: 'text', text: title, styles: {} }]
+    },
+    {
+      type: 'paragraph',
+      content: [{ type: 'text', text: placeholder, styles: {} }]
+    }
+  ];
+}
 
 export function ExperimentDetail({ experimentId }: { experimentId: string }) {
   const router = useRouter();
+  const locale = parseLocale(useLocale());
+  const t = useTranslations('Experiments');
+  const statusT = useTranslations('Status');
+  const defaultNote = useMemo(() => createDefaultNote(t('note'), t('notePlaceholder')), [t]);
   const [experiment, setExperiment] = useState<Experiment | null>(null);
   const [template, setTemplate] = useState<ExperimentTemplate | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -86,9 +92,9 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
         setProvenance(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load experiment.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     }
-  }, [experimentId]);
+  }, [defaultNote, experimentId, t]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -111,9 +117,9 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
         structured_data: structured
       });
       setExperiment(updated);
-      setMessage('Saved changes.');
+      setMessage(t('savedChanges'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save changes.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     } finally {
       setBusy(false);
     }
@@ -125,9 +131,9 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
     try {
       const updated = await api.updateExperiment(experiment.id, { note_document: note });
       setExperiment(updated);
-      setMessage('Note saved.');
+      setMessage(t('savedChanges'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save note.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     } finally {
       setBusy(false);
     }
@@ -139,7 +145,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
       const copy = await api.cloneExperiment(experiment.id, cloneTitle.trim());
       router.push(`/dashboard/experiments/${copy.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to clone experiment.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     } finally {
       setBusy(false);
     }
@@ -151,9 +157,9 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
       const revision = await api.createRevision(experiment.id, revisionNote);
       setRevisions((items) => [revision, ...items]);
       setRevisionNote('');
-      setMessage(`Revision ${revision.revision_number} created.`);
+      setMessage(t('revisionCreated', { number: revision.revision_number }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create revision.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     } finally {
       setBusy(false);
     }
@@ -165,21 +171,21 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
     try {
       const attachment = await api.uploadAttachment(experiment.id, file);
       setAttachments((items) => [attachment, ...items]);
-      setMessage('Attachment uploaded.');
+      setMessage(t('attachmentUploaded'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to upload attachment.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     } finally {
       setBusy(false);
       event.target.value = '';
     }
   }
   async function removeAttachment(id: string) {
-    if (!window.confirm('Delete this attachment?')) return;
+    if (!window.confirm(t('confirmDeleteAttachment'))) return;
     try {
       await api.deleteAttachment(id);
       setAttachments((items) => items.filter((item) => item.id !== id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to delete attachment.');
+      setError(err instanceof Error ? err.message : t('errorLoad'));
     }
   }
   if (error && !experiment)
@@ -195,11 +201,11 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
       </div>
     );
   return (
-    <div className='flex flex-1 flex-col px-4 pt-3 pb-8 md:px-6'>
-      <BackLink href={`/dashboard/projects/${experiment.project_id}`} children='Project' />
+    <div className='mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-4 pt-3 pb-8 md:px-6'>
+      <BackLink href={`/dashboard/projects/${experiment.project_id}`} children={t('project')} />
       <PageHeader
         title={experiment.title}
-        description={`${experiment.code} · template v${experiment.template_version}`}
+        description={`${experiment.code} · ${t('templateVersion', { version: experiment.template_version })}`}
         action={
           <div className='flex flex-wrap items-center gap-2'>
             <StatusBadge status={experiment.status} />
@@ -207,24 +213,26 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
               className='w-48'
               value={cloneTitle}
               onChange={(e) => setCloneTitle(e.target.value)}
-              placeholder='Clone title'
+              placeholder={t('cloneTitle')}
             />
             <Button variant='outline' disabled={busy || !cloneTitle.trim()} onClick={clone}>
-              Clone
+              {t('clone')}
             </Button>
           </div>
         }
       />
-      <div className='mb-4 flex flex-wrap gap-1 border-b'>
+      <div className='mb-5 flex gap-1 overflow-x-auto border-b' role='tablist'>
         {(['overview', 'record', 'files', 'data', 'literature', 'revisions'] as const).map(
           (item) => (
             <Button
               key={item}
               variant={tab === item ? 'secondary' : 'ghost'}
-              className='rounded-b-none capitalize'
+              className='shrink-0 rounded-b-none'
+              role='tab'
+              aria-selected={tab === item}
               onClick={() => setTab(item)}
             >
-              {item}
+              {t(item)}
             </Button>
           )
         )}
@@ -238,33 +246,33 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
         </p>
       )}
       {tab === 'overview' && (
-        <div className='grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]'>
+        <div className='grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]'>
           <Card>
             <CardHeader>
-              <CardTitle>Experiment metadata</CardTitle>
+              <CardTitle>{t('metadata')}</CardTitle>
             </CardHeader>
             <CardContent className='grid gap-4'>
               <div className='grid gap-2'>
-                <Label htmlFor='detail-title'>Title</Label>
+                <Label htmlFor='detail-title'>{t('titleLabel')}</Label>
                 <Input id='detail-title' value={title} onChange={(e) => setTitle(e.target.value)} />
               </div>
               <div className='grid gap-2'>
-                <Label htmlFor='detail-status'>Status</Label>
+                <Label htmlFor='detail-status'>{t('statusLabel')}</Label>
                 <select
                   id='detail-status'
                   className='h-8 rounded-lg border border-input bg-background px-2 text-sm'
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
                 >
-                  <option value='draft'>Draft</option>
-                  <option value='planned'>Planned</option>
-                  <option value='running'>Running</option>
-                  <option value='completed'>Completed</option>
-                  <option value='cancelled'>Cancelled</option>
+                  <option value='draft'>{statusT('draft')}</option>
+                  <option value='planned'>{statusT('planned')}</option>
+                  <option value='running'>{statusT('running')}</option>
+                  <option value='completed'>{statusT('completed')}</option>
+                  <option value='cancelled'>{statusT('cancelled')}</option>
                 </select>
               </div>
               <div className='grid gap-2'>
-                <Label htmlFor='detail-objective'>Objective</Label>
+                <Label htmlFor='detail-objective'>{t('objective')}</Label>
                 <Textarea
                   id='detail-objective'
                   value={objective}
@@ -272,26 +280,26 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                 />
               </div>
               <Button onClick={saveMetadata} disabled={busy}>
-                {busy ? 'Saving…' : 'Save changes'}
+                {busy ? t('saving') : t('saveChanges')}
               </Button>
             </CardContent>
           </Card>
           {provenance && (
             <Card>
               <CardHeader>
-                <CardTitle>Creation provenance</CardTitle>
+                <CardTitle>{t('creationProvenance')}</CardTitle>
               </CardHeader>
               <CardContent className='grid gap-2 text-sm'>
                 <p>
-                  Gated suggestion from Finding <code>{provenance.finding_id}</code> · Analysis Run{' '}
+                  {t('gatedSuggestion')} <code>{provenance.finding_id}</code> · {t('analysisRun')}{' '}
                   <code>{provenance.analysis_run_id}</code>
                 </p>
                 <p>
-                  Enabling review decision <code>{provenance.enabling_review_decision_id}</code>
+                  {t('enablingReview')} <code>{provenance.enabling_review_decision_id}</code>
                 </p>
                 <details className='rounded border p-3 text-xs'>
                   <summary className='cursor-pointer font-medium'>
-                    Inspect immutable snapshots
+                    {t('immutableSnapshots')}
                   </summary>
                   <pre className='mt-2 max-h-72 overflow-auto'>
                     {JSON.stringify(
@@ -309,7 +317,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
           )}
           <Card>
             <CardHeader>
-              <CardTitle>Structured properties</CardTitle>
+              <CardTitle>{t('structuredProperties')}</CardTitle>
             </CardHeader>
             <CardContent>
               <StructuredForm
@@ -319,7 +327,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                 onChange={setStructured}
               />
               <Button className='mt-4' onClick={saveMetadata} disabled={busy}>
-                Save structured data
+                {t('saveStructuredData')}
               </Button>
             </CardContent>
           </Card>
@@ -328,12 +336,12 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
       {tab === 'record' && (
         <Card>
           <CardHeader>
-            <CardTitle>Experimental note</CardTitle>
+            <CardTitle>{t('note')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <RichNoteEditor initialContent={note} onChange={setNote} />
+            <RichNoteEditor initialContent={note} onChange={setNote} key={locale} />
             <Button className='mt-4' onClick={saveNote} disabled={busy}>
-              {busy ? 'Saving…' : 'Save note'}
+              {busy ? t('saving') : t('saveNote')}
             </Button>
           </CardContent>
         </Card>
@@ -341,12 +349,12 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
       {tab === 'files' && (
         <Card>
           <CardHeader>
-            <CardTitle>Attachments</CardTitle>
+            <CardTitle>{t('attachments')}</CardTitle>
           </CardHeader>
           <CardContent className='grid gap-4'>
-            <Input type='file' onChange={upload} disabled={busy} />
+            <Input type='file' onChange={upload} disabled={busy} aria-label={t('upload')} />
             {attachments.length === 0 ? (
-              <p className='text-sm text-muted-foreground'>No files attached.</p>
+              <p className='text-sm text-muted-foreground'>{t('noFiles')}</p>
             ) : (
               <ul className='divide-y rounded-lg border'>
                 {attachments.map((file) => (
@@ -364,7 +372,8 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                         {file.original_filename}
                       </a>
                       <div className='text-xs text-muted-foreground'>
-                        {formatBytes(file.size_bytes)} · {formatDate(file.created_at)}
+                        {formatBytes(file.size_bytes, locale)} ·{' '}
+                        {formatDate(file.created_at, locale)}
                       </div>
                     </div>
                     <Button
@@ -372,7 +381,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                       size='sm'
                       onClick={() => removeAttachment(file.id)}
                     >
-                      Delete
+                      {t('deleteAttachment')}
                     </Button>
                   </li>
                 ))}
@@ -396,16 +405,16 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
         <div className='grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
           <Card>
             <CardHeader>
-              <CardTitle>Create revision</CardTitle>
+              <CardTitle>{t('revisionCreate')}</CardTitle>
             </CardHeader>
             <CardContent className='grid gap-3'>
               <Input
                 value={revisionNote}
                 onChange={(e) => setRevisionNote(e.target.value)}
-                placeholder='What changed?'
+                placeholder={t('revisionPlaceholder')}
               />
               <Button onClick={createRevision} disabled={busy}>
-                Create revision
+                {t('revisionCreateAction')}
               </Button>
               <div className='divide-y rounded-lg border'>
                 {revisions.map((revision) => (
@@ -416,13 +425,15 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                     onClick={() => setSelectedRevision(revision)}
                   >
                     <div className='flex justify-between'>
-                      <span className='font-medium'>Revision {revision.revision_number}</span>
+                      <span className='font-medium'>
+                        {t('revisionLabel', { number: revision.revision_number })}
+                      </span>
                       <span className='text-xs text-muted-foreground'>
-                        {formatDate(revision.created_at)}
+                        {formatDate(revision.created_at, locale)}
                       </span>
                     </div>
                     <div className='text-xs text-muted-foreground'>
-                      {revision.change_note || 'No change note'}
+                      {revision.change_note || t('noChangeNote')}
                     </div>
                   </button>
                 ))}
@@ -433,8 +444,8 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
             <CardHeader>
               <CardTitle>
                 {selectedRevision
-                  ? `Revision ${selectedRevision.revision_number}`
-                  : 'Select a revision'}
+                  ? t('revisionLabel', { number: selectedRevision.revision_number })
+                  : t('selectRevision')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -447,7 +458,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                         <StatusBadge status={snapshot.experiment.status} />
                       </div>
                       <p className='text-muted-foreground'>
-                        Template v{snapshot.experiment.template_version}
+                        {t('templateVersion', { version: snapshot.experiment.template_version })}
                       </p>
                       {snapshot.experiment.objective ? (
                         <p>{snapshot.experiment.objective}</p>
@@ -455,7 +466,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                     </div>
 
                     <section className='grid gap-2'>
-                      <h3 className='text-sm font-medium'>Structured properties</h3>
+                      <h3 className='text-sm font-medium'>{t('structuredProperties')}</h3>
                       {snapshotUsesLoadedTemplate ? (
                         <StructuredForm
                           schema={schema}
@@ -465,13 +476,13 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                         />
                       ) : (
                         <p className='rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive'>
-                          The exact template version for this revision could not be resolved.
+                          {t('exactTemplateMissing')}
                         </p>
                       )}
                     </section>
 
                     <section className='grid gap-2'>
-                      <h3 className='text-sm font-medium'>Experimental note</h3>
+                      <h3 className='text-sm font-medium'>{t('note')}</h3>
                       {snapshot.experiment.note_document.length > 0 ? (
                         <RichNoteEditor
                           initialContent={snapshot.experiment.note_document}
@@ -479,43 +490,45 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                           key={selectedRevision.id}
                         />
                       ) : (
-                        <p className='text-sm text-muted-foreground'>No note content.</p>
+                        <p className='text-sm text-muted-foreground'>{t('noNote')}</p>
                       )}
                     </section>
 
                     <section className='grid gap-2'>
-                      <h3 className='text-sm font-medium'>Attachment metadata</h3>
+                      <h3 className='text-sm font-medium'>{t('attachmentMetadata')}</h3>
                       {snapshot.attachments.length > 0 ? (
                         <ul className='divide-y rounded-lg border text-sm'>
                           {snapshot.attachments.map((attachment) => (
                             <li key={attachment.id} className='grid gap-1 px-3 py-2'>
                               <span className='font-medium'>{attachment.original_filename}</span>
                               <span className='text-xs text-muted-foreground'>
-                                {formatBytes(attachment.size_bytes)} · SHA-256 {attachment.sha256}
+                                {formatBytes(attachment.size_bytes, locale)} · {t('sha256')}{' '}
+                                {attachment.sha256}
                               </span>
                             </li>
                           ))}
                         </ul>
                       ) : (
                         <p className='text-sm text-muted-foreground'>
-                          No attachments in this snapshot.
+                          {t('noAttachmentsSnapshot')}
                         </p>
                       )}
                     </section>
 
                     {snapshot.measurements?.length ? (
                       <section className='grid gap-2'>
-                        <h3 className='text-sm font-medium'>Measurement references</h3>
+                        <h3 className='text-sm font-medium'>{t('measurementReferences')}</h3>
                         <ul className='divide-y rounded-lg border text-sm'>
                           {snapshot.measurements.map((measurement) => (
                             <li key={measurement.id} className='grid gap-1 px-3 py-2'>
                               <span className='font-medium'>{measurement.name}</span>
                               <span className='text-xs text-muted-foreground'>
-                                {measurement.row_count} rows · {measurement.x_label} (
-                                {measurement.x_unit}) → {measurement.y_label} ({measurement.y_unit})
+                                {t('rowCount', { count: measurement.row_count })} ·{' '}
+                                {measurement.x_label} ({measurement.x_unit}) → {measurement.y_label}{' '}
+                                ({measurement.y_unit})
                               </span>
                               <span className='text-xs text-muted-foreground'>
-                                Immutable points SHA-256 {measurement.points_sha256}
+                                {t('immutablePoints')} {t('sha256')} {measurement.points_sha256}
                               </span>
                             </li>
                           ))}
@@ -525,13 +538,13 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
 
                     {snapshot.literature_links?.length ? (
                       <section className='grid gap-2'>
-                        <h3 className='text-sm font-medium'>Literature references</h3>
+                        <h3 className='text-sm font-medium'>{t('literatureReferences')}</h3>
                         <ul className='divide-y rounded-lg border text-sm'>
                           {snapshot.literature_links.map((link) => (
                             <li key={link.id} className='grid gap-1 px-3 py-2'>
                               <span className='font-medium'>{link.title}</span>
                               <span className='text-xs text-muted-foreground'>
-                                {link.relationship_type} · literature {link.literature_id}
+                                {link.relationship_type} · {t('literature')} {link.literature_id}
                               </span>
                             </li>
                           ))}
@@ -541,13 +554,14 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
 
                     {snapshot.evidence?.length ? (
                       <section className='grid gap-2'>
-                        <h3 className='text-sm font-medium'>Evidence references</h3>
+                        <h3 className='text-sm font-medium'>{t('evidenceReferences')}</h3>
                         <ul className='divide-y rounded-lg border text-sm'>
                           {snapshot.evidence.map((item) => (
                             <li key={item.id} className='grid gap-1 px-3 py-2'>
                               <span className='font-medium'>{item.claim_text}</span>
                               <span className='text-xs text-muted-foreground'>
-                                {item.stance} · {item.source_type} · {item.status}
+                                {item.stance} · {item.source_type} ·{' '}
+                                <StatusBadge status={item.status} />
                               </span>
                             </li>
                           ))}
@@ -556,19 +570,17 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                     ) : null}
 
                     <details className='rounded-lg border p-3 text-xs'>
-                      <summary className='cursor-pointer font-medium'>Raw snapshot JSON</summary>
+                      <summary className='cursor-pointer font-medium'>{t('rawSnapshot')}</summary>
                       <pre className='mt-3 max-h-72 overflow-auto rounded-lg bg-muted p-3'>
                         {JSON.stringify(selectedRevision.snapshot_json, null, 2)}
                       </pre>
                     </details>
                   </div>
                 ) : (
-                  <p className='text-sm text-destructive'>Revision snapshot is malformed.</p>
+                  <p className='text-sm text-destructive'>{t('malformedSnapshot')}</p>
                 )
               ) : (
-                <p className='text-sm text-muted-foreground'>
-                  Choose a revision to inspect its immutable snapshot.
-                </p>
+                <p className='text-sm text-muted-foreground'>{t('chooseRevision')}</p>
               )}
             </CardContent>
           </Card>

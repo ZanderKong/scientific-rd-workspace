@@ -2,7 +2,7 @@ import { NavGroup } from '@/types';
 
 export const navGroups: NavGroup[] = [
   {
-    label: 'Scientific R&D',
+    label: 'Workspace',
     items: [
       {
         title: 'Overview',
@@ -17,7 +17,12 @@ export const navGroups: NavGroup[] = [
         icon: 'workspace',
         isActive: false,
         items: []
-      },
+      }
+    ]
+  },
+  {
+    label: 'Research',
+    items: [
       {
         title: 'Experiments',
         url: '/dashboard/experiments',
@@ -31,14 +36,24 @@ export const navGroups: NavGroup[] = [
         icon: 'trendingUp',
         isActive: false,
         items: []
-      },
+      }
+    ]
+  },
+  {
+    label: 'Knowledge',
+    items: [
       {
         title: 'Literature',
         url: '/dashboard/literature',
         icon: 'post',
         isActive: false,
         items: []
-      },
+      }
+    ]
+  },
+  {
+    label: 'AI & Evaluation',
+    items: [
       {
         title: 'Analysis',
         url: '/dashboard/analysis',

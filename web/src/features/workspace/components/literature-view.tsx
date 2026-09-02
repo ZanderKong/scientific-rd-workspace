@@ -7,9 +7,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api-client';
 import type { Evidence, Literature, Project } from '@/lib/domain';
-import { PageHeader, PageState } from './shared';
+import { PageHeader, PageState, StatusBadge } from './shared';
+import { useTranslations } from 'next-intl';
 
 export function LiteratureView() {
+  const t = useTranslations('Literature');
+  const common = useTranslations('Common');
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState('');
   const [items, setItems] = useState<Literature[]>([]);
@@ -27,8 +30,8 @@ export function LiteratureView() {
         setProjects(rows);
         if (rows[0]) setProjectId(rows[0].id);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Unable to load projects.'));
-  }, []);
+      .catch((e) => setError(e instanceof Error ? e.message : t('noLiterature')));
+  }, [t]);
   const refresh = useCallback(async () => {
     if (!projectId) return;
     const [literature, records] = await Promise.all([
@@ -39,10 +42,8 @@ export function LiteratureView() {
     setEvidence(records);
   }, [projectId]);
   useEffect(() => {
-    void refresh().catch((e) =>
-      setError(e instanceof Error ? e.message : 'Unable to load literature.')
-    );
-  }, [refresh]);
+    void refresh().catch((e) => setError(e instanceof Error ? e.message : t('errorLoad')));
+  }, [refresh, t]);
   async function create() {
     if (!projectId || !title.trim()) return;
     setError('');
@@ -55,10 +56,10 @@ export function LiteratureView() {
       setTitle('');
       setAuthors('');
       setDoi('');
-      setMessage('Literature record created.');
+      setMessage(t('created'));
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to create literature.');
+      setError(e instanceof Error ? e.message : t('noLiterature'));
     }
   }
   async function createEvidence(literatureId: string) {
@@ -70,25 +71,22 @@ export function LiteratureView() {
         source: { type: 'literature', literature_id: literatureId }
       });
       setClaim('');
-      setMessage('Evidence recorded.');
+      setMessage(t('evidenceCreated'));
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to create evidence.');
+      setError(e instanceof Error ? e.message : t('noEvidence'));
     }
   }
   if (error && !projects.length) return <PageState error={error} />;
   return (
     <div className='flex flex-1 flex-col gap-6 px-4 pt-4 pb-8 md:px-6'>
-      <PageHeader
-        title='Literature & evidence'
-        description='Keep human-authored sources and traceable claims close to the experiment record.'
-      />
+      <PageHeader title={t('title')} description={t('description')} />
       <select
         className='h-8 max-w-md rounded-lg border bg-background px-2 text-sm'
         value={projectId}
         onChange={(e) => setProjectId(e.target.value)}
       >
-        <option value=''>Choose a project</option>
+        <option value=''>{common('chooseProject')}</option>
         {projects.map((item) => (
           <option key={item.id} value={item.id}>
             {item.code} · {item.title}
@@ -104,33 +102,33 @@ export function LiteratureView() {
       <div className='grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
         <Card>
           <CardHeader>
-            <CardTitle>Add literature</CardTitle>
+            <CardTitle>{t('add')}</CardTitle>
           </CardHeader>
           <CardContent className='grid gap-3'>
             <div className='grid gap-2'>
-              <Label>Title</Label>
+              <Label>{t('titleLabel')}</Label>
               <Input value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
             <div className='grid gap-2'>
-              <Label>Authors</Label>
+              <Label>{t('authors')}</Label>
               <Input
                 value={authors}
                 onChange={(e) => setAuthors(e.target.value)}
-                placeholder='Example: Ada Example'
+                placeholder={t('authorsPlaceholder')}
               />
             </div>
             <div className='grid gap-2'>
-              <Label>DOI</Label>
+              <Label>{t('doi')}</Label>
               <Input value={doi} onChange={(e) => setDoi(e.target.value)} />
             </div>
             <Button onClick={create} disabled={!projectId || !title.trim()}>
-              Save literature
+              {t('save')}
             </Button>
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Project bibliography</CardTitle>
+            <CardTitle>{t('bibliography')}</CardTitle>
           </CardHeader>
           <CardContent className='grid gap-4'>
             {items.length ? (
@@ -143,7 +141,7 @@ export function LiteratureView() {
                         (author) =>
                           author.literal ?? [author.given, author.family].filter(Boolean).join(' ')
                       )
-                      .join(', ') || 'No authors'}
+                      .join(', ') || t('noAuthors')}
                     {item.publication_year ? ` · ${item.publication_year}` : ''}
                     {item.doi ? ` · ${item.doi}` : ''}
                   </div>
@@ -151,27 +149,27 @@ export function LiteratureView() {
                     <Input
                       value={claim}
                       onChange={(e) => setClaim(e.target.value)}
-                      placeholder='Human-authored evidence claim'
+                      placeholder={t('recordClaimPlaceholder')}
                     />
                     <Button
                       size='sm'
                       onClick={() => createEvidence(item.id)}
                       disabled={!claim.trim()}
                     >
-                      Record evidence
+                      {t('record')}
                     </Button>
                   </div>
                 </div>
               ))
             ) : (
-              <p className='text-sm text-muted-foreground'>No literature records yet.</p>
+              <p className='text-sm text-muted-foreground'>{t('noLiterature')}</p>
             )}
           </CardContent>
         </Card>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Evidence log</CardTitle>
+          <CardTitle>{t('evidenceLog')}</CardTitle>
         </CardHeader>
         <CardContent>
           {evidence.length ? (
@@ -180,14 +178,14 @@ export function LiteratureView() {
                 <div key={item.id} className='grid gap-1 py-3 text-sm'>
                   <div className='font-medium'>{item.claim_text}</div>
                   <div className='text-xs text-muted-foreground'>
-                    {item.source_type} · {item.status}
+                    {item.source_type} · <StatusBadge status={item.status} />
                     {item.locator ? ` · ${item.locator}` : ''}
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className='text-sm text-muted-foreground'>No evidence has been recorded.</p>
+            <p className='text-sm text-muted-foreground'>{t('noEvidence')}</p>
           )}
         </CardContent>
       </Card>

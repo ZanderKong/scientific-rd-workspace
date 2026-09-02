@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { Project } from '@/lib/domain';
 import { api } from '@/lib/api-client';
+import { useTranslations } from 'next-intl';
 
 export function ProjectForm({
   project,
@@ -17,6 +18,8 @@ export function ProjectForm({
   onSaved: (project: Project) => void;
   onCancel?: () => void;
 }) {
+  const t = useTranslations('Projects');
+  const statusT = useTranslations('Status');
   const [title, setTitle] = useState(project?.title ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
   const [status, setStatus] = useState(project?.status ?? 'active');
@@ -32,7 +35,7 @@ export function ProjectForm({
         : await api.createProject({ title, description, status });
       onSaved(saved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save project.');
+      setError(err instanceof Error ? err.message : t('errorSave'));
     } finally {
       setBusy(false);
     }
@@ -40,47 +43,47 @@ export function ProjectForm({
   return (
     <form onSubmit={submit} className='grid gap-4'>
       <div className='grid gap-2'>
-        <Label htmlFor='project-title'>Title</Label>
+        <Label htmlFor='project-title'>{t('titleLabel')}</Label>
         <Input
           id='project-title'
           required
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder='e.g. Polymer formulation screening'
+          placeholder={t('titlePlaceholder')}
         />
       </div>
       <div className='grid gap-2'>
-        <Label htmlFor='project-description'>Description</Label>
+        <Label htmlFor='project-description'>{t('descriptionLabel')}</Label>
         <Textarea
           id='project-description'
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder='What question is this project answering?'
+          placeholder={t('descriptionPlaceholder')}
         />
       </div>
       <div className='grid gap-2'>
-        <Label htmlFor='project-status'>Status</Label>
+        <Label htmlFor='project-status'>{t('statusLabel')}</Label>
         <select
           id='project-status'
           className='h-8 rounded-lg border border-input bg-background px-2 text-sm'
           value={status}
           onChange={(e) => setStatus(e.target.value as Project['status'])}
         >
-          <option value='active'>Active</option>
-          <option value='paused'>Paused</option>
-          <option value='completed'>Completed</option>
-          <option value='archived'>Archived</option>
+          <option value='active'>{statusT('active')}</option>
+          <option value='paused'>{statusT('paused')}</option>
+          <option value='completed'>{statusT('completed')}</option>
+          <option value='archived'>{statusT('archived')}</option>
         </select>
       </div>
       {error && <p className='text-sm text-destructive'>{error}</p>}
       <div className='flex justify-end gap-2'>
         {onCancel && (
           <Button type='button' variant='ghost' onClick={onCancel}>
-            Cancel
+            {t('cancel')}
           </Button>
         )}
         <Button type='submit' disabled={busy}>
-          {busy ? 'Saving…' : project ? 'Save project' : 'Create project'}
+          {busy ? t('saving') : project ? t('save') : t('create')}
         </Button>
       </div>
     </form>

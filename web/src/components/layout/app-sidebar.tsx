@@ -4,7 +4,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger
@@ -25,22 +24,33 @@ import {
   SidebarRail
 } from '@/components/ui/sidebar';
 import { navGroups } from '@/config/nav-config';
-import { useMediaQuery } from '@/hooks/use-media-query';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import * as React from 'react';
+import { usePathname } from 'next/navigation';
 import { Icons } from '@/components/icons';
+import { useTranslations } from 'next-intl';
+
+const groupLabels = {
+  Workspace: 'workspace',
+  Research: 'research',
+  Knowledge: 'knowledge',
+  'AI & Evaluation': 'aiEvaluation'
+} as const;
+
+const itemLabels = {
+  Overview: 'overview',
+  Projects: 'projects',
+  Experiments: 'experiments',
+  Compare: 'compare',
+  Literature: 'literature',
+  Analysis: 'analysis',
+  Evaluations: 'evaluations'
+} as const;
 
 export default function AppSidebar() {
+  const t = useTranslations('Navigation');
   const pathname = usePathname();
-  const { isOpen } = useMediaQuery();
-  const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
-
-  React.useEffect(() => {
-    // Side effects based on sidebar state changes
-  }, [isOpen]);
 
   return (
     <Sidebar collapsible='icon'>
@@ -48,7 +58,11 @@ export default function AppSidebar() {
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
-            {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+            {group.label && (
+              <SidebarGroupLabel>
+                {t(groupLabels[group.label as keyof typeof groupLabels] ?? 'workspace')}
+              </SidebarGroupLabel>
+            )}
             <SidebarMenu>
               {group.items.map((item) => {
                 const Icon = item.icon ? Icons[item.icon] : Icons.logo;
@@ -61,14 +75,18 @@ export default function AppSidebar() {
                     <CollapsibleTrigger
                       render={
                         <SidebarMenuButton
-                          tooltip={item.title}
+                          tooltip={t(
+                            itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace'
+                          )}
                           isActive={pathname === item.url}
                           className='group/collapsible'
                         />
                       }
                     >
                       {item.icon && <Icon />}
-                      <span>{item.title}</span>
+                      <span>
+                        {t(itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace')}
+                      </span>
                       <Icons.chevronRight className='ml-auto transition-transform duration-200 group-data-panel-open/collapsible:rotate-90' />
                     </CollapsibleTrigger>
                     <CollapsibleContent>
@@ -76,10 +94,23 @@ export default function AppSidebar() {
                         {item.items?.map((subItem) => (
                           <SidebarMenuSubItem key={subItem.title}>
                             <SidebarMenuSubButton
-                              render={<Link href={subItem.url} aria-label={subItem.title} />}
+                              render={
+                                <Link
+                                  href={subItem.url}
+                                  aria-label={t(
+                                    itemLabels[subItem.title as keyof typeof itemLabels] ??
+                                      'workspace'
+                                  )}
+                                />
+                              }
                               isActive={pathname === subItem.url}
                             >
-                              <span>{subItem.title}</span>
+                              <span>
+                                {t(
+                                  itemLabels[subItem.title as keyof typeof itemLabels] ??
+                                    'workspace'
+                                )}
+                              </span>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
                         ))}
@@ -89,12 +120,21 @@ export default function AppSidebar() {
                 ) : (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
-                      render={<Link href={item.url} aria-label={item.title} />}
-                      tooltip={item.title}
+                      render={
+                        <Link
+                          href={item.url}
+                          aria-label={t(
+                            itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace'
+                          )}
+                        />
+                      }
+                      tooltip={t(itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace')}
                       isActive={pathname === item.url}
                     >
                       <Icon />
-                      <span>{item.title}</span>
+                      <span>
+                        {t(itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace')}
+                      </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
@@ -115,7 +155,7 @@ export default function AppSidebar() {
                   />
                 }
               >
-                <span className='truncate'>Account</span>
+                <span className='truncate'>{t('account')}</span>
                 <Icons.chevronsDown className='ml-auto size-4' />
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -127,7 +167,7 @@ export default function AppSidebar() {
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className='p-0 font-normal'>
                     <div className='text-muted-foreground px-1 py-1.5 text-sm'>
-                      Sign in to manage your account
+                      {t('signInHint')}
                     </div>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>

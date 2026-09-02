@@ -25,10 +25,13 @@ import type {
   Literature,
   Evidence
 } from '@/lib/domain';
+import { useTranslations } from 'next-intl';
 import { PageHeader, PageState, StatusBadge } from './shared';
 
 export function CompareView() {
   const router = useRouter();
+  const t = useTranslations('Compare');
+  const common = useTranslations('Common');
   const [projects, setProjects] = useState<Project[]>([]);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projectId, setProjectId] = useState('');
@@ -48,8 +51,8 @@ export function CompareView() {
     void api
       .listProjects()
       .then(setProjects)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Unable to load projects.'));
-  }, []);
+      .catch((e) => setError(e instanceof Error ? e.message : t('errorLoad')));
+  }, [t]);
   useEffect(() => {
     void api
       .listModelProfiles()
@@ -64,8 +67,8 @@ export function CompareView() {
     void api
       .listProjectExperiments(projectId)
       .then(setExperiments)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Unable to load experiments.'));
-  }, [projectId]);
+      .catch((e) => setError(e instanceof Error ? e.message : t('errorLoad')));
+  }, [projectId, t]);
   function toggle(id: string) {
     setSelectedIds((items) =>
       items.includes(id)
@@ -106,7 +109,7 @@ export function CompareView() {
       );
       setPoints(Object.fromEntries(loaded));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to compare experiments.');
+      setError(e instanceof Error ? e.message : t('errorCompare'));
     } finally {
       setBusy(false);
     }
@@ -133,7 +136,7 @@ export function CompareView() {
       });
       router.push(`/dashboard/analysis/${run.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to run scientific analysis.');
+      setError(e instanceof Error ? e.message : t('errorAnalysis'));
     } finally {
       setBusy(false);
     }
@@ -141,13 +144,10 @@ export function CompareView() {
   if (error && !projects.length) return <PageState error={error} />;
   return (
     <div className='flex flex-1 flex-col gap-6 px-4 pt-4 pb-8 md:px-6'>
-      <PageHeader
-        title='Compare experiments'
-        description='Compare structured properties and compatible measurement overlays within one project.'
-      />
+      <PageHeader title={t('title')} description={t('description')} />
       <Card>
         <CardHeader>
-          <CardTitle>Choose experiments</CardTitle>
+          <CardTitle>{t('selectExperiments')}</CardTitle>
         </CardHeader>
         <CardContent className='grid gap-4'>
           <select
@@ -159,7 +159,7 @@ export function CompareView() {
               setResult(null);
             }}
           >
-            <option value=''>Choose a project</option>
+            <option value=''>{t('chooseProject')}</option>
             {projects.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.code} · {item.title}
@@ -180,7 +180,7 @@ export function CompareView() {
                 <span className='flex-1'>
                   <span className='font-medium'>{item.title}</span>
                   <span className='block text-xs text-muted-foreground'>
-                    {item.code} · template v{item.template_version}
+                    {item.code} · {common('revisionTitle', { number: item.template_version })}
                   </span>
                 </span>
                 <StatusBadge status={item.status} />
@@ -188,10 +188,10 @@ export function CompareView() {
             ))}
           </div>
           <Button onClick={compare} disabled={busy || selectedIds.length < 2}>
-            {busy ? 'Comparing…' : `Compare (${selectedIds.length})`}
+            {busy ? t('comparing') : t('compare', { count: selectedIds.length })}
           </Button>
           {selectedIds.length > 0 && selectedIds.length < 2 ? (
-            <p className='text-sm text-muted-foreground'>Select at least two experiments.</p>
+            <p className='text-sm text-muted-foreground'>{t('selectAtLeastTwo')}</p>
           ) : null}
         </CardContent>
       </Card>
@@ -202,26 +202,25 @@ export function CompareView() {
         <div className='grid gap-6'>
           <Card>
             <CardHeader>
-              <CardTitle>Scientific analysis configuration</CardTitle>
+              <CardTitle>{t('analysisConfiguration')}</CardTitle>
             </CardHeader>
             <CardContent className='grid gap-4'>
-              <p className='text-sm text-muted-foreground'>
-                Frozen revisions and compatible Measurements are sent to the server for validation.
-                Curated Evidence is optional when direct structured support is sufficient.
-              </p>
+              <p className='text-sm text-muted-foreground'>{t('directSupportHint')}</p>
               <div className='grid gap-2 md:grid-cols-2'>
                 <div>
-                  <p className='mb-2 text-sm font-medium'>Experiment revisions</p>
+                  <p className='mb-2 text-sm font-medium'>{t('revisions')}</p>
                   {selectedIds.map((id) => (
                     <p key={id} className='text-xs text-muted-foreground'>
-                      {experiments.find((item) => item.id === id)?.code}: Revision{' '}
-                      {revisions[id]?.revision_number ?? 'missing'}
+                      {experiments.find((item) => item.id === id)?.code}:{' '}
+                      {revisions[id]
+                        ? common('revisionTitle', { number: revisions[id]?.revision_number })
+                        : common('unknown')}
                     </p>
                   ))}
                 </div>
                 <div className='grid gap-2'>
                   <label className='text-sm font-medium' htmlFor='analysis-profile'>
-                    Model profile
+                    {t('analysisProfile')}
                   </label>
                   <select
                     id='analysis-profile'
@@ -240,7 +239,7 @@ export function CompareView() {
               </div>
               <div className='grid gap-2 md:grid-cols-2'>
                 <div>
-                  <p className='mb-1 text-sm font-medium'>Literature (optional)</p>
+                  <p className='mb-1 text-sm font-medium'>{t('literature')}</p>
                   {literature.map((item) => (
                     <label key={item.id} className='flex items-center gap-2 text-xs'>
                       <input
@@ -259,7 +258,7 @@ export function CompareView() {
                   ))}
                 </div>
                 <div>
-                  <p className='mb-1 text-sm font-medium'>Curated Evidence (0–25, optional)</p>
+                  <p className='mb-1 text-sm font-medium'>{t('curatedEvidence')}</p>
                   {evidence.map((item) => (
                     <label key={item.id} className='flex items-center gap-2 text-xs'>
                       <input
@@ -284,19 +283,19 @@ export function CompareView() {
                   busy || !profiles.some((item) => item.key === profileKey && item.available)
                 }
               >
-                {busy ? 'Running analysis…' : 'Analyse selected experiments'}
+                {busy ? t('runningAnalysis') : t('runAnalysis')}
               </Button>
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Structured property differences</CardTitle>
+              <CardTitle>{t('structuredDifferences')}</CardTitle>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Property</TableHead>
+                    <TableHead>{t('property')}</TableHead>
                     {result.experiments.map((item) => (
                       <TableHead key={item.id}>{item.code}</TableHead>
                     ))}
@@ -316,17 +315,17 @@ export function CompareView() {
                 </TableBody>
               </Table>
               {result.structured_differences.every((row) => !row.differs) ? (
-                <p className='text-sm text-muted-foreground'>No structured differences.</p>
+                <p className='text-sm text-muted-foreground'>{t('noDifferences')}</p>
               ) : null}
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Measurement overlays</CardTitle>
+              <CardTitle>{t('measurementOverlays')}</CardTitle>
             </CardHeader>
             <CardContent className='grid gap-6'>
               {result.measurements.length === 0 ? (
-                <p className='text-sm text-muted-foreground'>No measurements selected.</p>
+                <p className='text-sm text-muted-foreground'>{t('noMeasurements')}</p>
               ) : (
                 <>
                   {result.measurements.map((item) => (
@@ -336,7 +335,7 @@ export function CompareView() {
                           {item.name} · {item.experiment_id}
                         </span>
                         <span className={item.compatible ? 'text-primary' : 'text-destructive'}>
-                          {item.compatible ? 'Compatible' : item.incompatibility_reason}
+                          {item.compatible ? t('compatible') : item.incompatibility_reason}
                         </span>
                       </div>
                       {item.compatible ? (

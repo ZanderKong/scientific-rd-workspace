@@ -13,26 +13,21 @@ import {
   InfobarTrigger,
   useInfobar
 } from '@/components/ui/infobar';
-
-// Default/fallback data when no content is set
-const defaultData = {
-  title: 'Documentation',
-  sections: [
-    {
-      title: 'Getting Started',
-      description: 'Learn how to get started with this application.',
-      links: [
-        {
-          title: 'Installation Guide',
-          url: '#'
-        }
-      ]
-    }
-  ]
-};
+import { useTranslations } from 'next-intl';
 
 export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) {
   const { content } = useInfobar();
+  const t = useTranslations('Metadata');
+  const defaultData = {
+    title: t('documentation'),
+    sections: [
+      {
+        title: t('gettingStarted'),
+        description: t('gettingStartedDescription'),
+        links: [{ title: t('installationGuide'), url: '#' }]
+      }
+    ]
+  };
   const data = content || defaultData;
 
   return (
@@ -63,7 +58,7 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
                     {section.links && section.links.length > 0 && (
                       <div className='flex flex-col gap-2'>
                         <h4 className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
-                          Learn more
+                          {t('learnMore')}
                         </h4>
                         <ul className='flex flex-col gap-1.5'>
                           {section.links.map((link) => (

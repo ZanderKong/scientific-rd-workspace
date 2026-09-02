@@ -3,14 +3,38 @@ import { navGroups } from '@/config/nav-config';
 import { KBarAnimator, KBarPortal, KBarPositioner, KBarProvider, KBarSearch } from 'kbar';
 import { Kbd } from '@/components/ui/kbd';
 import { useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import RenderResults from './render-result';
 import useThemeSwitching from './use-theme-switching';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
+import { useTranslations } from 'next-intl';
+
+const navLabelKeys = {
+  Workspace: 'workspace',
+  Research: 'research',
+  Knowledge: 'knowledge',
+  'AI & Evaluation': 'aiEvaluation',
+  Overview: 'overview',
+  Projects: 'projects',
+  Experiments: 'experiments',
+  Compare: 'compare',
+  Literature: 'literature',
+  Analysis: 'analysis',
+  Evaluations: 'evaluations'
+} as const;
 
 export default function KBar({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
+  const t = useTranslations('Navigation');
+  const common = useTranslations('Common');
+  const label = useCallback(
+    (value: string) => {
+      const key = navLabelKeys[value as keyof typeof navLabelKeys];
+      return key ? t(key) : value;
+    },
+    [t]
+  );
 
   // These action are for the navigation
   const actions = useMemo(() => {
@@ -27,11 +51,11 @@ export default function KBar({ children }: { children: React.ReactNode }) {
         navItem.url !== '#'
           ? {
               id: `${navItem.title.toLowerCase()}Action`,
-              name: navItem.title,
+              name: label(navItem.title),
               shortcut: navItem.shortcut,
               keywords: navItem.title.toLowerCase(),
-              section: 'Navigation',
-              subtitle: `Go to ${navItem.title}`,
+              section: t('workspace'),
+              subtitle: `${common('open')}: ${label(navItem.title)}`,
               perform: () => navigateTo(navItem.url)
             }
           : null;
@@ -40,18 +64,18 @@ export default function KBar({ children }: { children: React.ReactNode }) {
       const childActions =
         navItem.items?.map((childItem) => ({
           id: `${childItem.title.toLowerCase()}Action`,
-          name: childItem.title,
+          name: label(childItem.title),
           shortcut: childItem.shortcut,
           keywords: childItem.title.toLowerCase(),
-          section: navItem.title,
-          subtitle: `Go to ${childItem.title}`,
+          section: label(navItem.title),
+          subtitle: `${common('open')}: ${label(childItem.title)}`,
           perform: () => navigateTo(childItem.url)
         })) ?? [];
 
       // Return only valid actions (ignoring null base actions for containers)
       return baseAction ? [baseAction, ...childActions] : childActions;
     });
-  }, [router, filteredGroups]);
+  }, [common, filteredGroups, label, router, t]);
 
   return (
     <KBarProvider actions={actions}>
@@ -61,6 +85,7 @@ export default function KBar({ children }: { children: React.ReactNode }) {
 }
 const KBarComponent = ({ children }: { children: React.ReactNode }) => {
   useThemeSwitching();
+  const common = useTranslations('Common');
 
   return (
     <>
@@ -76,13 +101,13 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
             <div className='text-muted-foreground flex items-center gap-3 border-t px-3 py-2 text-xs'>
               <span className='flex items-center gap-1'>
                 <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd> navigate
+                <Kbd>↓</Kbd> {common('open')}
               </span>
               <span className='flex items-center gap-1'>
-                <Kbd>↵</Kbd> open
+                <Kbd>↵</Kbd> {common('open')}
               </span>
               <span className='flex items-center gap-1'>
-                <Kbd>esc</Kbd> close
+                <Kbd>esc</Kbd> {common('close')}
               </span>
             </div>
           </KBarAnimator>

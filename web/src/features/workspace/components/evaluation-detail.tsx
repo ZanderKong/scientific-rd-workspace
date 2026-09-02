@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api-client';
 import type { EvaluationRun } from '@/lib/domain';
 import { BackLink, ButtonLink, PageHeader, PageState, StatusBadge } from './shared';
+import { useTranslations } from 'next-intl';
 
 const terminal = new Set([
   'completed',
@@ -17,15 +17,16 @@ const terminal = new Set([
 ]);
 
 export function EvaluationDetail({ evaluationRunId }: { evaluationRunId: string }) {
+  const t = useTranslations('Evaluation');
   const [run, setRun] = useState<EvaluationRun | null>(null);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     try {
       setRun(await api.getEvaluationRun(evaluationRunId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to load evaluation run.');
+      setError(e instanceof Error ? e.message : t('errorLoad'));
     }
-  }, [evaluationRunId]);
+  }, [evaluationRunId, t]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -44,37 +45,40 @@ export function EvaluationDetail({ evaluationRunId }: { evaluationRunId: string 
     try {
       setRun(await api.cancelEvaluationRun(run!.id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to cancel evaluation.');
+      setError(e instanceof Error ? e.message : t('errorCancel'));
     }
   }
   return (
     <div className='flex flex-1 flex-col gap-6 px-4 pt-3 pb-8 md:px-6'>
-      <BackLink href='/dashboard/evaluations'>Evaluations</BackLink>
+      <BackLink href='/dashboard/evaluations'>{t('title')}</BackLink>
       <PageHeader
-        title='Evaluation run'
-        description={`Dataset ${run.dataset_version}`}
+        title={t('runTitle')}
+        description={t('dataset', { version: run.dataset_version })}
         action={<StatusBadge status={run.status} />}
       />
       <Card>
         <CardHeader>
-          <CardTitle>Run configuration</CardTitle>
+          <CardTitle>{t('configuration')}</CardTitle>
         </CardHeader>
         <CardContent className='grid gap-2 text-sm'>
           <p>
-            <strong>Progress:</strong> {run.completed_cases}/{run.total_cases} · passed{' '}
-            {run.passed_cases} · failed {run.failed_cases} · errors {run.error_cases}
+            <strong>{t('progress')}:</strong> {run.completed_cases}/{run.total_cases} ·{' '}
+            {t('passed')} {run.passed_cases} · {t('failed')} {run.failed_cases} · {t('errors')}{' '}
+            {run.error_cases}
           </p>
           <p>
-            <strong>Model:</strong> {run.model_profile_key} · {run.structured_output_mode} · prompt
-            v{run.prompt_version}
+            <strong>{t('model')}:</strong> {run.model_profile_key} · {run.structured_output_mode} ·
+            prompt v{run.prompt_version}
           </p>
           <p>
-            <strong>Judge:</strong>{' '}
-            {run.judge_enabled ? `${run.judge_model_profile_key} (optional)` : 'disabled'}
+            <strong>{t('judge')}:</strong>{' '}
+            {run.judge_enabled
+              ? `${run.judge_model_profile_key} (${t('optional')})`
+              : t('disabled')}
           </p>
           {!terminal.has(run.status) && (
             <Button variant='destructive' onClick={() => void cancel()}>
-              Cancel run
+              {t('cancel')}
             </Button>
           )}
         </CardContent>
@@ -85,19 +89,20 @@ export function EvaluationDetail({ evaluationRunId }: { evaluationRunId: string 
             <CardContent className='grid gap-2 py-4 text-sm'>
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <span>
-                  <Badge variant='outline'>
-                    {result.evaluation_case?.case_type?.replace('_', ' ') ?? 'case'}
-                  </Badge>{' '}
-                  <strong>Case {result.ordinal + 1}</strong>
+                  {result.evaluation_case?.case_type ? (
+                    <StatusBadge status={result.evaluation_case.case_type} />
+                  ) : null}{' '}
+                  <strong>{t('case', { number: result.ordinal + 1 })}</strong>
                 </span>
                 <StatusBadge status={result.status} />
               </div>
               <p>
-                <strong>Deterministic:</strong> {JSON.stringify(result.deterministic_scores_json)}
+                <strong>{t('deterministic')}:</strong>{' '}
+                {JSON.stringify(result.deterministic_scores_json)}
               </p>
               {result.judge_scores_json && (
                 <p>
-                  <strong>Model judge:</strong> {JSON.stringify(result.judge_scores_json)}
+                  <strong>{t('modelJudge')}:</strong> {JSON.stringify(result.judge_scores_json)}
                 </p>
               )}
               {result.error_message && (
@@ -117,7 +122,7 @@ export function EvaluationDetail({ evaluationRunId }: { evaluationRunId: string 
                     variant='ghost'
                     size='sm'
                   >
-                    Source Finding
+                    {t('sourceFinding')}
                   </ButtonLink>
                 )}
                 {result.replay_analysis_run_id && (
@@ -126,7 +131,7 @@ export function EvaluationDetail({ evaluationRunId }: { evaluationRunId: string 
                     variant='outline'
                     size='sm'
                   >
-                    Replay Analysis
+                    {t('replayAnalysis')}
                   </ButtonLink>
                 )}
               </div>

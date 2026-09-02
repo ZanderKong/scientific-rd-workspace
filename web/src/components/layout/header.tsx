@@ -4,6 +4,7 @@ import { Separator } from '../ui/separator';
 import { Breadcrumbs } from '../breadcrumbs';
 import SearchInput from '../search-input';
 import { ThemeModeToggle } from '../themes/theme-mode-toggle';
+import { LocaleSwitcher } from './locale-switcher';
 
 export default function Header() {
   return (
@@ -18,6 +19,7 @@ export default function Header() {
         <div className='hidden md:flex'>
           <SearchInput />
         </div>
+        <LocaleSwitcher />
         <ThemeModeToggle />{' '}
       </div>
     </header>

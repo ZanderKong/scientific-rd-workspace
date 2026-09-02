@@ -89,6 +89,21 @@ https://github.com/eclipsesource/jsonforms
 License:
 MIT。
 
+## 4.1 next-intl
+
+用途：
+- workspace UI 的 `zh-CN` 默认 locale 与 `en` fallback。
+- server/client message loading、first-party locale cookie 和 active-locale formatting。
+
+使用：
+作为 package dependency 使用；不引入 URL locale prefix，不把 locale 参数扩散到 backend/API。
+
+License:
+MIT（版本锁定在 `web/package-lock.json`）。
+
+Upstream:
+https://next-intl.dev/
+
 ## 5. LiteLLM
 
 Phase 3 M1–M9 embeds the LiteLLM Python SDK behind the Workspace `AIProvider` interface. The

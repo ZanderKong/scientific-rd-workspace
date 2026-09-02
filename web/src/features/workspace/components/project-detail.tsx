@@ -8,8 +8,10 @@ import type { Experiment, Project } from '@/lib/domain';
 import { ExperimentTable } from './experiment-table';
 import { BackLink, ButtonLink, PageHeader, PageState, StatusBadge } from './shared';
 import { ProjectForm } from './project-form';
+import { useTranslations } from 'next-intl';
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
+  const t = useTranslations('Projects');
   const [project, setProject] = useState<Project | null>(null);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [editing, setEditing] = useState(false);
@@ -26,45 +28,47 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       setProject(p);
       setExperiments(e);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load project.');
+      setError(err instanceof Error ? err.message : t('notFound'));
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
   useEffect(() => {
     void load();
   }, [load]);
   if (loading || error || !project)
     return (
       <div className='flex flex-1 flex-col px-4 pt-4 md:px-6'>
-        <PageState loading={loading} error={error || (!project ? 'Project not found.' : '')} />
+        <PageState loading={loading} error={error || (!project ? t('notFound') : '')} />
       </div>
     );
   return (
     <div className='flex flex-1 flex-col px-4 pt-3 pb-8 md:px-6'>
-      <BackLink href='/dashboard/projects' children='Projects' />
+      <BackLink href='/dashboard/projects' children={t('title')} />
       <PageHeader
         title={project.title}
-        description={`${project.code} · ${project.description || 'No description yet.'}`}
+        description={`${project.code} · ${project.description || t('descriptionPlaceholder')}`}
         action={
           <div className='flex gap-2'>
             <Button variant='outline' onClick={() => setEditing((v) => !v)}>
-              {editing ? 'Close edit' : 'Edit project'}
+              {editing ? t('closeEdit') : t('edit')}
             </Button>
             <ButtonLink href={`/dashboard/projects/${project.id}/experiments/new`}>
-              New experiment
+              {t('newExperiment')}
             </ButtonLink>
           </div>
         }
       />
       <div className='mb-6 flex items-center gap-2'>
         <StatusBadge status={project.status} />
-        <span className='text-sm text-muted-foreground'>{experiments.length} experiments</span>
+        <span className='text-sm text-muted-foreground'>
+          {t('experimentsCount', { count: experiments.length })}
+        </span>
       </div>
       {editing && (
         <Card className='mb-6'>
           <CardHeader>
-            <CardTitle>Edit project</CardTitle>
+            <CardTitle>{t('edit')}</CardTitle>
           </CardHeader>
           <CardContent>
             <ProjectForm
@@ -79,10 +83,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </Card>
       )}
       <div className='mb-3 flex items-center justify-between'>
-        <h2 className='text-lg font-semibold'>Experiments</h2>
-        <span className='text-sm text-muted-foreground'>
-          Immutable revisions are created from each saved record.
-        </span>
+        <h2 className='text-lg font-semibold'>{t('experimentsHeading')}</h2>
+        <span className='text-sm text-muted-foreground'>{t('revisionsDescription')}</span>
       </div>
       <ExperimentTable experiments={experiments} />
     </div>

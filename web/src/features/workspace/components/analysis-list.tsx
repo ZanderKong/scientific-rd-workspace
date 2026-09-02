@@ -5,8 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api-client';
 import type { AnalysisRun, Project } from '@/lib/domain';
 import { ButtonLink, PageHeader, PageState, StatusBadge, formatDate } from './shared';
+import { useLocale, useTranslations } from 'next-intl';
+import { parseLocale } from '@/i18n/config';
 
 export function AnalysisList() {
+  const locale = parseLocale(useLocale());
+  const t = useTranslations('Analysis');
+  const common = useTranslations('Common');
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState('');
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
@@ -31,10 +36,7 @@ export function AnalysisList() {
   }, [projectId]);
   return (
     <div className='flex flex-1 flex-col gap-6 px-4 pt-4 pb-8 md:px-6'>
-      <PageHeader
-        title='Scientific analysis'
-        description='Structured Findings and human review over frozen scientific context.'
-      />
+      <PageHeader title={t('title')} description={t('description')} />
       {loading || error ? (
         <PageState loading={loading} error={error} />
       ) : (
@@ -44,7 +46,7 @@ export function AnalysisList() {
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
           >
-            <option value=''>Choose a project</option>
+            <option value=''>{common('chooseProject')}</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.code} · {p.title}
@@ -53,8 +55,8 @@ export function AnalysisList() {
           </select>
           {runs.length === 0 ? (
             <PageState
-              empty='No analysis runs yet. Start one from Compare.'
-              action={<ButtonLink href='/dashboard/compare'>Open Compare</ButtonLink>}
+              empty={t('noRuns')}
+              action={<ButtonLink href='/dashboard/compare'>{t('openCompare')}</ButtonLink>}
             />
           ) : (
             <div className='grid gap-4'>
@@ -70,11 +72,12 @@ export function AnalysisList() {
                   </CardHeader>
                   <CardContent className='flex flex-wrap items-center justify-between gap-3 text-sm'>
                     <span>
-                      {formatDate(run.created_at)} · {run.findings.length} Findings ·{' '}
-                      {run.structured_output_mode}
+                      {formatDate(run.created_at, locale)} ·{' '}
+                      {common('findingsCount', { count: run.findings.length })} ·{' '}
+                      {t('structuredOutput')}: {run.structured_output_mode}
                     </span>
                     <ButtonLink href={`/dashboard/analysis/${run.id}`} variant='outline' size='sm'>
-                      Inspect run
+                      {t('inspectRun')}
                     </ButtonLink>
                   </CardContent>
                 </Card>
