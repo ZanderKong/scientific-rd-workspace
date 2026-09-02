@@ -342,8 +342,14 @@ export function MeasurementData({
                   >
                     <div className='font-medium'>{item.name}</div>
                     <div className='text-xs text-muted-foreground'>
-                      {t(item.measurement_type)} · {t('rowCount', { count: item.row_count })} ·{' '}
-                      {item.x_unit} / {item.y_unit}
+                      {t(
+                        item.measurement_type === 'spectral_response'
+                          ? 'spectralResponse'
+                          : item.measurement_type === 'time_series'
+                            ? 'timeSeries'
+                            : 'otherXY'
+                      )}{' '}
+                      · {t('rowCount', { count: item.row_count })} · {item.x_unit} / {item.y_unit}
                     </div>
                   </button>
                 ))}
