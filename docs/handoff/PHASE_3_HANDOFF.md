@@ -2,15 +2,16 @@
 
 ## 1. Release status
 
-- **Verdict: `PHASE 3 NOT YET RELEASED`**
-- **Implementation head:** `c0248f0` (`Format Phase 3 browser surfaces`); final handoff commits
-  `ef1b6c6`, `835cca9` and `8968e6a` are documentation-only and pushed to `main`.
+- **Verdict: `PHASE 3 PASS`**
+- **Release commit:** recorded after this closeout; annotated tag `v0.1-demo` points to the same
+  accepted commit.
+- **Implementation head before documentation closeout:** `c863495` (`Fix DeepSeek V4 strict JSON
+  analysis smoke`).
 - **Accepted baseline before this final batch:** `58b74eb`.
 - **M1–M7:** accepted and preserved; no redesign was made.
 - **M8–M9:** implemented and locally audited.
-- **M10:** PostgreSQL 17/fixture CI and offline browser gates passed. The required live LiteLLM
-  smoke is not complete because no provider credentials were configured in this environment.
-- No `v0.1-demo` tag was created. Do not treat this handoff as a release until the live smoke passes.
+- **M10:** PostgreSQL 17/fixture CI, frontend gates, offline browser audit, and the required live
+  LiteLLM Workspace smoke all passed.
 
 ## 2. M8 — gated prefilled draft Experiment
 
@@ -62,9 +63,9 @@ workflow's seed assertion confirms exactly 3 `reference_case` and 3 `bad_case` r
 | Browser M8 flow | PASS | Fixture review → prefill → edit → explicit draft submit → detail provenance |
 | Browser responsive/error check | PASS | 1024px and 1280px; no captured console errors |
 | Browser mixed Evaluation | PASS | Fixture dataset 6/6 terminal results, sequential one-worker run |
-| PostgreSQL 17 GitHub Actions | PASS | [Phase 3 Scientific AI CI run #33596950448](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33596950448) on `8968e6a` |
-| Phase 1 regression | PASS | [Phase 1 CI run #33596950451](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33596950451) on `8968e6a` |
-| Live LiteLLM analysis smoke | NOT RUN | No `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY` or live model profile was configured; no external call was attempted |
+| PostgreSQL 17 GitHub Actions | PASS | [Phase 3 Scientific AI CI run #33600400812](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33600400812) on `c863495` |
+| Phase 1 regression | PASS | [Phase 1 CI run #33600400781](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33600400781) on `c863495` |
+| Live LiteLLM analysis smoke | PASS | 2026-09-02 14:45:19 +0800, external to CI; `deepseek-live`, requested `deepseek/deepseek-v4-flash`, resolved `deepseek-v4-flash`, `json_object`, AnalysisRun `d864d74c-4ae6-416d-a17b-f6c018381a11`, prompt SHA-256 `fe5faec4364fb0b71091c499865e38c3d327cf60c7c46197990582305bc24b78`, provider response ID `99f06ebe-9867-4b21-9020-9469e28a28a1` |
 | Langfuse | NON-BLOCKING | Disabled by default; no external call required for this batch |
 
 The Phase 3 workflow is the consolidated `.github/workflows/phase-3-ci.yml`. It uses PostgreSQL 17,
@@ -72,6 +73,23 @@ checks blank and populated Phase 2→head migrations, parity, seed idempotency a
 then runs all backend and frontend gates. CI uses FixtureProvider and Langfuse disabled. Evaluation
 deployment remains exactly one API process/worker (`uvicorn ... --workers 1`); PostgreSQL is not a
 cross-worker queue and multi-worker deployment is unsupported.
+
+### Live provider acceptance detail
+
+The request used the real application path `Workspace API → embedded LiteLLMProvider → DeepSeek
+Chat Completions → json_object → direct JSON decode → Workspace Pydantic validation → scientific
+reference/direct-support validation → deterministic Evidence Gate → database persistence`. This
+Docker-free smoke used the application's SQLite fallback; PostgreSQL 17 persistence and migration
+parity were separately verified in the passing GitHub Actions run above. The
+run completed with 3 Findings, 0 curated EvidenceRecord links, and verified direct structured
+support; all three gates were `partially_supported` with separate `medium` confidence labels and
+material-limitations rationale. The provider output decoded as direct JSON and matched the persisted
+validated response. A refresh GET returned the same completed run and Findings.
+
+The model produced conservative comparative/observational Findings rather than a causal claim; this
+is a scientific-quality note, not a validation bypass. Earlier compatibility failures were retained
+as failed Runs with zero Findings, no validated output, and no raw output, confirming atomic failure
+behavior. The raw output contained no credential value, and no secret was logged or committed.
 
 ## 5. Invariants preserved
 
@@ -84,11 +102,10 @@ cross-worker queue and multi-worker deployment is unsupported.
 - No Measurement Compare redesign, LangGraph, RAG, embeddings, pgvector, MCP, queue, or other Phase 2/3
   deferred functionality was added.
 
-## 6. Required next action before release
+## 6. Release closeout
 
-Configure one live LiteLLM model profile and its provider credential outside CI, execute one manual
-analysis smoke, and record provider/model metadata, structured-output mode, prompt hash, response ID
-and resulting run status here. If it passes, update this verdict to `PHASE 3 PASS` and create the
-annotated `v0.1-demo` tag. Until then the exact release verdict remains:
+The required live provider gate passed outside CI. The final documentation commit is tagged
+`v0.1-demo` only after the accepted code, PostgreSQL 17 CI, frontend gates, and this live AnalysisRun
+were verified. The working tree is clean and the local `api/.env` remains ignored by Git.
 
-**PHASE 3 NOT YET RELEASED**
+**PHASE 3 PASS**

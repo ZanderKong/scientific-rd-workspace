@@ -6,9 +6,10 @@
 - Phase 2 is formally closed as **PASS**; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
 - Accepted source commit: `939bf82`; implementation commit: `b916292`.
 - PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
-- Phase 3 Milestones 1–9 are implemented from the approved plan; M10's offline gates passed.
-  Current verdict: **PHASE 3 NOT YET RELEASED** because the mandatory live LiteLLM smoke is pending.
-  PostgreSQL 17 evidence is GitHub Actions run `33596500483` on commit `c0248f0`. See
+- Phase 3 M1–M10 are implemented from the approved plan and the required external live LiteLLM
+  Workspace smoke passed. Current verdict: **PHASE 3 PASS**; release tag `v0.1-demo` is created
+  on the final closeout commit. PostgreSQL 17 evidence is GitHub Actions run `33600400812` on
+  `c863495`; Phase 1 regression is `33600400781`. See
   [Phase 3 交接报告](PHASE_3_HANDOFF.md).
 
 ## 仓库
@@ -70,6 +71,6 @@ cd ../web && npm install && npm run dev
 
 ## 交接建议
 
-Phase 1 与 Phase 2 均已正式关闭并通过 PostgreSQL 17 CI。Phase 3 M8–M9 已完成 gated draft
-Experiment provenance 与确定性六案例演示；M10 离线门禁完成，但 live LiteLLM smoke 仍是发布前
-必要条件。单进程/单 worker、immutable template/revision/provenance 保证继续有效。
+Phase 1 与 Phase 2 均已正式关闭并通过 PostgreSQL 17 CI。Phase 3 M8–M10 已完成 gated draft
+Experiment provenance、确定性六案例演示、PostgreSQL/前端门禁和外部 live LiteLLM smoke；发布
+标签为 `v0.1-demo`。单进程/单 worker、immutable template/revision/provenance 保证继续有效。

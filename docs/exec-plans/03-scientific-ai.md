@@ -1,6 +1,6 @@
 # Execution Plan 03 — Scientific AI + Evaluation
 
-**Status:** M8–M9 COMPLETE — M10 OFFLINE GATES COMPLETE; live LiteLLM smoke pending
+**Status:** COMPLETE — PHASE 3 PASS
 
 **Stable baseline:** Phase 1 and Phase 2 PASS; M1–M4 accepted at `4680dad`; M5–M7 accepted at `6162dc3`; final implementation head is recorded in the Phase 3 handoff
 
@@ -1526,8 +1526,15 @@ The first implementation batch stopped after Milestone 4 as required. It is addi
 - **M10:** Consolidated the PostgreSQL 17 workflow as `.github/workflows/phase-3-ci.yml`; it runs blank
   and populated Phase 2→head migrations, parity, seed twice with 3+3 case assertions, all backend
   tests, frontend lint/format/typecheck/tests/build, and the one-process/one-worker contract. The
-  offline FixtureProvider/browser audit is complete. A live LiteLLM analysis smoke with configured
-  credentials remains mandatory before release; no `v0.1-demo` tag is permitted before it passes.
+  offline FixtureProvider/browser audit passed, and the final live LiteLLM Workspace smoke passed
+  outside CI using DeepSeek `deepseek/deepseek-v4-flash` in `json_object` mode. The accepted run is
+  `d864d74c-4ae6-416d-a17b-f6c018381a11`; the release handoff records its validation metadata and
+  Evidence Gate result.
+- **Live-provider compatibility correction:** `LiteLLMProvider` now disables DeepSeek V4 thinking
+  for strict JSON requests and includes the Workspace JSON Schema plus conditional/reference
+  orientation rules in the `json_object` system instruction. Direct JSON decoding, Pydantic and
+  scientific-reference validation remain strict; no extraction, repair, or autonomous retry was
+  introduced. Ruff and all 45 backend tests pass after this correction.
 
 # 17. Final v0.1-demo Browser Scenario
 
@@ -1601,4 +1608,6 @@ The handoff must record migrations, model/profile/prompt versions, CI runs, brow
 
 **Highest implementation risks:** frozen-context correctness and size bounds; distinguishing direct comparative support from causal support; provider variability in `json_object` mode; quality drift in approved Reference Cases; atomic Finding/gate persistence after provider failures; single-worker Evaluation misdeployment and interruption semantics; ensuring optional Langfuse never becomes a hidden dependency; preserving user authority in the prefilled draft flow.
 
-**Review verdict:** READY FOR EXECUTION. The human-review amendments are incorporated; execute Phase 3 only within the documented scope and acceptance criteria.
+**Execution verdict:** COMPLETE — `PHASE 3 PASS`. The human-review amendments were implemented and
+all documented P0 acceptance criteria, including the external live-provider gate, passed. The
+annotated `v0.1-demo` release tag is created only on the accepted closeout commit.

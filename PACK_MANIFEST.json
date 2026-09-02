@@ -1,9 +1,9 @@
 {
   "package": "scientific-rd-workspace-codex-pack",
   "version": "0.1",
-  "active_phase": "03-scientific-ai-m8-m10-closeout",
+  "active_phase": "03-scientific-ai-complete",
   "execution_plan": "docs/exec-plans/03-scientific-ai.md",
   "phase_2": "closed-pass",
-  "phase_3": "m1-m9-accepted-m10-live-smoke-pending",
+  "phase_3": "pass-v0.1-demo",
   "recommended_entrypoint": "AGENTS.md"
 }

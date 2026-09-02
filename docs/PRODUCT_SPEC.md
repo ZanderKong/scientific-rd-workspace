@@ -147,8 +147,8 @@ Experiment 某个可追溯时间点的 snapshot。
 - Benchmark/Regression view
 - final demo polish
 
-当前实现进度：Phase 3 M1–M9 已实现并通过本地回归门禁；M10 的 PostgreSQL/前端/离线浏览器
-审计已完成，仍需一次配置凭据的 live LiteLLM smoke 才能发布。AI 仅产生冻结上下文上的结构化 Finding
+当前实现进度：Phase 3 M1–M10 已实现，并通过 PostgreSQL 17、前端、浏览器及外部 live LiteLLM
+smoke；当前发布状态为 `PHASE 3 PASS`（`v0.1-demo`）。AI 仅产生冻结上下文上的结构化 Finding
 与非权威建议，Evidence Gate 由服务端确定性策略计算，不能直接修改 Experiment、Measurement、
 Evidence、Literature、Revision 或 ReviewDecision。
 
