@@ -1,8 +1,8 @@
 # Execution Plan 03 — Scientific AI + Evaluation
 
-**Status:** M5–M7 IMPLEMENTED — M8 UNBLOCKED; Milestone 8 and later are not started
+**Status:** M5–M7 COMPLETE — M8 UNBLOCKED; Milestone 8 and later are not started
 
-**Stable baseline:** Phase 1 and Phase 2 PASS; Phase 3 implementation baseline is commit `4384191`
+**Stable baseline:** Phase 1 and Phase 2 PASS; M1–M4 accepted at `4680dad`; M5–M7 accepted at `6162dc3`
 
 **Release target:** `v0.1-demo`
 
@@ -1503,9 +1503,11 @@ The first implementation batch stopped after Milestone 4 as required. It is addi
   Langfuse dataset/score projection that never gates local PostgreSQL results.
 - **Verification:** API Ruff and pytest pass (31 tests), SQLite migration/parity reaches `0006`, and
   Web lint (inherited starter warnings only), format, typecheck, Vitest (6 tests), and production build
-  pass. Browser routes compile and are reachable through the existing shell; live provider/Langfuse
-  calls are intentionally not required. M8 gated draft-Experiment, M9 fixtures, and M10 release audit
-  remain outside this batch.
+  pass. The local browser flow was exercised at 1024px and 1280px. GitHub Actions run
+  `33587413638` passed the PostgreSQL 17 blank/populated migration, parity, seed idempotency, backend
+  tests, frontend gates, and M5–M7 head commit `6162dc3`; parallel Phase 1 regression run
+  `33587413676` also passed. Live provider/Langfuse calls are intentionally not required. M8 gated
+  draft-Experiment, M9 fixtures, and M10 release audit remain outside this batch.
 
 # 17. Final v0.1-demo Browser Scenario
 

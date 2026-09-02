@@ -8,7 +8,8 @@
 - PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
 - Phase 3 Milestones 1–7 are implemented from the approved plan; work stops before Milestone 8.
   Current verdict: **M5–M7 ACCEPTED — M8 UNBLOCKED**. This is not an overall Phase 3
-  PASS or release closeout. PostgreSQL 17 evidence is GitHub Actions run `33584109673`. See
+  PASS or release closeout. PostgreSQL 17 evidence is GitHub Actions run `33587413638` on
+  commit `6162dc3`. See
   [Phase 3 交接报告](PHASE_3_HANDOFF.md).
 
 ## 仓库

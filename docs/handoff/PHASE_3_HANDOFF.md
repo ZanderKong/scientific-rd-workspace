@@ -7,6 +7,7 @@
   Langfuse projection. M8 gated draft Experiment was not started.
 - **Phase 1 baseline:** `9bb494d`; **Phase 2 accepted commit:** `939bf82`.
 - **Implementation baseline before this batch:** `4680dad` (M1–M4 accepted).
+- **Accepted implementation commit:** `6162dc3` (`Implement Phase 3 M5-M7 analysis evaluation workflow`).
 - **Closeout date:** 2026-09-02.
 - No `v0.1-demo` release tag is claimed; M9/M10 final fixtures, browser audit and release gate remain.
 
@@ -80,11 +81,17 @@
 | Frontend format/type/tests/build | PASS | `cd web && npm run format:check && npm run typecheck && npm run test && npm run build` |
 | Frontend lint | PASS | `cd web && npm run lint`; only inherited starter warnings remain |
 | Browser route compilation | PASS | Next production build includes `/dashboard/analysis`, `/dashboard/analysis/[analysisRunId]`, `/dashboard/evaluations`, `/dashboard/evaluations/[evaluationRunId]` |
+| Browser workflow | PASS | Local fixture flow at 1024px/1280px: Compare → Analyse → Accept/Needs Evidence/Reject → controlled Bad/Reference Case → Evaluation `202` run → terminal results and replay/source links |
 | Live model/Langfuse | NOT REQUIRED | FixtureProvider/mocks only; Langfuse disabled by default and projection is best-effort |
 
-PostgreSQL 17 remains the authoritative acceptance database. The existing Phase 2 GitHub Actions run
-`33522448986` and Phase 3 M1–M4 run `33584333549` remain green baselines; a new CI workflow run for this
-M5–M7 batch must be recorded before M10 release closeout.
+PostgreSQL 17 is the authoritative acceptance database. The M5–M7 implementation passed the
+[Phase 2 Scientific Workflow CI run #33587413638](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33587413638)
+on commit `6162dc39a4f7e8c407c686822254c7c3ea575041` (`completed / success`, 2026-09-02 UTC).
+Its `Backend / PostgreSQL 17` job passed blank migration, migration/model parity, populated Phase 2
+upgrade to the `0006` head, seed idempotency, Ruff checks and the complete backend suite; its Frontend
+job passed lint, format check, typecheck, tests and production build. The parallel [Phase 1 CI run
+#33587413676](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33587413676)
+also completed successfully on the same commit, preserving the earlier Phase 1 regression gate.
 
 ## 7. Files changed
 
@@ -99,8 +106,7 @@ M5–M7 batch must be recorded before M10 release closeout.
 ## 8. Remaining scope and risks
 
 - M8 gated prefilled draft Experiment and `ExperimentProvenanceLink` write path remain deferred.
-- M9 deterministic six-case seed/demo polish and M10 PostgreSQL 17 CI consolidation, complete browser
-  audit, live LiteLLM smoke and release tag remain.
+- M9 deterministic six-case seed/demo polish and M10 final release audit/tag remain.
 - Optional judge is intentionally allowed to be unavailable; deterministic results remain authoritative.
 - Multi-worker/durable Evaluation execution is unsupported by design; do not deploy v0.1 with more than
   one API worker.
