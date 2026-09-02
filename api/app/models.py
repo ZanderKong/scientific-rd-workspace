@@ -594,6 +594,36 @@ def _reject_delete(_mapper: Any, _connection: Any, target: Any) -> None:
     raise ValueError(f"{target.__class__.__name__} is immutable")
 
 
+RUN_PROVENANCE_FIELDS = {
+    "project_id",
+    "purpose",
+    "provider_key",
+    "model_profile_key",
+    "structured_output_mode",
+    "requested_model",
+    "prompt_key",
+    "prompt_version",
+    "prompt_sha256",
+    "prompt_snapshot_json",
+    "output_schema_version",
+    "workflow_version",
+    "generation_parameters_json",
+}
+
+
+def _reject_run_provenance_update(
+    _mapper: Any, _connection: Any, target: ScientificAnalysisRun
+) -> None:
+    if target.status == "building_context":
+        return
+    state = inspect(target)
+    changed = {attribute.key for attribute in state.attrs if attribute.history.has_changes()}
+    if changed & RUN_PROVENANCE_FIELDS:
+        raise ValueError("ScientificAnalysisRun provenance is immutable after context building")
+
+
+event.listen(ScientificAnalysisRun, "before_update", _reject_run_provenance_update)
+event.listen(ScientificAnalysisRun, "before_delete", _reject_delete)
 event.listen(AnalysisContextSnapshot, "before_update", _reject_update)
 event.listen(AnalysisContextSnapshot, "before_delete", _reject_delete)
 event.listen(Finding, "before_update", lambda m, c, t: _reject_update(m, c, t, ("review_status",)))

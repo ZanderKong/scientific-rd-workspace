@@ -2,8 +2,8 @@
 
 ## 1. Status
 
-- **Implementation status:** Milestones 1–4 complete in this batch; work intentionally stops before
-  Milestone 5. This is not a Phase 3 release closeout or `PHASE 3 PASS` claim.
+- **Implementation status:** Milestones 1–4 corrective closeout fixes complete; work intentionally
+  stops before Milestone 5. This is not a Phase 3 release closeout or `PHASE 3 PASS` claim.
 - **Implementation baseline:** Phase 3 work started from `4384191` (approved plan and handoff).
 - **Implementation commit:** the commit containing this handoff (`Implement Phase 3 milestones 1-4`);
   use `git log -1` for its final hash.
@@ -62,26 +62,46 @@
 - Suggested next experiments are normalized, template-validated, non-authoritative JSON proposals;
   no endpoint creates or mutates an Experiment.
 
-## 3. Verification Performed
+## 3. Corrective closeout fixes
+
+- Provider context limits now count sampled points (maximum 200 per Measurement and 2,000 total),
+  while retaining original row counts, endpoint-preserving sampling metadata, and the full immutable
+  `points_sha256`.
+- Langfuse 4.15.1 now uses the v4 `create_trace_id(seed=...)` and `start_observation(...,
+  as_type="generation")` APIs with `base_url`. `LANGFUSE_CAPTURE_CONTENT=false` is the default;
+  disabled capture sends only IDs/hashes, model/profile, prompt/version metadata, usage, latency and
+  status, never context, notes, abstracts, rendered prompts, or model output.
+- ScientificAnalysisRun configuration/provenance fields are ORM-guarded once the run leaves
+  `building_context`; named lifecycle/result fields remain writable by the run service.
+- Capability preflight no longer treats generic `response_format` as native-schema proof:
+  `native_schema` requires explicit profile smoke verification, while `json_object` may use provider
+  response-format support. Unsupported profiles report an unavailable reason.
+- Exactly one retry is allowed for timeout, rate-limit, unavailable, or retryable 5xx provider
+  failures. Authentication, bad request, unsupported capability, invalid JSON/schema, and scientific
+  reference failures are never retried; attempt/retry counts are recorded in run metadata.
+- The PostgreSQL 17 populated-Phase-2-upgrade/parity check is now part of the Phase 2 CI workflow so
+  the M1 acceptance can be evidenced on GitHub without live model or Langfuse calls.
+
+## 4. Verification Performed
 
 | Check | Result | Evidence |
 | --- | --- | --- |
 | API formatter/lint | PASS | `uv run ruff format app tests && uv run ruff check app tests` |
-| API regression and Phase 3 tests | PASS | `uv run pytest -q` — 24 tests |
+| API regression and Phase 3 tests | PASS | `uv run pytest -q` — 28 tests |
 | Blank-database Alembic upgrade | PASS locally | SQLite fallback smoke to `0005_scientific_analysis` |
-| PostgreSQL 17 Phase 3 acceptance | NOT RUN | reserved for the later complete Phase 3/M10 closeout |
+| PostgreSQL 17 blank/populated migration acceptance | PENDING | CI workflow includes blank head, populated `0004` upgrade, hash parity and `alembic check` |
 | Frontend gates/browser audit | NOT RUN | no M5 UI was implemented |
-| Live LiteLLM/Langfuse calls | NOT RUN | tests use FixtureProvider; Langfuse disabled |
+| Live LiteLLM/Langfuse calls | NOT RUN | tests use FixtureProvider/mocks; Langfuse content capture is disabled |
 
 The repository remains additive to Phase 1/2. Existing immutable template-version rows, revision
 snapshots, Measurement/import provenance, Literature/Evidence semantics, and attachment storage
 contracts were not rewritten.
 
-## 4. Intentionally Deferred
+## 5. Intentionally Deferred
 
 M5 analysis/review UX; M6–M7 EvaluationCase/EvaluationRun/runner and evaluation UI; M8 gated prefilled
 draft Experiment provenance flow; M9 demo fixtures/browser story; M10 PostgreSQL 17 CI, full audit and
 release handoff. Multi-worker evaluation is unsupported by design and no queue was introduced.
 
-Phase 3 remains **IN PROGRESS**, not passed. Continue from the approved execution plan and preserve
-the Phase 1/2 contracts above.
+Phase 3 remains **IN PROGRESS**, not passed until the PostgreSQL 17 corrective acceptance is green.
+Continue from the approved execution plan and preserve the Phase 1/2 contracts above.

@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+import app.scientific_ai_service as scientific_ai_service
+from app.ai_provider import (
+    AIRequest,
+    AIResult,
+    FixtureProvider,
+    LangfuseAdapter,
+    LiteLLMProvider,
+    ModelProfile,
+    ProviderFailure,
+)
 from app.context_builder import ContextValidationError, build_scientific_context
 from app.core.config import Settings, get_settings
 from app.main import app
@@ -197,6 +209,45 @@ def test_context_is_frozen_and_factor_diff_is_name_addressable(db):
     db.commit()
     with pytest.raises(ContextValidationError, match="changed since revision"):
         build_scientific_context(db, project.id, payload, Settings())
+
+
+def test_context_sampling_limits_provider_points_and_preserves_full_hash(db):
+    project, _, experiments, measurements = _make_fixture(db, 2)
+    marker_hash = "a" * 64
+    measurements[0].row_count = 2501
+    measurements[0].points_sha256 = marker_hash
+    db.add_all(
+        [
+            MeasurementPoint(
+                measurement_id=measurements[0].id,
+                ordinal=ordinal,
+                source_row_number=ordinal + 2,
+                x_value=float(ordinal),
+                y_value=float(ordinal) / 10,
+            )
+            for ordinal in range(2, 2501)
+        ]
+    )
+    db.commit()
+    db.expire_all()
+    payload = AnalysisRunCreate.model_validate(_payload(experiments, measurements))
+    settings = Settings(ai_max_measurement_points=200, ai_max_total_points=2000)
+    context, digest, _ = build_scientific_context(db, project.id, payload, settings)
+    sampled = context["measurements"][0]
+    assert sampled["sampling"] == {
+        "sampled": True,
+        "original_count": 2501,
+        "sample_count": 200,
+        "method": "even_ordinal_with_endpoints",
+    }
+    assert len(sampled["points"]) == 200
+    assert sampled["points"][0]["ordinal"] == 0
+    assert sampled["points"][-1]["ordinal"] == 2500
+    assert sampled["points_sha256"] == marker_hash
+    assert sum(len(item["points"]) for item in context["measurements"]) <= 2000
+    context2, digest2, _ = build_scientific_context(db, project.id, payload, settings)
+    assert context2 == context
+    assert digest2 == digest
 
 
 def test_fixture_analysis_supports_comparison_without_evidence_and_caps_causality(db, monkeypatch):
@@ -400,3 +451,132 @@ def test_gate_covers_partial_and_contradicted_states(db):
     )
     run2 = create_analysis_run(db, project.id, payload2, Settings(), fixture_response=contradicted)
     assert run2.findings[0].evidence_gate_status == "contradicted"
+
+
+def test_langfuse_v4_adapter_uses_deterministic_observation_and_redacts_content(monkeypatch):
+    calls: dict[str, object] = {}
+
+    class FakeObservation:
+        def end(self):
+            calls["ended"] = True
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            calls["client_kwargs"] = kwargs
+
+        def create_trace_id(self, *, seed):
+            calls["seed"] = seed
+            return "0" * 32
+
+        def start_observation(self, **kwargs):
+            calls["observation"] = kwargs
+            return FakeObservation()
+
+        def flush(self):
+            calls["flushed"] = True
+
+    monkeypatch.setitem(sys.modules, "langfuse", SimpleNamespace(Langfuse=FakeClient))
+    settings = Settings(
+        langfuse_enabled=True,
+        langfuse_public_key="pk-test",
+        langfuse_secret_key="sk-test",
+        langfuse_base_url="https://example.test",
+        langfuse_capture_content=False,
+    )
+    run_id = uuid.uuid4()
+    request = AIRequest(
+        model="fixture://analysis",
+        structured_output_mode="native_schema",
+        messages=[{"role": "user", "content": "secret scientific context"}],
+        response_schema={"type": "object"},
+        timeout=1,
+        max_output_tokens=10,
+        metadata={"context": {"secret": True}, "context_sha256": "b" * 64, "prompt_version": 1},
+    )
+    result = AIResult(
+        parsed={"secret": True},
+        raw_output='{"secret":true}',
+        requested_model=request.model,
+        resolved_model=request.model,
+        response_id="response-1",
+        provider_model_version="fixture-v1",
+        usage={"completion_tokens": 2},
+        finish_reason="stop",
+        latency_ms=4,
+    )
+    trace_id = LangfuseAdapter(settings).record_analysis(run_id, request, result)
+    assert trace_id == "0" * 32
+    assert calls["seed"] == f"analysis-run:{run_id}"
+    assert calls["client_kwargs"]["base_url"] == "https://example.test"
+    assert "host" not in calls["client_kwargs"]
+    observation = calls["observation"]
+    assert observation["input"] is None
+    assert observation["output"] is None
+    assert "secret" not in str(observation["metadata"])
+    assert calls["ended"] is True
+    assert calls["flushed"] is True
+
+
+def test_provider_retries_once_for_transient_failure_only(db, monkeypatch):
+    project, _, experiments, measurements = _make_fixture(db, 2)
+    delegate = FixtureProvider()
+
+    class FlakyProvider:
+        attempts = 0
+
+        def generate_structured(self, request, response_model):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise ProviderFailure("provider_timeout", "temporary", retryable=True)
+            return delegate.generate_structured(request, response_model)
+
+    flaky = FlakyProvider()
+    monkeypatch.setattr(scientific_ai_service, "_provider", lambda profile: flaky)
+    payload = AnalysisRunCreate.model_validate(_payload(experiments, measurements))
+    run = create_analysis_run(db, project.id, payload, Settings())
+    assert flaky.attempts == 2
+    assert run.model_metadata_json["attempt_count"] == 2
+    assert run.model_metadata_json["retry_count"] == 1
+    run.requested_model = "tampered-model"
+    with pytest.raises(ValueError, match="provenance is immutable"):
+        db.commit()
+    db.rollback()
+
+    class InvalidProvider:
+        attempts = 0
+
+        def generate_structured(self, request, response_model):
+            self.attempts += 1
+            raise ProviderFailure("invalid_provider_json", "bad JSON", retryable=True)
+
+    invalid = InvalidProvider()
+    monkeypatch.setattr(scientific_ai_service, "_provider", lambda profile: invalid)
+    with pytest.raises(AnalysisFailure):
+        create_analysis_run(db, project.id, payload, Settings())
+    assert invalid.attempts == 1
+
+
+def test_capability_preflight_does_not_equate_native_schema_with_json_object(monkeypatch):
+    fake_litellm = SimpleNamespace(
+        get_supported_openai_params=lambda model: ["response_format"],
+    )
+    monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
+    native = ModelProfile(
+        key="native",
+        model="provider/model",
+        label="Native",
+        provider="litellm",
+        structured_output_mode="native_schema",
+    )
+    json_object = ModelProfile(
+        key="json",
+        model="provider/model",
+        label="JSON",
+        provider="litellm",
+        structured_output_mode="json_object",
+    )
+    assert LiteLLMProvider.capability(native) == (
+        False,
+        "native_schema requires profile smoke validation",
+    )
+    assert LiteLLMProvider.capability(json_object) == (True, None)

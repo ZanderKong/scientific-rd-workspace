@@ -56,6 +56,28 @@ class AnalysisFailure(RuntimeError):
         self.run_id = run_id
 
 
+TRANSIENT_PROVIDER_CODES = {
+    "provider_timeout",
+    "provider_rate_limit",
+    "provider_unavailable",
+    "provider_server_error",
+}
+
+
+def _generate_with_retry(
+    provider: Any, request: AIRequest, response_model: type[ScientificAnalysisResponseV1]
+) -> tuple[AIResult, int]:
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            return provider.generate_structured(request, response_model), attempts
+        except ProviderFailure as exc:
+            if attempts == 1 and exc.retryable and exc.code in TRANSIENT_PROVIDER_CODES:
+                continue
+            raise
+
+
 def resolve_profile(settings: Settings, key: str) -> ModelProfile:
     profiles = load_model_profiles(settings)
     profile = profiles.get(key)
@@ -536,6 +558,7 @@ def create_analysis_run(
     db.add(run)
     db.commit()
     db.refresh(run)
+    attempts = 0
     try:
         context, context_hash, context_size = build_scientific_context(
             db, project_id, payload, settings
@@ -566,14 +589,24 @@ def create_analysis_run(
             timeout=settings.ai_timeout_seconds,
             max_output_tokens=settings.ai_max_output_tokens,
             temperature=0.0,
-            metadata={"context": context, "analysis_run_id": str(run.id)},
+            metadata={
+                "context": context,
+                "analysis_run_id": str(run.id),
+                "context_sha256": context_hash,
+                "prompt_key": "scientific_analysis",
+                "prompt_version": payload.prompt_version,
+                "prompt_sha256": prompt_hash,
+                "output_schema_version": 1,
+                "workflow_version": 1,
+                "model_profile_key": profile.key,
+            },
         )
         provider: Any = (
             FixtureProvider(fixture_response)
             if fixture_response is not None
             else _provider(profile)
         )
-        result: AIResult = provider.generate_structured(request, ScientificAnalysisResponseV1)
+        result, attempts = _generate_with_retry(provider, request, ScientificAnalysisResponseV1)
         parsed = ScientificAnalysisResponseV1.model_validate(result.parsed)
         run.raw_output_text = result.raw_output
         run.validated_output_json = parsed.model_dump(mode="json")
@@ -585,6 +618,8 @@ def create_analysis_run(
             "finish_reason": result.finish_reason,
             "latency_ms": result.latency_ms,
             "context_sha256": context_hash,
+            "attempt_count": attempts,
+            "retry_count": attempts - 1,
         }
         for ordinal, candidate in enumerate(parsed.findings):
             _make_finding(db, project_id, run.id, ordinal, candidate, context)
@@ -610,6 +645,11 @@ def create_analysis_run(
         failed.status = "failed"
         failed.error_code = getattr(exc, "code", "invalid_provider_response")
         failed.error_message = str(exc)[:2000]
+        failed.model_metadata_json = {
+            **(failed.model_metadata_json or {}),
+            "attempt_count": attempts,
+            "retry_count": max(attempts - 1, 0),
+        }
         failed.completed_at = _now()
         db.commit()
         raise AnalysisFailure(

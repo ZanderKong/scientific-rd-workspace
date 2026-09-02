@@ -92,6 +92,7 @@ def post_analysis(
         elif exc.code in {
             "provider_auth",
             "provider_rate_limit",
+            "provider_server_error",
             "provider_unavailable",
             "provider_error",
             "invalid_provider_json",

@@ -262,9 +262,11 @@ def build_scientific_context(
     ).all()
     if len(measurement_rows) != len(payload.measurement_ids):
         raise ContextValidationError("measurement_not_found", "selected measurement not found")
+    measurements_by_id = {item.id: item for item in measurement_rows}
     selected_measurements: list[dict[str, Any]] = []
     measurement_ids = {item.id for item in measurement_rows}
-    for measurement in measurement_rows:
+    for measurement_id in payload.measurement_ids:
+        measurement = measurements_by_id[measurement_id]
         if measurement.experiment_id not in by_id:
             raise ContextValidationError(
                 "measurement_project_mismatch", "measurement is outside selected experiments"
@@ -324,7 +326,7 @@ def build_scientific_context(
                 },
             }
         )
-    total_points = sum(item["sampling"]["original_count"] for item in selected_measurements)
+    total_points = sum(len(item["points"]) for item in selected_measurements)
     if total_points > settings.ai_max_total_points:
         raise ContextValidationError("analysis_context_too_large", "too many measurement points")
 
@@ -338,6 +340,7 @@ def build_scientific_context(
         raise ContextValidationError(
             "literature_selection_invalid", "literature is outside selected project"
         )
+    literature_by_id = {item.id: item for item in literature_rows}
     selected_literature = [
         {
             "id": str(item.id),
@@ -349,7 +352,8 @@ def build_scientific_context(
             "url": item.url,
             "abstract": item.abstract,
         }
-        for item in literature_rows
+        for literature_id in payload.literature_ids
+        for item in [literature_by_id[literature_id]]
     ]
 
     evidence_rows = db.scalars(
@@ -363,7 +367,9 @@ def build_scientific_context(
         )
     selected_literature_ids = {item.id for item in literature_rows}
     selected_evidence: list[dict[str, Any]] = []
-    for evidence in evidence_rows:
+    evidence_by_id = {item.id: item for item in evidence_rows}
+    for evidence_id in payload.evidence_ids:
+        evidence = evidence_by_id[evidence_id]
         if evidence.status != "active":
             raise ContextValidationError(
                 "evidence_withdrawn", "withdrawn EvidenceRecord cannot be selected"

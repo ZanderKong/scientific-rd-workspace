@@ -28,6 +28,8 @@ class ModelProfile:
     label: str
     provider: str
     structured_output_mode: str
+    native_schema_verified: bool = False
+    json_object_verified: bool = False
     available: bool = True
     capability_reason: str | None = None
 
@@ -92,6 +94,8 @@ def load_model_profiles(settings: Settings) -> dict[str, ModelProfile]:
             label=label,
             provider=item.get("provider") or _profile_provider(model),
             structured_output_mode=mode,
+            native_schema_verified=bool(item.get("native_schema_verified", False)),
+            json_object_verified=bool(item.get("json_object_verified", False)),
         )
     return result
 
@@ -241,6 +245,8 @@ class LiteLLMProvider:
         except Exception as exc:  # provider metadata is best-effort during preflight
             return False, f"capability lookup failed: {type(exc).__name__}"
         if profile.structured_output_mode == "native_schema":
+            if not profile.native_schema_verified:
+                return False, "native_schema requires profile smoke validation"
             supported = "response_format" in (params or [])
         else:
             supported = "response_format" in (params or [])
@@ -278,7 +284,13 @@ class LiteLLMProvider:
             )
         except Exception as exc:
             error_name = exc.__class__.__name__.lower()
-            if "timeout" in error_name:
+            status_code = getattr(exc, "status_code", None)
+            if status_code is None:
+                response_obj = getattr(exc, "response", None)
+                status_code = getattr(response_obj, "status_code", None)
+            if isinstance(status_code, int) and status_code >= 500:
+                code = "provider_server_error"
+            elif "timeout" in error_name:
                 code = "provider_timeout"
             elif "auth" in error_name or "permission" in error_name:
                 code = "provider_auth"
@@ -288,7 +300,17 @@ class LiteLLMProvider:
                 code = "provider_unavailable"
             else:
                 code = "provider_error"
-            raise ProviderFailure(code, str(exc)[:1000], retryable=True) from exc
+            raise ProviderFailure(
+                code,
+                str(exc)[:1000],
+                retryable=code
+                in {
+                    "provider_timeout",
+                    "provider_rate_limit",
+                    "provider_unavailable",
+                    "provider_server_error",
+                },
+            ) from exc
         try:
             choice = response.choices[0]
             content = choice.message.content
@@ -352,6 +374,7 @@ class LangfuseAdapter:
         )
 
     def trace_id(self, analysis_run_id: uuid.UUID) -> str:
+        # The SDK creates a valid trace ID while preserving deterministic seed correlation.
         return f"analysis-run:{analysis_run_id}"
 
     def record_analysis(
@@ -366,17 +389,37 @@ class LangfuseAdapter:
             client = Langfuse(
                 public_key=self.settings.langfuse_public_key,
                 secret_key=self.settings.langfuse_secret_key,
-                host=self.settings.langfuse_host,
+                base_url=self.settings.langfuse_base_url,
             )
-            trace = client.trace(id=trace_id, metadata={"analysis_run_id": str(run_id)})
-            trace.generation(
+            sdk_trace_id = client.create_trace_id(seed=trace_id)
+            safe_metadata = {
+                "analysis_run_id": str(run_id),
+                "model": request.model,
+                "structured_output_mode": request.structured_output_mode,
+                "usage": result.usage,
+                "latency_ms": result.latency_ms,
+                "finish_reason": result.finish_reason,
+                "status": "completed",
+                **{
+                    key: value
+                    for key, value in request.metadata.items()
+                    if key.endswith("_sha256") or key.endswith("_version") or key.endswith("_key")
+                },
+            }
+            content = request.messages if self.settings.langfuse_capture_content else None
+            output = result.parsed if self.settings.langfuse_capture_content else None
+            observation = client.start_observation(
+                trace_context={"trace_id": sdk_trace_id},
                 name="scientific-analysis",
+                as_type="generation",
+                input=content,
+                output=output,
+                metadata=safe_metadata,
                 model=request.model,
-                input=request.messages,
-                output=result.parsed,
-                usage=result.usage,
+                usage_details=result.usage,
             )
+            observation.end()
             client.flush()
-            return trace_id
+            return sdk_trace_id
         except Exception as exc:
             raise ProviderFailure("langfuse_sync_failed", str(exc)[:1000]) from exc

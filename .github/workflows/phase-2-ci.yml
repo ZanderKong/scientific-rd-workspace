@@ -44,6 +44,58 @@ jobs:
         run: uv run alembic upgrade head
       - name: Verify migration/model parity
         run: uv run alembic check
+      - name: Verify populated Phase 2 upgrade to Phase 3 M1 head
+        env:
+          PHASE2_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd_phase2
+        run: |
+          PGPASSWORD=scientific createdb -h localhost -U scientific scientific_rd_phase2
+          DATABASE_URL="$PHASE2_DATABASE_URL" uv run alembic upgrade 0004_literature_evidence
+          DATABASE_URL="$PHASE2_DATABASE_URL" uv run python -m app.seed
+          DATABASE_URL="$PHASE2_DATABASE_URL" uv run python - <<'PY' > /tmp/phase2-hashes-before.txt
+          import hashlib
+          import json
+
+          from app.db import SessionLocal
+          from app.models import EvidenceRecord, Experiment, ExperimentRevision, LiteratureRecord, Measurement, MeasurementImport
+
+          def digest(value):
+              return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
+
+          with SessionLocal() as db:
+              rows = {
+                  "experiments": [(str(item.id), digest({"structured_data": item.structured_data, "note_document": item.note_document, "template_id": str(item.template_id), "template_version": item.template_version})) for item in db.query(Experiment).order_by(Experiment.id).all()],
+                  "revisions": [(str(item.id), digest(item.snapshot_json)) for item in db.query(ExperimentRevision).order_by(ExperimentRevision.id).all()],
+                  "measurements": [(str(item.id), digest({"summary_json": item.summary_json, "points_sha256": item.points_sha256})) for item in db.query(Measurement).order_by(Measurement.id).all()],
+                  "imports": [(str(item.id), digest(item.mapping_json)) for item in db.query(MeasurementImport).order_by(MeasurementImport.id).all()],
+                  "literature": [(str(item.id), digest({"title": item.title, "authors_json": item.authors_json, "publication_year": item.publication_year, "doi": item.doi, "url": item.url, "provider": item.provider, "external_id": item.external_id})) for item in db.query(LiteratureRecord).order_by(LiteratureRecord.id).all()],
+                  "evidence": [(str(item.id), digest(item.source_snapshot_json)) for item in db.query(EvidenceRecord).order_by(EvidenceRecord.id).all()],
+              }
+          print(json.dumps(rows, sort_keys=True, separators=(",", ":")))
+          PY
+          DATABASE_URL="$PHASE2_DATABASE_URL" uv run alembic upgrade head
+          DATABASE_URL="$PHASE2_DATABASE_URL" uv run alembic check
+          DATABASE_URL="$PHASE2_DATABASE_URL" uv run python - <<'PY' > /tmp/phase2-hashes-after.txt
+          import hashlib
+          import json
+
+          from app.db import SessionLocal
+          from app.models import EvidenceRecord, Experiment, ExperimentRevision, LiteratureRecord, Measurement, MeasurementImport
+
+          def digest(value):
+              return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
+
+          with SessionLocal() as db:
+              rows = {
+                  "experiments": [(str(item.id), digest({"structured_data": item.structured_data, "note_document": item.note_document, "template_id": str(item.template_id), "template_version": item.template_version})) for item in db.query(Experiment).order_by(Experiment.id).all()],
+                  "revisions": [(str(item.id), digest(item.snapshot_json)) for item in db.query(ExperimentRevision).order_by(ExperimentRevision.id).all()],
+                  "measurements": [(str(item.id), digest({"summary_json": item.summary_json, "points_sha256": item.points_sha256})) for item in db.query(Measurement).order_by(Measurement.id).all()],
+                  "imports": [(str(item.id), digest(item.mapping_json)) for item in db.query(MeasurementImport).order_by(MeasurementImport.id).all()],
+                  "literature": [(str(item.id), digest({"title": item.title, "authors_json": item.authors_json, "publication_year": item.publication_year, "doi": item.doi, "url": item.url, "provider": item.provider, "external_id": item.external_id})) for item in db.query(LiteratureRecord).order_by(LiteratureRecord.id).all()],
+                  "evidence": [(str(item.id), digest(item.source_snapshot_json)) for item in db.query(EvidenceRecord).order_by(EvidenceRecord.id).all()],
+              }
+          print(json.dumps(rows, sort_keys=True, separators=(",", ":")))
+          PY
+          cmp /tmp/phase2-hashes-before.txt /tmp/phase2-hashes-after.txt
       - name: Backend lint and format
         run: |
           uv run ruff check app tests
