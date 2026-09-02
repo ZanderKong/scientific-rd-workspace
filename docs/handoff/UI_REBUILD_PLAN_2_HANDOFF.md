@@ -82,8 +82,8 @@ CI evidence retained from the project baseline:
 
 - [Phase 1 frontend/CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33616425820)
 - [Phase 3 completion/CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33616425909)
-- [Plan 2 closeout Phase 1 CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33651754023) — passed on `d6a94e9`.
-- [Plan 2 closeout Phase 3 Scientific AI CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33651754079) — passed on `d6a94e9`.
+- [Plan 2 closeout Phase 1 CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33654117933) — passed on `714f15e`.
+- [Plan 2 closeout Phase 3 Scientific AI CI run](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33654117891) — passed on `714f15e`.
 
 ## Browser matrix
 
@@ -108,7 +108,7 @@ Critical path used real local seed data: `Overview → Projects → PRJ-001 → 
 
 - Final frontend implementation commit: `150485f4d2138b6326e49839706474e3f76b1e67`
 - Documentation closeout commit: the final `HEAD` after this handoff is committed.
-- Final CI runs: Phase 1 `33651754023` and Phase 3 `33651754079`, both passed.
+- Final CI runs: Phase 1 `33654117933` and Phase 3 `33654117891`, both passed.
 - Worktree clean after final documentation commit: `yes`
 - No new tag created.
 
