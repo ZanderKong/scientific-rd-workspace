@@ -207,7 +207,7 @@ ExperimentRevision 之一，并保留 immutable source snapshot。
 ### Relation
 通用 provenance relation 未来可引入，但 Phase 1 不为了「通用图」重构所有 FK。
 
-## 5. Phase 3 Implemented Concepts (M1–M7)
+## 5. Phase 3 Implemented Concepts (M1–M9)
 
 ### ScientificAnalysisRun
 一次同步、单 provider-call 的科学分析，记录 project、冻结 context、provider/model profile、

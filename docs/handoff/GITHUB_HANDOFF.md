@@ -6,10 +6,9 @@
 - Phase 2 is formally closed as **PASS**; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
 - Accepted source commit: `939bf82`; implementation commit: `b916292`.
 - PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
-- Phase 3 Milestones 1–7 are implemented from the approved plan; work stops before Milestone 8.
-  Current verdict: **M8–M9 COMPLETE — M10 live LiteLLM smoke pending**. This is not an overall Phase 3
-  PASS or release closeout. PostgreSQL 17 evidence is GitHub Actions run `33587413638` on
-  commit `6162dc3`. See
+- Phase 3 Milestones 1–9 are implemented from the approved plan; M10's offline gates passed.
+  Current verdict: **PHASE 3 NOT YET RELEASED** because the mandatory live LiteLLM smoke is pending.
+  PostgreSQL 17 evidence is GitHub Actions run `33596500483` on commit `c0248f0`. See
   [Phase 3 交接报告](PHASE_3_HANDOFF.md).
 
 ## 仓库
@@ -67,7 +66,7 @@ cd ../web && npm install && npm run dev
 
 - 本机没有 Docker，因此早期只执行了 SQLite 本地验证；该限制已由 GitHub Actions 的 PostgreSQL 17 成功验收取代，不再是阶段阻塞项。
 - npm audit 报告 starter 依赖树中存在 3 条 advisory，未执行破坏性强制升级。
-- 本节是仓库级交接记录；Phase 2 的 Measurement、Compare、CSV/XLSX import、Literature 和 Evidence 当前实现状态见 `PHASE_2_HANDOFF.md`。Phase 3 M1–M7 的 AIProvider、冻结上下文、Finding、Evidence Gate、人工评审、Evaluation runner 和 UI 见 `PHASE_3_HANDOFF.md`；M8 草稿实验、RAG、LangGraph、MCP、pgvector 仍延后。
+- 本节是仓库级交接记录；Phase 2 的 Measurement、Compare、CSV/XLSX import、Literature 和 Evidence 当前实现状态见 `PHASE_2_HANDOFF.md`。Phase 3 M1–M9 的 AIProvider、冻结上下文、Finding、Evidence Gate、人工评审、Evaluation runner、gated draft Experiment provenance 和确定性 demo fixtures 见 `PHASE_3_HANDOFF.md`；RAG、LangGraph、MCP、pgvector 仍未引入。
 
 ## 交接建议
 

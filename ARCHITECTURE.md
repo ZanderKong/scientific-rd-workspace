@@ -115,7 +115,7 @@ repository / storage
 - repository：DB persistence
 - storage：binary persistence
 
-### 4.1 Phase 3 scientific analysis boundary (M1–M7)
+### 4.1 Phase 3 scientific analysis boundary (M1–M10)
 
 Scientific Analysis is an additive backend capability. The router delegates to explicit Python
 services that build a frozen, canonical context in PostgreSQL, make one structured provider call,
