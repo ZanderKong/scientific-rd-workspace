@@ -8,6 +8,7 @@
 - **Phase 1 baseline:** `9bb494d`; **Phase 2 accepted commit:** `939bf82`.
 - **Implementation baseline before this batch:** `4680dad` (M1–M4 accepted).
 - **Accepted implementation commit:** `6162dc3` (`Implement Phase 3 M5-M7 analysis evaluation workflow`).
+- **Corrective closeout commit:** `ee11930` (`Fix Phase 3 M5-M7 evaluation closeout issues`).
 - **Closeout date:** 2026-09-02.
 - No `v0.1-demo` release tag is claimed; M9/M10 final fixtures, browser audit and release gate remain.
 
@@ -44,6 +45,16 @@
 - Deterministic scores include structured output, evidence IDs/roles, Direct Structured Support scope,
   comparison correctness, causal guard/non-upgrade, expected Gate, limitations, missing evidence and
   suggestion checks. Optional judge invocation is separate and never changes deterministic pass/fail.
+- Corrective audit fixes freeze the source Finding ordinal and compatible claim/causal-target semantics in
+  every Case; replay selects that ordinal and records an explicit result error when it is missing or
+  incompatible. Bad Cases preserve the rejected Finding and review reason as observed behavior, while
+  expected behavior is bounded by the rejection taxonomy or supplied by the reviewer. Reference Cases may
+  derive expectations from an accepted Finding. Suggestion-path checks read the normalized representation
+  and fail closed when required paths are absent.
+- The runner distinguishes per-case scientific/schema failures from run-wide provider/auth/profile/capability
+  failures. Per-case errors continue sequential execution; global failures persist the current error, mark
+  pending results terminal, stop the run and recompute counts. Completed results and Case snapshots remain
+  immutable. The Analysis UI opens a controlled Bad Case expectation form before submitting a Case.
 
 ## 4. M7 — Evaluation UI and Langfuse projection
 
@@ -75,23 +86,24 @@
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Backend formatting/lint | PASS | `cd api && uv run ruff format --check app tests && uv run ruff check app tests` |
-| Backend tests | PASS | `cd api && uv run pytest -q` — 31 tests, including M1–M4 regression and M6 case/runner coverage |
+| Backend tests | PASS | `cd api && uv run pytest -q` — 43 tests, including M1–M4 regression and corrective M6 replay/case/runner coverage |
 | Blank migration/parity | PASS locally | `DATABASE_URL=sqlite+pysqlite:///... uv run alembic upgrade head`; `uv run alembic check` reports no new operations at `0006` |
 | Evaluation smoke | PASS locally | Fixture analysis → Accept/Reject → controlled case → `202` run → sequential result and deterministic score |
 | Frontend format/type/tests/build | PASS | `cd web && npm run format:check && npm run typecheck && npm run test && npm run build` |
 | Frontend lint | PASS | `cd web && npm run lint`; only inherited starter warnings remain |
 | Browser route compilation | PASS | Next production build includes `/dashboard/analysis`, `/dashboard/analysis/[analysisRunId]`, `/dashboard/evaluations`, `/dashboard/evaluations/[evaluationRunId]` |
-| Browser workflow | PASS | Local fixture flow at 1024px/1280px: Compare → Analyse → Accept/Needs Evidence/Reject → controlled Bad/Reference Case → Evaluation `202` run → terminal results and replay/source links |
+| Browser workflow | PASS | Local fixture flow at 1024px/1280px: Compare → Analyse → Accept/Reject → Bad Case expectation form → Reference Case → mixed Evaluation `202` run → terminal results and replay/source links; no console errors |
 | Live model/Langfuse | NOT REQUIRED | FixtureProvider/mocks only; Langfuse disabled by default and projection is best-effort |
 
-PostgreSQL 17 is the authoritative acceptance database. The M5–M7 implementation passed the
-[Phase 2 Scientific Workflow CI run #33587413638](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33587413638)
-on commit `6162dc39a4f7e8c407c686822254c7c3ea575041` (`completed / success`, 2026-09-02 UTC).
+PostgreSQL 17 is the authoritative acceptance database. The corrective closeout passed the
+[Phase 2 Scientific Workflow CI run #33592081341](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592081341)
+on commit `ee11930aba696afd9c3986fda4967f480aa2dc88` (`completed / success`, 2026-09-02 UTC).
 Its `Backend / PostgreSQL 17` job passed blank migration, migration/model parity, populated Phase 2
-upgrade to the `0006` head, seed idempotency, Ruff checks and the complete backend suite; its Frontend
-job passed lint, format check, typecheck, tests and production build. The parallel [Phase 1 CI run
-#33587413676](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33587413676)
-also completed successfully on the same commit, preserving the earlier Phase 1 regression gate.
+upgrade to the `0006` M7 head, seed idempotency, Ruff checks and all 43 backend tests; its Frontend job
+passed lint, format check, typecheck, 6 tests and production build. The parallel [Phase 1 CI run
+#33592081336](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33592081336)
+also completed successfully on the same commit, preserving the Phase 1 regression gate. The earlier M5–M7
+CI evidence remains recorded in [run #33587413638](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33587413638).
 
 ## 7. Files changed
 
