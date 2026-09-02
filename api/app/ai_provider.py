@@ -273,15 +273,42 @@ class LiteLLMProvider:
             raise ProviderFailure("unsupported_structured_output", "unknown structured output mode")
         started = time.perf_counter()
         try:
-            response = litellm.completion(
-                model=request.model,
-                messages=request.messages,
-                response_format=response_format,
-                timeout=request.timeout,
-                max_tokens=request.max_output_tokens,
-                temperature=request.temperature,
-                seed=request.seed,
-            )
+            completion_kwargs: dict[str, Any] = {
+                "model": request.model,
+                "messages": request.messages,
+                "response_format": response_format,
+                "timeout": request.timeout,
+                "max_tokens": request.max_output_tokens,
+                "temperature": request.temperature,
+                "seed": request.seed,
+            }
+            if request.structured_output_mode == "json_object":
+                # JSON-object mode guarantees valid JSON, but does not carry the
+                # application's field schema to the provider. Include the exact
+                # Workspace schema in the strict prompt so direct decoding is also
+                # followed by the intended Pydantic contract.
+                schema_instruction = (
+                    "Return exactly one JSON object matching this JSON Schema. "
+                    "Do not add, remove, or rename fields; do not include Markdown or prose. "
+                    "Workspace conditional rule: causal_target must be null unless claim_type "
+                    "is causal_claim; every causal_claim must include causal_target. "
+                    "For measurement_comparison and comparison_assertions, relation compares "
+                    "right_measurement_id to left_measurement_id: greater_than means the right "
+                    "value is greater than the left value, and less_than means the right value "
+                    "is less than the left value. Keep the response concise: return no more "
+                    "than 3 findings and short rationales.\n"
+                    f"{json.dumps(request.response_schema, sort_keys=True)}"
+                )
+                completion_kwargs["messages"] = [
+                    *request.messages,
+                    {"role": "system", "content": schema_instruction},
+                ]
+            # DeepSeek V4 enables thinking by default. Its reasoning tokens share the
+            # output budget, which can leave json_object responses empty at our bounded
+            # max_tokens. Disable thinking for this strict JSON adapter path only.
+            if request.model.startswith("deepseek/") and "/deepseek-v4-" in request.model:
+                completion_kwargs["thinking"] = {"type": "disabled"}
+            response = litellm.completion(**completion_kwargs)
         except Exception as exc:
             error_name = exc.__class__.__name__.lower()
             status_code = getattr(exc, "status_code", None)
