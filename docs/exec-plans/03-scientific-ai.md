@@ -1482,7 +1482,8 @@ The first implementation batch stopped after Milestone 4 as required. It is addi
   human ReviewDecision endpoints. Suggested next experiments remain non-authoritative JSON only.
 - **Verification:** `uv run ruff check app tests` and `uv run pytest -q` pass in the API. SQLite is
   used only for local fallback; PostgreSQL 17 blank/populated migration and full backend acceptance
-  passed in GitHub Actions run `33584109673` on corrective commit `0b5ffc4`.
+  passed in GitHub Actions run `33584333549` on synchronized commit `086efc1` (corrective code was
+  introduced in `0b5ffc4`).
 - **Corrective audit:** provider-context limits now count sampled points, deterministic sampling
   preserves endpoints/full hashes, Langfuse uses the v4 observation API with opt-in content capture,
   run provenance is immutable after context building, capability preflight distinguishes native schema

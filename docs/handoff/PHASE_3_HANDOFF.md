@@ -90,7 +90,7 @@
 | API formatter/lint | PASS | `uv run ruff format app tests && uv run ruff check app tests` |
 | API regression and Phase 3 tests | PASS | `uv run pytest -q` — 28 tests |
 | Blank-database Alembic upgrade | PASS locally | SQLite fallback smoke to `0005_scientific_analysis` |
-| PostgreSQL 17 blank/populated migration acceptance | PASS | GitHub Actions run [33584109673](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33584109673) on corrective commit `0b5ffc4`; blank head, populated `0004` upgrade, hash parity and `alembic check` |
+| PostgreSQL 17 blank/populated migration acceptance | PASS | GitHub Actions run [33584333549](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33584333549) on synchronized `main` (`086efc1`); blank head, populated `0004` upgrade, hash parity and `alembic check` |
 | Backend regression against PostgreSQL 17 | PASS | Same run; full pytest suite (28 tests) |
 | Frontend gates/browser audit | PASS for existing Phase 1/2 gates | Same run; lint, format check, typecheck, Vitest and production build; M5 UI remains unimplemented |
 | Live LiteLLM/Langfuse calls | NOT RUN | tests use FixtureProvider/mocks; Langfuse content capture is disabled |
