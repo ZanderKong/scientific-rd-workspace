@@ -3,7 +3,7 @@
 ## 1. Release status
 
 - **Verdict: `PHASE 3 NOT YET RELEASED`**
-- **Current head:** `c0248f0` (`Format Phase 3 browser surfaces`), pushed to `main`.
+- **Current head:** `ef1b6c6` (`Record Phase 3 final handoff and release gate`), pushed to `main`.
 - **Accepted baseline before this final batch:** `58b74eb`.
 - **M1–M7:** accepted and preserved; no redesign was made.
 - **M8–M9:** implemented and locally audited.
@@ -61,8 +61,8 @@ workflow's seed assertion confirms exactly 3 `reference_case` and 3 `bad_case` r
 | Browser M8 flow | PASS | Fixture review → prefill → edit → explicit draft submit → detail provenance |
 | Browser responsive/error check | PASS | 1024px and 1280px; no captured console errors |
 | Browser mixed Evaluation | PASS | Fixture dataset 6/6 terminal results, sequential one-worker run |
-| PostgreSQL 17 GitHub Actions | PASS | [Phase 3 Scientific AI CI run #33596500483](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33596500483) on `c0248f0` |
-| Phase 1 regression | PASS | [Phase 1 CI run #33596500556](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33596500556) on `c0248f0` |
+| PostgreSQL 17 GitHub Actions | PASS | [Phase 3 Scientific AI CI run #33596766443](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33596766443) on `ef1b6c6` |
+| Phase 1 regression | PASS | [Phase 1 CI run #33596766422](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33596766422) on `ef1b6c6` |
 | Live LiteLLM analysis smoke | NOT RUN | No `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY` or live model profile was configured; no external call was attempted |
 | Langfuse | NON-BLOCKING | Disabled by default; no external call required for this batch |
 
