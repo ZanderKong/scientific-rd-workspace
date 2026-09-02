@@ -7,7 +7,9 @@
 - Accepted source commit: `939bf82`; implementation commit: `b916292`.
 - PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
 - Phase 3 Milestones 1–4 are implemented from the approved plan; work stops before Milestone 5.
-  This is not a Phase 3 PASS or release closeout. See [Phase 3 交接报告](PHASE_3_HANDOFF.md).
+  Corrective closeout verdict: **M1–M4 ACCEPTED — M5 UNBLOCKED**. This is not an overall Phase 3
+  PASS or release closeout. PostgreSQL 17 evidence is GitHub Actions run `33584109673`. See
+  [Phase 3 交接报告](PHASE_3_HANDOFF.md).
 
 ## 仓库
 
