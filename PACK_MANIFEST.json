@@ -6,5 +6,7 @@
   "phase_2": "closed-pass",
   "phase_3": "pass-v0.1-demo",
   "ui_i18n_plan_1": "pass",
+  "ui_rebuild_plan_2": "pass",
+  "ui_rebuild_plan_2_handoff": "docs/handoff/UI_REBUILD_PLAN_2_HANDOFF.md",
   "recommended_entrypoint": "AGENTS.md"
 }

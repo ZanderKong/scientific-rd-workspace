@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@/components/ui/table';
 import { api } from '@/lib/api-client';
 import type { AnalysisRun, Project } from '@/lib/domain';
 import { ButtonLink, PageHeader, PageState, StatusBadge, formatDate } from './shared';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseLocale } from '@/i18n/config';
+import { SectionHeader } from './scientific-ui';
 
 export function AnalysisList() {
   const locale = parseLocale(useLocale());
@@ -59,30 +68,59 @@ export function AnalysisList() {
               action={<ButtonLink href='/dashboard/compare'>{t('openCompare')}</ButtonLink>}
             />
           ) : (
-            <div className='grid gap-4'>
-              {runs.map((run) => (
-                <Card key={run.id}>
-                  <CardHeader>
-                    <div className='flex flex-wrap items-center justify-between gap-2'>
-                      <CardTitle className='text-base'>
-                        {run.provider_key} · {run.model_profile_key}
-                      </CardTitle>
-                      <StatusBadge status={run.status} />
-                    </div>
-                  </CardHeader>
-                  <CardContent className='flex flex-wrap items-center justify-between gap-3 text-sm'>
-                    <span>
-                      {formatDate(run.created_at, locale)} ·{' '}
-                      {common('findingsCount', { count: run.findings.length })} ·{' '}
-                      {t('structuredOutput')}: {run.structured_output_mode}
-                    </span>
-                    <ButtonLink href={`/dashboard/analysis/${run.id}`} variant='outline' size='sm'>
-                      {t('inspectRun')}
-                    </ButtonLink>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <Card>
+              <CardHeader>
+                <SectionHeader title={t('runHistory')} description={t('runHistoryHint')} />
+              </CardHeader>
+              <CardContent className='p-0'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('created')}</TableHead>
+                      <TableHead>{t('provider')}</TableHead>
+                      <TableHead>{t('model')}</TableHead>
+                      <TableHead>{t('findings')}</TableHead>
+                      <TableHead>{t('status')}</TableHead>
+                      <TableHead className='text-right'>{t('inspectRun')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => (
+                      <TableRow key={run.id}>
+                        <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>
+                          {formatDate(run.created_at, locale)}
+                        </TableCell>
+                        <TableCell>
+                          <div className='font-medium'>{run.provider_key}</div>
+                          <div className='text-xs text-muted-foreground'>
+                            {run.structured_output_mode}
+                          </div>
+                        </TableCell>
+                        <TableCell className='max-w-56 whitespace-normal text-sm'>
+                          {run.model_profile_key}
+                          <div className='font-mono text-[0.68rem] text-muted-foreground'>
+                            {run.requested_model}
+                          </div>
+                        </TableCell>
+                        <TableCell className='tabular-nums'>{run.findings.length}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={run.status} />
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          <ButtonLink
+                            href={`/dashboard/analysis/${run.id}`}
+                            variant='outline'
+                            size='sm'
+                          >
+                            {t('inspectRun')}
+                          </ButtonLink>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
         </>
       )}

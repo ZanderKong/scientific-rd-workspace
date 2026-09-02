@@ -25,7 +25,14 @@ docs/
 ├── handoff/
 │   ├── PHASE_1_HANDOFF.md
 │   ├── PHASE_2_HANDOFF.md
+│   ├── UI_REBUILD_PLAN_2_HANDOFF.md
 │   └── PHASE_HANDOFF_TEMPLATE.md
+├── assets/ui/
+    ├── overview-zh.png
+    ├── experiment-detail-zh.png
+    ├── compare-zh.png
+    ├── analysis-detail-zh.png
+    └── evaluation-detail-zh.png
 └── references/
     └── SOURCES.md
 ```
@@ -44,7 +51,27 @@ Phase 2 已完成并通过：
 
 Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在提交 `939bf82` 上通过；详情见 `docs/handoff/PHASE_2_HANDOFF.md`。Phase 3 M1–M10 已完成，外部 DeepSeek LiteLLM `json_object` smoke 已通过，发布标签为 `v0.1-demo`。当前确切状态与验证证据见 `docs/handoff/PHASE_3_HANDOFF.md`。
 
-当前 UI Plan 1 已完成：中文 `zh-CN` 为默认 locale，英文 `en` 可切换；locale 通过 first-party cookie 持久化，不改变 URL。UI direction、catalog contract、验收边界与交付证据见 `docs/UI_SPEC.md` 和 `docs/handoff/UI_I18N_PLAN_1_HANDOFF.md`。本批次在 Plan 1 停止，不进入 Plan 2。
+当前 UI Plan 1 已完成，并已完成正式 Plan 2 的 full-site UI rebuild + portfolio polish：中文 `zh-CN` 为默认 locale，英文 `en` 可切换；locale 通过 first-party cookie 持久化，不改变 URL。最终 UI direction、catalog contract、验收边界与交付证据见 `docs/UI_SPEC.md`、`docs/handoff/UI_I18N_PLAN_1_HANDOFF.md` 和 `docs/handoff/UI_REBUILD_PLAN_2_HANDOFF.md`。
+
+## Finished product
+
+Scientific R&D Workspace 是一个以项目、实验、测量、文献、分析和评测为主线的可追溯科研工作台。最终产品壳保持中文优先、英文可切换、轻量表格/列表优先，并把 Evidence Gate、Confidence、人工审核、冻结上下文和 provenance 作为一等信息，而不是把科学内容包装成泛化 dashboard 卡片。
+
+推荐演示路径：`Overview → Projects → PRJ-001 → EXP-045 → Measurements → Compare EXP-041/044/045 → Analysis Detail → human review → Evaluations → Evaluation Detail → Suggested Draft Experiment`。本地 demo seed 提供真实 API 数据；建议从 `http://localhost:3000/dashboard/overview` 开始。
+
+中文桌面端关键界面：
+
+![Overview](docs/assets/ui/overview-zh.png)
+
+![Experiment detail](docs/assets/ui/experiment-detail-zh.png)
+
+![Compare](docs/assets/ui/compare-zh.png)
+
+![Analysis detail](docs/assets/ui/analysis-detail-zh.png)
+
+![Evaluation detail](docs/assets/ui/evaluation-detail-zh.png)
+
+界面契约保持不变：默认中文、`English` 可切换、URL 不增加 locale prefix、`scientific_workspace_locale` 持久化 locale；API/DB enum、scientific prose、Finding 内容、论文元数据和用户输入不被翻译。建议实验草稿由审核后的 Finding 带入，但仍必须经过 schema-driven 表单复核和明确提交。
 
 ## 阶段执行记录
 
@@ -53,6 +80,7 @@ Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在
 3. Phase 2 的 PostgreSQL 17、后端和前端门禁已通过 GitHub Actions。
 4. Phase 1/2 的最终证据分别记录在 `docs/handoff/PHASE_1_HANDOFF.md` 和 `docs/handoff/PHASE_2_HANDOFF.md`。
 5. Phase 3 M1–M10 已按批准计划实现并通过 PostgreSQL 17、前端、浏览器和外部 live LiteLLM 门禁；当前发布为 `PHASE 3 PASS`，标签为 `v0.1-demo`。
+6. UI Plan 1 与正式 UI Plan 2 已完成；Plan 2 只改前端展示层、共享 UI 组织和交付文档，不改变后端、数据库、API contract 或科学新功能。
 
 ## 核心原则
 
@@ -62,7 +90,7 @@ Phase 1 基线为 `9bb494d`。Phase 2 的 PostgreSQL 17 GitHub Actions 验收在
 - 不为了未来需求提前制造微服务。
 - 不重新开发富文本编辑器或通用 Schema Form Engine。
 - 每个阶段必须保持可运行。
-- UI 可以先做到一致、清晰、可演示，不追求最终视觉 polish。
+- UI 保持一致、清晰、可演示，并以最终的科学工作流与可追溯性 polish 为交付标准。
 - Scientific schema、workflow、evidence 和 provenance 才是项目原创价值。
 
 ## Phase 1 技术基线

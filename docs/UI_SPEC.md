@@ -1,9 +1,9 @@
-# UI Spec — Plan 1 UI Direction + i18n Foundation
+# UI Spec — Plan 1 UI Direction + i18n Foundation and Plan 2 Final Rebuild
 
 ## 1. Scope and product posture
 
-本规范描述当前 Plan 1 的可验收 UI：一个中文优先、英文可切换、可追溯的 Scientific R&D Workspace。
-Plan 1 只建立视觉方向与国际化基础，不启动 Plan 2。
+本规范描述 Plan 1 契约与正式 Plan 2 完成后的最终 UI：一个中文优先、英文可切换、可追溯的 Scientific R&D Workspace。
+Plan 1 建立视觉方向与国际化基础；Plan 2 在不改变后端/API/数据库和科学功能边界的前提下完成全站 UI 重建与 portfolio polish。
 
 设计目标：
 
@@ -97,3 +97,22 @@ Evaluation 页面区分 Bad Case / Reference Case、deterministic scores、optio
 ## 9. Plan 1 exit boundary
 
 Plan 1 验收包括 frontend gates、双语 catalog parity、代表页面视觉检查、所有现有 route quick inspect、文档与 handoff。完成后停在 Plan 1；任何后续产品范围不得在本批次实现。
+
+## 10. Plan 2 final UI specification
+
+Plan 2 的最终界面以工作流和证据边界为骨架，不新增产品能力：
+
+- Overview 与 Projects 使用紧凑 summary strip、研究活动表和可筛选的项目表；Projects 不再使用卡片画廊作为主信息架构。
+- Project detail 与 Experiment detail 保留既有 tabs、编辑、保存、clone、revision、attachment 和 measurement 行为；Experiment detail 增加清晰的 Entity identity、provenance 和只读 traceability timeline。
+- New Experiment 的主要输入使用当前模板的 JSON Forms schema/ui schema；Finding 建议只作为 gated prefill，原始 payload 仅在可折叠 technical details 中查看。
+- Measurements 按 `Import → List → Detail` 分层，呈现 stepper-like hierarchy、统计摘要、图表、测量行和冻结 provenance。
+- Compare 先以表格明确选择，最多 5 个实验；结果分为 configuration、differences matrix、compatible overlays 和 secondary literature/evidence，不把结构化 payload 作为首要视觉输出。
+- Literature / Evidence 以 bibliography table 为主；新增文献和 evidence action 在 modal/sheet 中完成，并保留 source attachment 关系。
+- Analysis list 显示 run history；Analysis detail 分开 Evidence Gate、Confidence、Direct Structured Support、Curated Evidence、limitations、risks、missing evidence 和 append-only human review。Finding 详情只展示当前 API 提供的可追溯链接。
+- Evaluation list 明确分成 Bad Cases、Reference Cases 与 Runs；Evaluation detail 使用 metric strip、structured result matrix、failure tags、case context、source/replay links；optional model judge 与 deterministic score 分隔呈现。
+
+共享的最小 primitives 位于 `web/src/features/workspace/components/scientific-ui.tsx`，包括 SectionHeader、MetricStrip、MetadataList、TechnicalDetails、EntityIdentity、EvidenceGateSummary、CaseTypeBadge、ScoreSummary、ProvenanceSummary 和 TraceabilityTimeline；纯展示/格式化与选择上限逻辑位于 `web/src/features/workspace/presentation.ts`。没有引入新的 UI framework 或 React Flow。TraceabilityTimeline 是基于现有 experiment/revision/attachment/provenance、analysis/finding/evidence 数据的只读 fallback，不能创建或暗示 API 中不存在的关系。
+
+Plan 2 保持 Plan 1 locale boundary：`zh-CN` 默认、`en` fallback、无 URL prefix、cookie `scientific_workspace_locale`、`<html lang>` 同步；只翻译 UI copy、状态呈现、表单标题、帮助/错误/空状态以及日期/数字格式，不翻译 canonical enum、scientific content、Finding prose、论文元数据、文件名或模型键。BlockNote 与 JSON Forms 继续使用官方 i18n 接口。
+
+响应式验收目标为 1280px 桌面与 1024px 可操作布局；长表格/横向 tabs 允许局部滚动，页面不发生横向溢出。所有关键 route 在 zh-CN/en、light/dark、loading/empty/error/disabled/selected/focus 状态下保持可理解。真实 demo 截图与最终验收记录见 `docs/assets/ui/` 和 `docs/handoff/UI_REBUILD_PLAN_2_HANDOFF.md`。

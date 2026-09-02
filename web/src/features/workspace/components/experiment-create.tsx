@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api-client';
 import type { ExperimentPrefill, ExperimentTemplate, JsonObject } from '@/lib/domain';
 import { BackLink, PageHeader, StatusBadge } from './shared';
+import { StructuredForm } from './structured-form';
 
 export function ExperimentCreate({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -24,7 +25,7 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
   const [objective, setObjective] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [status, setStatus] = useState('draft');
-  const [structuredText, setStructuredText] = useState('{}');
+  const [structured, setStructured] = useState<JsonObject>({});
   const [prefill, setPrefill] = useState<ExperimentPrefill | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -39,7 +40,7 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
         setTemplateId(suggestion?.template_id ?? items[0]?.id ?? '');
         setTitle(suggestion?.title ?? '');
         setObjective(suggestion?.objective ?? '');
-        setStructuredText(JSON.stringify(suggestion?.structured_data ?? {}, null, 2));
+        setStructured(suggestion?.structured_data ?? {});
       })
       .catch((e) => setError(e.message));
   }, [findingId]);
@@ -48,18 +49,12 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
     setBusy(true);
     setError('');
     try {
-      let structured_data: JsonObject = {};
-      try {
-        structured_data = JSON.parse(structuredText) as JsonObject;
-      } catch {
-        throw new Error(t('invalidJson'));
-      }
       const created = await api.createExperiment(projectId, {
         title,
         objective,
         template_id: templateId,
         status,
-        structured_data,
+        structured_data: structured,
         ...(prefill
           ? {
               suggestion_origin: {
@@ -132,13 +127,22 @@ export function ExperimentCreate({ projectId }: { projectId: string }) {
               </select>
             </div>
             <div className='grid gap-2'>
-              <Label htmlFor='experiment-structured-data'>{t('structuredData')}</Label>
-              <Textarea
-                id='experiment-structured-data'
-                value={structuredText}
-                onChange={(e) => setStructuredText(e.target.value)}
-                className='min-h-40 font-mono text-xs'
-              />
+              <Label>{t('structuredProperties')}</Label>
+              <p className='text-xs leading-5 text-muted-foreground'>{t('structuredFormHint')}</p>
+              {templates.find((template) => template.id === templateId) ? (
+                <StructuredForm
+                  schema={
+                    templates.find((template) => template.id === templateId)?.json_schema ?? {}
+                  }
+                  uiSchema={templates.find((template) => template.id === templateId)?.ui_schema}
+                  data={structured}
+                  onChange={setStructured}
+                />
+              ) : (
+                <p className='rounded-lg border border-dashed p-3 text-sm text-muted-foreground'>
+                  {t('chooseTemplate')}
+                </p>
+              )}
             </div>
             <div className='grid gap-2'>
               <Label htmlFor='experiment-status'>{t('statusLabel')}</Label>

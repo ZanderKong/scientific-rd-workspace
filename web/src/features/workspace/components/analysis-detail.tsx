@@ -12,6 +12,13 @@ import { api } from '@/lib/api-client';
 import type { AnalysisRun, Finding, JsonObject } from '@/lib/domain';
 import { BackLink, PageHeader, PageState, StatusBadge, formatDate } from './shared';
 import { parseLocale } from '@/i18n/config';
+import {
+  EvidenceGateSummary,
+  MetricStrip,
+  SectionHeader,
+  TraceabilityTimeline
+} from './scientific-ui';
+import { formatStructuredValue } from '../presentation';
 
 const reasonCodes = [
   'unsupported_causal_claim',
@@ -59,9 +66,7 @@ const reasonKeys = {
 } as const;
 
 function readableValue(value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+  return formatStructuredValue(value);
 }
 
 function objectValue(value: unknown): JsonObject | null {
@@ -160,7 +165,7 @@ function FindingCard({
     }
   }
   return (
-    <Card className='border-l-4 border-l-primary'>
+    <Card id={`finding-${finding.id}`} className='border-l-4 border-l-primary'>
       <CardHeader>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div>
@@ -173,28 +178,14 @@ function FindingCard({
         </div>
       </CardHeader>
       <CardContent className='grid gap-4 text-sm'>
-        <div className='grid gap-3 md:grid-cols-2'>
-          <div className='rounded-lg border bg-muted/30 p-3'>
-            <div className='mb-2 flex items-center justify-between gap-2'>
-              <h3 className='font-medium'>{t('confidence')}</h3>
-              <Badge variant='secondary'>
-                {t(confidenceKeys[finding.confidence_label] ?? 'confidenceMedium')}
-              </Badge>
-            </div>
-            <p className='text-muted-foreground'>{finding.confidence_rationale}</p>
-          </div>
-          <div className='rounded-lg border border-primary/30 bg-primary/5 p-3'>
-            <div className='mb-2 flex items-center justify-between gap-2'>
-              <h3 className='font-medium'>{t('gate')}</h3>
-              <StatusBadge status={finding.evidence_gate_status} />
-            </div>
-            <p className='text-muted-foreground'>
-              {Object.entries(finding.evidence_gate_rationale_json)
-                .map(([key, value]) => `${key}: ${readableValue(value)}`)
-                .join(' · ')}
-            </p>
-          </div>
-        </div>
+        <EvidenceGateSummary
+          status={finding.evidence_gate_status}
+          confidence={t(confidenceKeys[finding.confidence_label] ?? 'confidenceMedium')}
+          confidenceRationale={finding.confidence_rationale}
+          rationale={Object.entries(finding.evidence_gate_rationale_json)
+            .map(([key, value]) => `${key}: ${readableValue(value)}`)
+            .join(' · ')}
+        />
         <p>
           <strong>{t('applicability')}:</strong> {finding.applicability_scope}
         </p>
@@ -515,9 +506,28 @@ export function AnalysisDetail({ analysisRunId }: { analysisRunId: string }) {
         })}
         action={<StatusBadge status={run.status} />}
       />
+      <MetricStrip
+        items={[
+          { label: t('findings'), value: run.findings.length, tone: 'primary' },
+          {
+            label: t('reviewed'),
+            value: run.findings.filter((finding) => finding.reviews.length > 0).length
+          },
+          {
+            label: t('directSupport'),
+            value: run.findings.filter((finding) => finding.structured_support_json.length > 0)
+              .length
+          },
+          {
+            label: t('gateSupported'),
+            value: run.findings.filter((finding) => finding.evidence_gate_status === 'supported')
+              .length
+          }
+        ]}
+      />
       <Card>
         <CardHeader>
-          <CardTitle>{t('frozenContext')}</CardTitle>
+          <SectionHeader title={t('frozenContext')} description={t('frozenContextHint')} />
         </CardHeader>
         <CardContent className='grid gap-2 text-sm'>
           <p>
@@ -551,6 +561,43 @@ export function AnalysisDetail({ analysisRunId }: { analysisRunId: string }) {
           )}
         </CardContent>
       </Card>
+      <TraceabilityTimeline
+        title={t('traceability')}
+        nodes={[
+          {
+            id: run.id,
+            kind: 'analysis run',
+            label: run.id,
+            detail: `${run.provider_key} · ${run.requested_model}`
+          },
+          ...(run.context_snapshot
+            ? [
+                {
+                  id: run.context_snapshot.id,
+                  kind: 'context snapshot',
+                  label: run.context_snapshot.snapshot_sha256,
+                  detail: `${run.context_snapshot.size_bytes} bytes`
+                }
+              ]
+            : []),
+          ...run.findings.map((finding) => ({
+            id: finding.id,
+            kind: 'finding',
+            label: `#${finding.ordinal + 1} ${finding.claim}`,
+            href: `#finding-${finding.id}`,
+            detail: `${finding.evidence_gate_status} · ${finding.review_status}`
+          })),
+          ...run.findings.flatMap((finding) =>
+            finding.evidence_links.map((link) => ({
+              id: link.id,
+              kind: 'evidence link',
+              label: link.evidence_record_id,
+              detail: `${link.role} · ${link.rationale}`
+            }))
+          )
+        ]}
+      />
+      <SectionHeader title={t('findings')} description={t('findingReviewHint')} />
       <div className='grid gap-6'>
         {run.findings.map((finding) => (
           <FindingCard

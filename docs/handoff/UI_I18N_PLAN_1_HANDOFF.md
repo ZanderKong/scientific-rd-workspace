@@ -8,6 +8,7 @@
 
 - `zh-CN` 是默认 UI locale，`en` 是第二 locale；没有 URL locale prefix。
 - locale 通过 first-party cookie 持久化；切换语言不改变 dashboard URL，`<html lang>` 与 active locale 一致。
+- locale implementation is pinned to `next-intl@4.14.2`; the persisted first-party cookie is exactly `scientific_workspace_locale`.
 - translation catalogs 位于 `web/messages/zh-CN.json` 与 `web/messages/en.json`，并由自动化测试校验 key tree parity。
 - global shell、导航分组、header、search、theme、breadcrumbs、状态、表单、表格、空/加载/错误状态和当前可达 Workspace 页面均接入 active locale。
 - Overview、Experiment Detail、Analysis Detail 建立 Plan 2 可复用的科学工作台视觉方向：紧凑摘要、研究活动、实验元数据/溯源、Evidence Gate 与 Confidence 分离、Direct Structured Support 与 Curated Evidence 分离。

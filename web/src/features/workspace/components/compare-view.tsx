@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { ChartContainer } from '@/components/ui/chart';
 import {
   Table,
@@ -27,6 +27,8 @@ import type {
 } from '@/lib/domain';
 import { useTranslations } from 'next-intl';
 import { PageHeader, PageState, StatusBadge } from './shared';
+import { formatStructuredValue, toggleBoundedSelection } from '../presentation';
+import { MetadataList, MetricStrip, SectionHeader, TechnicalDetails } from './scientific-ui';
 
 export function CompareView() {
   const router = useRouter();
@@ -70,13 +72,7 @@ export function CompareView() {
       .catch((e) => setError(e instanceof Error ? e.message : t('errorLoad')));
   }, [projectId, t]);
   function toggle(id: string) {
-    setSelectedIds((items) =>
-      items.includes(id)
-        ? items.filter((item) => item !== id)
-        : items.length < 5
-          ? [...items, id]
-          : items
-    );
+    setSelectedIds((items) => toggleBoundedSelection(items, id));
   }
   async function compare() {
     if (selectedIds.length < 2 || !projectId) return;
@@ -147,7 +143,7 @@ export function CompareView() {
       <PageHeader title={t('title')} description={t('description')} />
       <Card>
         <CardHeader>
-          <CardTitle>{t('selectExperiments')}</CardTitle>
+          <SectionHeader title={t('selectionStep')} description={t('selectionHint')} />
         </CardHeader>
         <CardContent className='grid gap-4'>
           <select
@@ -166,30 +162,53 @@ export function CompareView() {
               </option>
             ))}
           </select>
-          <div className='grid gap-2 md:grid-cols-2'>
-            {experiments.map((item) => (
-              <label
-                key={item.id}
-                className='flex items-center gap-3 rounded-lg border p-3 text-sm'
-              >
-                <input
-                  type='checkbox'
-                  checked={selectedIds.includes(item.id)}
-                  onChange={() => toggle(item.id)}
-                />
-                <span className='flex-1'>
-                  <span className='font-medium'>{item.title}</span>
-                  <span className='block text-xs text-muted-foreground'>
-                    {item.code} · {common('revisionTitle', { number: item.template_version })}
-                  </span>
-                </span>
-                <StatusBadge status={item.status} />
-              </label>
-            ))}
+          <div className='overflow-hidden rounded-lg border'>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className='w-10'>{t('select')}</TableHead>
+                  <TableHead>{t('experiment')}</TableHead>
+                  <TableHead>{t('revision')}</TableHead>
+                  <TableHead>{t('status')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {experiments.map((item) => (
+                  <TableRow
+                    key={item.id}
+                    data-state={selectedIds.includes(item.id) ? 'selected' : undefined}
+                  >
+                    <TableCell>
+                      <input
+                        type='checkbox'
+                        aria-label={item.code}
+                        checked={selectedIds.includes(item.id)}
+                        onChange={() => toggle(item.id)}
+                      />
+                    </TableCell>
+                    <TableCell className='min-w-64 whitespace-normal'>
+                      <div className='font-medium'>{item.title}</div>
+                      <div className='font-mono text-xs text-muted-foreground'>{item.code}</div>
+                    </TableCell>
+                    <TableCell className='text-xs text-muted-foreground'>
+                      {common('revisionTitle', { number: item.template_version })}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={item.status} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
-          <Button onClick={compare} disabled={busy || selectedIds.length < 2}>
-            {busy ? t('comparing') : t('compare', { count: selectedIds.length })}
-          </Button>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <p className='text-sm text-muted-foreground'>
+              {t('selectedCount', { count: selectedIds.length })} · {t('maxSelected')}
+            </p>
+            <Button onClick={compare} disabled={busy || selectedIds.length < 2}>
+              {busy ? t('comparing') : t('compare', { count: selectedIds.length })}
+            </Button>
+          </div>
           {selectedIds.length > 0 && selectedIds.length < 2 ? (
             <p className='text-sm text-muted-foreground'>{t('selectAtLeastTwo')}</p>
           ) : null}
@@ -202,7 +221,10 @@ export function CompareView() {
         <div className='grid gap-6'>
           <Card>
             <CardHeader>
-              <CardTitle>{t('analysisConfiguration')}</CardTitle>
+              <SectionHeader
+                title={t('analysisStep')}
+                description={t('analysisConfigurationHint')}
+              />
             </CardHeader>
             <CardContent className='grid gap-4'>
               <p className='text-sm text-muted-foreground'>{t('directSupportHint')}</p>
@@ -237,9 +259,10 @@ export function CompareView() {
                   </select>
                 </div>
               </div>
-              <div className='grid gap-2 md:grid-cols-2'>
+              <div className='grid gap-2 border-t pt-4 md:grid-cols-2'>
                 <div>
                   <p className='mb-1 text-sm font-medium'>{t('literature')}</p>
+                  <p className='mb-2 text-xs text-muted-foreground'>{t('optionalContext')}</p>
                   {literature.map((item) => (
                     <label key={item.id} className='flex items-center gap-2 text-xs'>
                       <input
@@ -259,6 +282,7 @@ export function CompareView() {
                 </div>
                 <div>
                   <p className='mb-1 text-sm font-medium'>{t('curatedEvidence')}</p>
+                  <p className='mb-2 text-xs text-muted-foreground'>{t('optionalContext')}</p>
                   {evidence.map((item) => (
                     <label key={item.id} className='flex items-center gap-2 text-xs'>
                       <input
@@ -289,7 +313,7 @@ export function CompareView() {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>{t('structuredDifferences')}</CardTitle>
+              <SectionHeader title={t('differencesStep')} description={t('differencesHint')} />
             </CardHeader>
             <CardContent>
               <Table>
@@ -308,7 +332,9 @@ export function CompareView() {
                       <TableRow key={row.path}>
                         <TableCell className='font-medium'>{row.label}</TableCell>
                         {result.experiments.map((item) => (
-                          <TableCell key={item.id}>{String(row.values[item.id] ?? '—')}</TableCell>
+                          <TableCell key={item.id}>
+                            {formatStructuredValue(row.values[item.id])}
+                          </TableCell>
                         ))}
                       </TableRow>
                     ))}
@@ -321,7 +347,7 @@ export function CompareView() {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>{t('measurementOverlays')}</CardTitle>
+              <SectionHeader title={t('measurementOverlays')} description={t('overlaysHint')} />
             </CardHeader>
             <CardContent className='grid gap-6'>
               {result.measurements.length === 0 ? (
@@ -338,6 +364,29 @@ export function CompareView() {
                           {item.compatible ? t('compatible') : item.incompatibility_reason}
                         </span>
                       </div>
+                      <MetricStrip
+                        className='sm:grid-cols-2 lg:grid-cols-5'
+                        items={[
+                          {
+                            label: t('xRange'),
+                            value: `${formatStructuredValue(item.summary_json.x_min)}–${formatStructuredValue(item.summary_json.x_max)} ${item.x_unit}`
+                          },
+                          {
+                            label: t('yRange'),
+                            value: `${formatStructuredValue(item.summary_json.y_min)}–${formatStructuredValue(item.summary_json.y_max)} ${item.y_unit}`
+                          },
+                          {
+                            label: t('mean'),
+                            value: formatStructuredValue(item.summary_json.y_mean)
+                          },
+                          { label: t('rows'), value: item.row_count },
+                          {
+                            label: t('source'),
+                            value: item.id.slice(0, 10),
+                            detail: t('measurementId')
+                          }
+                        ]}
+                      />
                       {item.compatible ? (
                         <ChartContainer
                           config={{ series: { label: item.y_label, color: 'var(--chart-2)' } }}
@@ -352,6 +401,20 @@ export function CompareView() {
                           </LineChart>
                         </ChartContainer>
                       ) : null}
+                      <TechnicalDetails title={t('measurementProvenance')}>
+                        <MetadataList
+                          items={[
+                            { label: t('measurementId'), value: item.id, mono: true },
+                            { label: t('experimentId'), value: item.experiment_id, mono: true },
+                            {
+                              label: t('schema'),
+                              value: `${item.schema_key} · v${item.schema_version}`
+                            },
+                            { label: t('rowCount'), value: item.row_count }
+                          ]}
+                          columns={2}
+                        />
+                      </TechnicalDetails>
                     </div>
                   ))}
                 </>

@@ -24,6 +24,7 @@ import { StructuredForm } from './structured-form';
 import { MeasurementData } from './measurement-data';
 import { ExperimentLiterature } from './experiment-literature';
 import { parseLocale } from '@/i18n/config';
+import { ProvenanceSummary, TechnicalDetails, TraceabilityTimeline } from './scientific-ui';
 
 const RichNoteEditor = dynamic(
   () => import('./rich-note-editor').then((mod) => mod.RichNoteEditor),
@@ -200,6 +201,42 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
         <PageState loading />
       </div>
     );
+  const traceNodes = [
+    { id: experiment.id, kind: 'experiment', label: experiment.code, detail: experiment.title },
+    ...(experiment.parent_experiment_id
+      ? [
+          {
+            id: experiment.parent_experiment_id,
+            kind: 'parent experiment',
+            label: experiment.parent_experiment_id,
+            href: `/dashboard/experiments/${experiment.parent_experiment_id}`
+          }
+        ]
+      : []),
+    ...revisions.slice(0, 3).map((revision) => ({
+      id: revision.id,
+      kind: 'revision',
+      label: t('revisionLabel', { number: revision.revision_number }),
+      detail: revision.change_note || t('noChangeNote')
+    })),
+    ...attachments.slice(0, 3).map((attachment) => ({
+      id: attachment.id,
+      kind: 'attachment',
+      label: attachment.original_filename,
+      detail: `${formatBytes(attachment.size_bytes, locale)} · ${attachment.sha256}`
+    })),
+    ...(provenance
+      ? [
+          {
+            id: provenance.finding_id,
+            kind: 'finding',
+            label: provenance.finding_id,
+            href: `/dashboard/analysis/${provenance.analysis_run_id}`,
+            detail: t('gatedSuggestion')
+          }
+        ]
+      : [])
+  ];
   return (
     <div className='mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-4 pt-3 pb-8 md:px-6'>
       <BackLink href={`/dashboard/projects/${experiment.project_id}`} children={t('project')} />
@@ -284,24 +321,27 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
               </Button>
             </CardContent>
           </Card>
-          {provenance && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t('creationProvenance')}</CardTitle>
-              </CardHeader>
-              <CardContent className='grid gap-2 text-sm'>
-                <p>
-                  {t('gatedSuggestion')} <code>{provenance.finding_id}</code> · {t('analysisRun')}{' '}
-                  <code>{provenance.analysis_run_id}</code>
-                </p>
-                <p>
-                  {t('enablingReview')} <code>{provenance.enabling_review_decision_id}</code>
-                </p>
-                <details className='rounded border p-3 text-xs'>
-                  <summary className='cursor-pointer font-medium'>
-                    {t('immutableSnapshots')}
-                  </summary>
-                  <pre className='mt-2 max-h-72 overflow-auto'>
+          {provenance ? (
+            <ProvenanceSummary
+              title={t('creationProvenance')}
+              items={[
+                {
+                  label: t('finding'),
+                  value: provenance.finding_id,
+                  href: `/dashboard/analysis/${provenance.analysis_run_id}`
+                },
+                {
+                  label: t('analysisRun'),
+                  value: provenance.analysis_run_id,
+                  href: `/dashboard/analysis/${provenance.analysis_run_id}`
+                },
+                { label: t('enablingReview'), value: provenance.enabling_review_decision_id },
+                { label: t('relationType'), value: provenance.relation_type },
+                { label: t('createdAt'), value: formatDate(provenance.created_at, locale) }
+              ]}
+              note={
+                <TechnicalDetails title={t('immutableSnapshots')}>
+                  <pre className='max-h-72 overflow-auto rounded bg-muted p-3 font-mono text-xs'>
                     {JSON.stringify(
                       {
                         suggestion: provenance.suggestion_snapshot_json,
@@ -311,10 +351,10 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
                       2
                     )}
                   </pre>
-                </details>
-              </CardContent>
-            </Card>
-          )}
+                </TechnicalDetails>
+              }
+            />
+          ) : null}
           <Card>
             <CardHeader>
               <CardTitle>{t('structuredProperties')}</CardTitle>
@@ -331,6 +371,7 @@ export function ExperimentDetail({ experimentId }: { experimentId: string }) {
               </Button>
             </CardContent>
           </Card>
+          <TraceabilityTimeline title={t('traceability')} nodes={traceNodes} />
         </div>
       )}
       {tab === 'record' && (

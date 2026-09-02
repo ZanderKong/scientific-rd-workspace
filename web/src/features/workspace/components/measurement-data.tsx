@@ -12,7 +12,7 @@ import {
   YAxis
 } from 'recharts';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -28,6 +28,13 @@ import { ApiError, api } from '@/lib/api-client';
 import { useLocale, useTranslations } from 'next-intl';
 import { parseLocale } from '@/i18n/config';
 import { formatNumber } from './shared';
+import {
+  MetadataList,
+  MetricStrip,
+  SectionHeader,
+  StateMarker,
+  TechnicalDetails
+} from './scientific-ui';
 import type {
   Attachment,
   Experiment,
@@ -65,6 +72,12 @@ export function MeasurementData({
     xUnit: '1',
     yUnit: '1'
   });
+  const importSteps = [
+    { label: t('stepSelect'), done: Boolean(attachmentId) },
+    { label: t('stepPreview'), done: Boolean(preview) },
+    { label: t('stepMap'), done: Boolean(preview && mapping.x && mapping.y) },
+    { label: t('stepCommit'), done: measurements.length > 0 }
+  ];
   const onMessageRef = useRef(onMessage);
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -139,10 +152,19 @@ export function MeasurementData({
     <div className='grid gap-6'>
       <Card>
         <CardHeader>
-          <CardTitle>{t('import')}</CardTitle>
+          <SectionHeader title={t('import')} description={t('uploadHint')} />
         </CardHeader>
         <CardContent className='grid gap-4'>
-          <p className='text-sm text-muted-foreground'>{t('uploadHint')}</p>
+          <ol className='grid gap-2 border-b pb-4 sm:grid-cols-4'>
+            {importSteps.map((step, index) => (
+              <li key={step.label} className='flex items-center gap-2'>
+                <span className='flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold'>
+                  {index + 1}
+                </span>
+                <StateMarker done={step.done} label={step.label} />
+              </li>
+            ))}
+          </ol>
           <div className='grid gap-2'>
             <Label>{t('attachment')}</Label>
             <select
@@ -177,7 +199,7 @@ export function MeasurementData({
           </Button>
           {preview ? (
             <div className='grid gap-4 rounded-lg border p-4'>
-              <div className='text-sm text-muted-foreground'>
+              <div className='rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground'>
                 {t('previewRows', { count: preview.row_count ?? 0 })} ·{' '}
                 {t('previewColumns', { count: preview.column_count ?? 0 })} · {t('sha256')}{' '}
                 {preview.source_sha256}
@@ -300,7 +322,7 @@ export function MeasurementData({
       <div className='grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
         <Card>
           <CardHeader>
-            <CardTitle>{t('title')}</CardTitle>
+            <SectionHeader title={t('title')} description={t('listHint')} />
           </CardHeader>
           <CardContent className='p-0'>
             {measurements.length ? (
@@ -333,19 +355,32 @@ export function MeasurementData({
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>{selected ? selected.name : t('selectMeasurement')}</CardTitle>
+            <SectionHeader
+              title={selected ? selected.name : t('selectMeasurement')}
+              description={
+                selected
+                  ? `${selected.x_label} (${selected.x_unit}) → ${selected.y_label} (${selected.y_unit})`
+                  : t('detailHint')
+              }
+            />
           </CardHeader>
           <CardContent>
             {selected ? (
               <div className='grid gap-4'>
-                <div className='grid grid-cols-2 gap-3 text-sm md:grid-cols-5'>
-                  {Object.entries(selected.summary_json).map(([key, value]) => (
-                    <div key={key} className='rounded-lg border p-2'>
-                      <div className='text-xs text-muted-foreground'>{key}</div>
-                      <div className='font-medium'>{formatNumber(Number(value), locale)}</div>
-                    </div>
-                  ))}
-                </div>
+                <MetricStrip
+                  className='sm:grid-cols-2 lg:grid-cols-5'
+                  items={[
+                    { label: t('xMin'), value: formatNumber(selected.summary_json.x_min, locale) },
+                    { label: t('xMax'), value: formatNumber(selected.summary_json.x_max, locale) },
+                    { label: t('yMin'), value: formatNumber(selected.summary_json.y_min, locale) },
+                    { label: t('yMax'), value: formatNumber(selected.summary_json.y_max, locale) },
+                    {
+                      label: t('yMean'),
+                      value: formatNumber(selected.summary_json.y_mean, locale),
+                      tone: 'primary'
+                    }
+                  ]}
+                />
                 <ChartContainer
                   config={{ series: { label: selected.y_label, color: 'var(--chart-1)' } }}
                   className='min-h-72 w-full'
@@ -375,14 +410,25 @@ export function MeasurementData({
                     )}
                   </>
                 </ChartContainer>
-                <p className='text-xs text-muted-foreground'>
-                  {t('provenance', {
-                    importId: selected.import_id,
-                    attachmentId: selected.source_attachment_id
-                  })}
-                  {' · '}
-                  {t('sha256')} {selected.source_sha256}
-                </p>
+                <TechnicalDetails title={t('provenanceTitle')}>
+                  <MetadataList
+                    items={[
+                      { label: t('importId'), value: selected.import_id, mono: true },
+                      {
+                        label: t('attachmentId'),
+                        value: selected.source_attachment_id,
+                        mono: true
+                      },
+                      { label: t('pointsHash'), value: selected.points_sha256, mono: true },
+                      { label: t('sourceHash'), value: selected.source_sha256, mono: true },
+                      {
+                        label: t('rowCountLabel'),
+                        value: t('rowCount', { count: selected.row_count })
+                      }
+                    ]}
+                    columns={2}
+                  />
+                </TechnicalDetails>
               </div>
             ) : (
               <p className='text-sm text-muted-foreground'>{t('chooseMeasurement')}</p>
