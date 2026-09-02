@@ -3,8 +3,8 @@
 ## 1. Release status
 
 - **Verdict: `PHASE 3 PASS`**
-- **Release commit:** recorded after this closeout; annotated tag `v0.1-demo` points to the same
-  accepted commit.
+- **Release commit:** this final documentation closeout commit; annotated tag `v0.1-demo` points to
+  the same accepted commit after remote verification.
 - **Implementation head before documentation closeout:** `c863495` (`Fix DeepSeek V4 strict JSON
   analysis smoke`).
 - **Accepted baseline before this final batch:** `58b74eb`.
