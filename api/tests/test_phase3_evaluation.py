@@ -218,6 +218,14 @@ def test_suggestion_paths_are_required_and_read_from_normalized_prefill():
             },
         },
     )
+    passing_root = SimpleNamespace(
+        **common,
+        suggested_next_experiment_json={
+            "validation_status": "valid",
+            "prefill": {"structured_data": {}, "change_operations": []},
+            "change_operations": [{"path": "/additives/@starch"}],
+        },
+    )
     failing = SimpleNamespace(
         **common,
         suggested_next_experiment_json={
@@ -226,6 +234,9 @@ def test_suggestion_paths_are_required_and_read_from_normalized_prefill():
         },
     )
     assert evaluation_service.deterministic_metrics(case, passing, True)["overall_pass"] is True
+    assert (
+        evaluation_service.deterministic_metrics(case, passing_root, True)["overall_pass"] is True
+    )
     assert (
         evaluation_service.deterministic_metrics(case, failing, True)[
             "required_suggestion_paths_present"

@@ -95,17 +95,16 @@ def _suggestion_change_paths(suggestion: Any) -> list[str]:
     prefill = suggestion.get("prefill")
     if isinstance(prefill, dict):
         containers.insert(0, prefill)
+    paths: set[str] = set()
     for container in containers:
         operations = container.get("change_operations")
         if isinstance(operations, list):
-            return sorted(
-                {
-                    str(item.get("path"))
-                    for item in operations
-                    if isinstance(item, dict) and item.get("path")
-                }
+            paths.update(
+                str(item.get("path"))
+                for item in operations
+                if isinstance(item, dict) and item.get("path")
             )
-    return []
+    return sorted(paths)
 
 
 def _reference_expected_behavior(finding: Finding, payload: EvaluationCaseCreate) -> dict[str, Any]:
