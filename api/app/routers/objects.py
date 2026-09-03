@@ -1,22 +1,60 @@
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.capabilities import capabilities
+from app.change_set_service import (
+    apply_change_set,
+    change_set_out,
+    list_change_sets,
+    propose_change_set,
+    review_change_set,
+)
 from app.composition_service import get_process_composition, put_process_composition
 from app.core.config import get_settings
+from app.data_service import (
+    create_data_record,
+    create_file_payload,
+    create_scalar_payload,
+    create_table_payload,
+    get_data_record,
+)
+from app.data_service import (
+    payload_out as data_payload_out,
+)
 from app.db import get_db
+from app.execution_service import finish_execution, get_execution, start_execution, update_execution
+from app.experiment_comparison_service import compare_experiment
+from app.experiment_record_service import (
+    create_experiment_record,
+    get_experiment_record,
+    update_experiment_record,
+)
 from app.graph_query_service import DEFAULT_DEPTH, MAX_DEPTH, graph_query_service
+from app.idempotency_service import IdempotencyReplay, run_idempotent
 from app.import_service import ImportValidationError, commit_import, create_preview
 from app.models import (
     OBJECT_KINDS,
     Attachment,
+    ChangeSet,
     DataImport,
     DataPayload,
     DataPoint,
@@ -25,13 +63,33 @@ from app.models import (
     ObjectType,
     ResearchObject,
 )
+from app.project_context_service import (
+    create_project_record,
+    get_project_context,
+    get_project_record,
+    search_project,
+    update_project_record,
+)
 from app.relation_semantics import SemanticConflict
 from app.sample_record_service import create_sample_record, get_sample_record, update_sample_record
 from app.schemas import (
     AttachmentOut,
+    ChangeSetOut,
+    ChangeSetProposal,
+    ChangeSetReview,
+    DataFileCreate,
     DataImportOut,
     DataPayloadOut,
     DataPointOut,
+    DataRecordCreate,
+    DataRecordOut,
+    DataScalarCreate,
+    DataTableCreate,
+    ExecutionReadOut,
+    ExperimentComparisonOut,
+    ExperimentRecordCreate,
+    ExperimentRecordOut,
+    ExperimentRecordPut,
     ImportCommitMapping,
     ImportPreviewOut,
     ImportPreviewRequest,
@@ -43,12 +101,18 @@ from app.schemas import (
     ObjectTypeOut,
     ProcessCompositionOut,
     ProcessCompositionPut,
+    ProjectContextOut,
+    ProjectRecordCreate,
+    ProjectRecordOut,
+    ProjectRecordPut,
+    ProjectSearchOut,
     ProjectSummaryOut,
     RelationCreate,
     RelationPatch,
     ResearchObjectOut,
     RevisionCreate,
     SampleContextOut,
+    SampleExecutionUpdate,
     SampleRecordCreate,
     SampleRecordOut,
     SampleRecordPut,
@@ -77,31 +141,211 @@ def _storage() -> LocalStorageAdapter:
 
 
 def _error(exc: Exception) -> HTTPException:
+    raw = str(exc)
+    parsed: dict[str, Any] = {}
+    if raw.startswith("{"):
+        try:
+            candidate = json.loads(raw)
+            if isinstance(candidate, dict):
+                parsed = candidate
+        except json.JSONDecodeError:
+            pass
+    code = getattr(exc, "code", None) or parsed.get("code")
+    if not code:
+        code = {
+            "duplicate relation": "semantic_conflict",
+            "stale_record": "stale_record",
+            "change_set_stale": "change_set_stale",
+            "idempotency_conflict": "idempotency_conflict",
+            "sample execution already exists": "semantic_conflict",
+        }.get(raw)
+    if not code:
+        if isinstance(exc, LookupError):
+            code = "not_found"
+        elif any(
+            marker in raw
+            for marker in (
+                "project scope",
+                "project_scope",
+                "crosses project",
+                "outside the Data project scope",
+            )
+        ):
+            code = "scope_conflict"
+        else:
+            code = "validation_failed" if isinstance(exc, ValueError) else "internal_error"
+    message = parsed.get("message") or raw or "internal server error"
+    details = parsed.get("errors") or parsed.get("details") or {}
     if isinstance(exc, LookupError):
-        return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, (SemanticConflict, IntegrityError)):
-        detail = str(exc) if isinstance(exc, SemanticConflict) else "graph write conflict"
-        return HTTPException(status_code=409, detail=detail)
-    if isinstance(exc, ValueError):
-        return HTTPException(status_code=422, detail=str(exc))
-    return HTTPException(status_code=500, detail="internal server error")
+        status_code = 404
+    elif isinstance(exc, (SemanticConflict, IntegrityError)):
+        status_code = 409
+    elif isinstance(exc, ValueError):
+        status_code = 422
+    else:
+        status_code = 500
+    if code in {"idempotency_conflict", "change_set_stale"}:
+        status_code = 409
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "code": code,
+                "message": message,
+                "path": None,
+                "details": details,
+                "request_id": str(uuid.uuid4()),
+            }
+        },
+    )
+
+
+def _if_match(current_hash: str, provided: str | None) -> None:
+    if provided is None:
+        return
+    if provided.strip('"') != current_hash:
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail={
+                "error": {
+                    "code": "stale_record",
+                    "message": "The record changed after it was loaded.",
+                    "path": None,
+                    "details": {"expected": provided, "actual": current_hash},
+                    "request_id": str(uuid.uuid4()),
+                }
+            },
+        )
+
+
+def _run_idempotent_or_replay(
+    db: Session, key: str | None, payload: Any, operation: Any, response_status: int
+) -> dict[str, Any] | JSONResponse:
+    try:
+        return run_idempotent(db, key, payload, operation, response_status=response_status)
+    except IdempotencyReplay as replay:
+        return JSONResponse(content=replay.response_json, status_code=replay.status_code)
 
 
 def _payload_out(payload: DataPayload) -> dict[str, Any]:
-    return {
-        "id": payload.id,
-        "data_object_id": payload.data_object_id,
-        "payload_kind": payload.payload_kind,
-        "name": payload.name,
-        "schema_key": payload.schema_key,
-        "schema_version": payload.schema_version,
-        "metadata_jsonb": payload.metadata_jsonb or {},
-        "summary_jsonb": payload.summary_jsonb or {},
-        "source_attachment_id": payload.source_attachment_id,
-        "payload_sha256": payload.payload_sha256,
-        "points_count": len(payload.points) if payload.points is not None else 0,
-        "created_at": payload.created_at,
-    }
+    return data_payload_out(payload)
+
+
+def _import_error(exc: ImportValidationError) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "path": None,
+                "details": {"errors": exc.errors, "warnings": exc.warnings},
+                "request_id": str(uuid.uuid4()),
+            }
+        },
+    )
+
+
+@router.get("/capabilities")
+def get_capabilities() -> dict[str, Any]:
+    return capabilities()
+
+
+@router.post("/project-records", response_model=ProjectRecordOut, status_code=201)
+def post_project_record(
+    payload: ProjectRecordCreate,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> ProjectRecordOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_project_record(db, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ProjectRecordOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/projects/{project_id}/record", response_model=ProjectRecordOut)
+def project_record(
+    project_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> ProjectRecordOut:
+    try:
+        result = get_project_record(db, project_id)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ProjectRecordOut.model_validate(result)
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/projects/{project_id}/record", response_model=ProjectRecordOut)
+def put_project_record(
+    project_id: uuid.UUID,
+    payload: ProjectRecordPut,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ProjectRecordOut:
+    try:
+        current = get_project_record(db, project_id)
+        _if_match(current["record_sha256"], if_match)
+        result = update_project_record(db, project_id, payload)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ProjectRecordOut.model_validate(result)
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/projects/{project_id}/context", response_model=ProjectContextOut)
+def project_context(
+    project_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> ProjectContextOut:
+    try:
+        result = get_project_context(db, project_id)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ProjectContextOut.model_validate(result)
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/projects/{project_id}/search", response_model=ProjectSearchOut)
+def project_search(
+    project_id: uuid.UUID,
+    q: str | None = None,
+    kinds: list[ObjectKind] | None = Query(default=None),
+    status: str | None = None,
+    include_global: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> ProjectSearchOut:
+    try:
+        return ProjectSearchOut.model_validate(
+            search_project(
+                db,
+                project_id,
+                q=q,
+                kinds=kinds,
+                status=status,
+                include_global=include_global,
+                limit=limit,
+                offset=offset,
+            )
+        )
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
 
 
 def _import_out(record: DataImport, *, preview: bool = False) -> dict[str, Any]:
@@ -491,19 +735,36 @@ def sample_context(
 
 
 @router.get("/samples/{sample_id}/record", response_model=SampleRecordOut)
-def sample_record(sample_id: uuid.UUID, db: Session = Depends(get_db)) -> SampleRecordOut:
+def sample_record(
+    sample_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> SampleRecordOut:
     try:
-        return SampleRecordOut.model_validate(get_sample_record(db, sample_id))
+        result = get_sample_record(db, sample_id)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return SampleRecordOut.model_validate(result)
     except (LookupError, ValueError) as exc:
         raise _error(exc) from exc
 
 
 @router.post("/sample-records", response_model=SampleRecordOut, status_code=status.HTTP_201_CREATED)
 def post_sample_record(
-    payload: SampleRecordCreate, db: Session = Depends(get_db)
-) -> SampleRecordOut:
+    payload: SampleRecordCreate,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> SampleRecordOut | JSONResponse:
     try:
-        return SampleRecordOut.model_validate(create_sample_record(db, payload))
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_sample_record(db, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return SampleRecordOut.model_validate(result)
     except (LookupError, ValueError, IntegrityError) as exc:
         db.rollback()
         raise _error(exc) from exc
@@ -511,10 +772,364 @@ def post_sample_record(
 
 @router.put("/samples/{sample_id}/record", response_model=SampleRecordOut)
 def put_sample_record(
-    sample_id: uuid.UUID, payload: SampleRecordPut, db: Session = Depends(get_db)
+    sample_id: uuid.UUID,
+    payload: SampleRecordPut,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    db: Session = Depends(get_db),
 ) -> SampleRecordOut:
     try:
-        return SampleRecordOut.model_validate(update_sample_record(db, sample_id, payload))
+        current = get_sample_record(db, sample_id)
+        _if_match(current["record_sha256"], if_match)
+        result = update_sample_record(db, sample_id, payload)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return SampleRecordOut.model_validate(result)
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/experiment-records", response_model=ExperimentRecordOut, status_code=201)
+def post_experiment_record(
+    payload: ExperimentRecordCreate,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> ExperimentRecordOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_experiment_record(db, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExperimentRecordOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/experiments/{experiment_id}/record", response_model=ExperimentRecordOut)
+def experiment_record(
+    experiment_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> ExperimentRecordOut:
+    try:
+        result = get_experiment_record(db, experiment_id)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExperimentRecordOut.model_validate(result)
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/experiments/{experiment_id}/record", response_model=ExperimentRecordOut)
+def put_experiment_record(
+    experiment_id: uuid.UUID,
+    payload: ExperimentRecordPut,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ExperimentRecordOut:
+    try:
+        current = get_experiment_record(db, experiment_id)
+        _if_match(current["record_sha256"], if_match)
+        result = update_experiment_record(db, experiment_id, payload)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExperimentRecordOut.model_validate(result)
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/experiments/{experiment_id}/comparison", response_model=ExperimentComparisonOut)
+def experiment_comparison(
+    experiment_id: uuid.UUID,
+    differences_only: bool = False,
+    db: Session = Depends(get_db),
+) -> ExperimentComparisonOut:
+    try:
+        return ExperimentComparisonOut.model_validate(
+            compare_experiment(db, experiment_id, differences_only=differences_only)
+        )
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/data-records", response_model=DataRecordOut, status_code=201)
+def post_data_record(
+    payload: DataRecordCreate,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> DataRecordOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_data_record(db, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return DataRecordOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/data/{data_id}/record", response_model=DataRecordOut)
+def data_record(
+    data_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> DataRecordOut:
+    try:
+        result = get_data_record(db, data_id)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return DataRecordOut.model_validate(result)
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/data/{data_id}/payloads/scalar", response_model=DataPayloadOut, status_code=201)
+def post_scalar_payload(
+    data_id: uuid.UUID,
+    payload: DataScalarCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> DataPayloadOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_scalar_payload(db, data_id, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return DataPayloadOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/data/{data_id}/payloads/table", response_model=DataPayloadOut, status_code=201)
+def post_table_payload(
+    data_id: uuid.UUID,
+    payload: DataTableCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> DataPayloadOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_table_payload(db, data_id, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return DataPayloadOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/data/{data_id}/payloads/file", response_model=DataPayloadOut, status_code=201)
+def post_file_payload(
+    data_id: uuid.UUID,
+    payload: DataFileCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> DataPayloadOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_file_payload(db, data_id, payload),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return DataPayloadOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post(
+    "/samples/{sample_id}/execution/start", response_model=ExecutionReadOut, status_code=201
+)
+def post_execution_start(
+    sample_id: uuid.UUID,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> ExecutionReadOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            {"sample_id": str(sample_id), "operation": "start"},
+            lambda: start_execution(db, sample_id),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExecutionReadOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/samples/{sample_id}/execution", response_model=ExecutionReadOut)
+def sample_execution(
+    sample_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> ExecutionReadOut:
+    try:
+        result = get_execution(db, sample_id)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExecutionReadOut.model_validate(result)
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/samples/{sample_id}/execution", response_model=ExecutionReadOut)
+def put_sample_execution(
+    sample_id: uuid.UUID,
+    payload: SampleExecutionUpdate,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ExecutionReadOut:
+    try:
+        current = get_execution(db, sample_id)
+        _if_match(current["record_sha256"], if_match)
+        result = update_execution(db, sample_id, payload)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExecutionReadOut.model_validate(result)
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/samples/{sample_id}/execution/complete", response_model=ExecutionReadOut)
+def complete_sample_execution(
+    sample_id: uuid.UUID,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> ExecutionReadOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            {"sample_id": str(sample_id), "operation": "complete"},
+            lambda: finish_execution(db, sample_id, cancelled=False),
+            200,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExecutionReadOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/samples/{sample_id}/execution/cancel", response_model=ExecutionReadOut)
+def cancel_sample_execution(
+    sample_id: uuid.UUID,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> ExecutionReadOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            {"sample_id": str(sample_id), "operation": "cancel"},
+            lambda: finish_execution(db, sample_id, cancelled=True),
+            200,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExecutionReadOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/change-sets", response_model=list[ChangeSetOut])
+def get_change_sets(
+    project_scope_id: uuid.UUID | None = None, db: Session = Depends(get_db)
+) -> list[ChangeSetOut]:
+    return [ChangeSetOut.model_validate(item) for item in list_change_sets(db, project_scope_id)]
+
+
+@router.post("/change-sets/propose", response_model=ChangeSetOut, status_code=201)
+def post_change_set_proposal(
+    payload: ChangeSetProposal,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> ChangeSetOut | JSONResponse:
+    try:
+        result = _run_idempotent_or_replay(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: propose_change_set(db, payload, idempotency_key=idempotency_key),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return ChangeSetOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/change-sets/{change_set_id}", response_model=ChangeSetOut)
+def get_change_set(change_set_id: uuid.UUID, db: Session = Depends(get_db)) -> ChangeSetOut:
+    item = db.get(ChangeSet, change_set_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="ChangeSet not found")
+    return ChangeSetOut.model_validate(change_set_out(item))
+
+
+@router.post("/change-sets/{change_set_id}/review", response_model=ChangeSetOut)
+def review_change_set_route(
+    change_set_id: uuid.UUID, payload: ChangeSetReview, db: Session = Depends(get_db)
+) -> ChangeSetOut:
+    try:
+        return ChangeSetOut.model_validate(review_change_set(db, change_set_id, payload))
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/change-sets/{change_set_id}/apply", response_model=ChangeSetOut)
+def apply_change_set_route(change_set_id: uuid.UUID, db: Session = Depends(get_db)) -> ChangeSetOut:
+    try:
+        apply_change_set(db, change_set_id)
+        item = db.get(ChangeSet, change_set_id)
+        if item is None:
+            raise LookupError("ChangeSet not found")
+        return ChangeSetOut.model_validate(change_set_out(item))
     except (LookupError, ValueError, IntegrityError) as exc:
         db.rollback()
         raise _error(exc) from exc
@@ -536,7 +1151,11 @@ def list_payloads(data_id: uuid.UUID, db: Session = Depends(get_db)) -> list[Dat
     payloads = db.scalars(
         select(DataPayload)
         .where(DataPayload.data_object_id == data_id)
-        .options(selectinload(DataPayload.points))
+        .options(
+            selectinload(DataPayload.points),
+            selectinload(DataPayload.scalar),
+            selectinload(DataPayload.table_rows),
+        )
         .order_by(DataPayload.created_at.desc())
     ).all()
     return [DataPayloadOut.model_validate(_payload_out(item)) for item in payloads]
@@ -568,15 +1187,7 @@ def preview_data_import(
     except (LookupError, ValueError, ImportValidationError) as exc:
         db.rollback()
         if isinstance(exc, ImportValidationError):
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": exc.code,
-                    "message": exc.message,
-                    "errors": exc.errors,
-                    "warnings": exc.warnings,
-                },
-            ) from exc
+            raise _import_error(exc) from exc
         raise _error(exc) from exc
 
 
@@ -598,7 +1209,11 @@ def commit_data_import(
             db.scalar(
                 select(DataPayload)
                 .where(DataPayload.id == result.id)
-                .options(selectinload(DataPayload.points))
+                .options(
+                    selectinload(DataPayload.points),
+                    selectinload(DataPayload.scalar),
+                    selectinload(DataPayload.table_rows),
+                )
             )
             or result
         )
@@ -611,15 +1226,7 @@ def commit_data_import(
             record.errors_json = exc.errors
             record.warnings_json = exc.warnings
             db.commit()
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": exc.code,
-                "message": exc.message,
-                "errors": exc.errors,
-                "warnings": exc.warnings,
-            },
-        ) from exc
+        raise _import_error(exc) from exc
     except (LookupError, ValueError) as exc:
         db.rollback()
         response = _error(exc)
@@ -633,7 +1240,11 @@ def get_payload(payload_id: uuid.UUID, db: Session = Depends(get_db)) -> DataPay
     payload = db.scalar(
         select(DataPayload)
         .where(DataPayload.id == payload_id)
-        .options(selectinload(DataPayload.points))
+        .options(
+            selectinload(DataPayload.points),
+            selectinload(DataPayload.scalar),
+            selectinload(DataPayload.table_rows),
+        )
     )
     if payload is None:
         raise HTTPException(status_code=404, detail="data payload not found")
