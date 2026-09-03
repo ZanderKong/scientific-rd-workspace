@@ -37,7 +37,7 @@ OBJECT_KINDS = (
     "experiment",
     "project",
 )
-RELATION_TYPES = ("contains", "uses", "produces", "precedes", "related_to")
+RELATION_TYPES = ("contains", "includes", "uses", "produces", "precedes", "related_to")
 
 
 class ObjectType(Base):
@@ -196,11 +196,23 @@ class ObjectRelation(Base):
     __tablename__ = "object_relations"
     __table_args__ = (
         CheckConstraint(
-            "relation_type in ('contains','uses','produces','precedes','related_to')",
+            "relation_type in ('contains','includes','uses','produces','precedes','related_to')",
             name="ck_object_relations_type",
         ),
         Index("ix_object_relations_source_type", "source_object_id", "relation_type"),
         Index("ix_object_relations_target_type", "target_object_id", "relation_type"),
+        Index(
+            "ix_object_relations_includes_source",
+            "source_object_id",
+            "relation_type",
+            postgresql_where=text("relation_type = 'includes'"),
+        ),
+        Index(
+            "ix_object_relations_includes_target",
+            "target_object_id",
+            "relation_type",
+            postgresql_where=text("relation_type = 'includes'"),
+        ),
         Index(
             "uq_object_relations_semantic",
             "source_object_id",
@@ -259,9 +271,16 @@ class ObjectRevision(Base):
     snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn)
     snapshot_sha256: Mapped[str] = mapped_column(String(64))
     change_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    change_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("change_sets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_client_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_client_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_transport: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     object: Mapped[ResearchObject] = relationship(back_populates="revisions")
+    change_set: Mapped[ChangeSet | None] = relationship(back_populates="revisions")
 
 
 class ObjectCodeCounter(Base):
@@ -292,7 +311,9 @@ class Attachment(Base):
 class DataPayload(Base):
     __tablename__ = "data_payloads"
     __table_args__ = (
-        CheckConstraint("payload_kind in ('xy_series')", name="ck_data_payloads_kind"),
+        CheckConstraint(
+            "payload_kind in ('scalar','xy_series','table','file')", name="ck_data_payloads_kind"
+        ),
         CheckConstraint("schema_version > 0", name="ck_data_payloads_schema_version"),
     )
 
@@ -317,6 +338,12 @@ class DataPayload(Base):
     points: Mapped[list[DataPoint]] = relationship(
         back_populates="payload", cascade="all, delete-orphan", order_by="DataPoint.ordinal"
     )
+    scalar: Mapped[DataScalar | None] = relationship(
+        back_populates="payload", cascade="all, delete-orphan", uselist=False
+    )
+    table_rows: Mapped[list[DataTableRow]] = relationship(
+        back_populates="payload", cascade="all, delete-orphan", order_by="DataTableRow.ordinal"
+    )
 
 
 class DataPoint(Base):
@@ -337,6 +364,42 @@ class DataPoint(Base):
     y_value: Mapped[float] = mapped_column(Float)
 
     payload: Mapped[DataPayload] = relationship(back_populates="points")
+
+
+class DataScalar(Base):
+    __tablename__ = "data_scalars"
+    __table_args__ = (
+        CheckConstraint(
+            "value = value AND value < 1.7976931348623157e308 AND value > -1.7976931348623157e308",
+            name="ck_data_scalars_finite_value",
+        ),
+    )
+
+    payload_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_payloads.id", ondelete="CASCADE"), primary_key=True
+    )
+    value: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    payload: Mapped[DataPayload] = relationship(back_populates="scalar")
+
+
+class DataTableRow(Base):
+    __tablename__ = "data_table_rows"
+    __table_args__ = (
+        CheckConstraint("ordinal >= 0", name="ck_data_table_rows_ordinal"),
+        UniqueConstraint("payload_id", "ordinal", name="uq_data_table_rows_ordinal"),
+        Index("ix_data_table_rows_payload_id", "payload_id"),
+    )
+
+    payload_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_payloads.id", ondelete="CASCADE"), primary_key=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    values_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+
+    payload: Mapped[DataPayload] = relationship(back_populates="table_rows")
 
 
 class DataImport(Base):
@@ -378,3 +441,96 @@ class DataImport(Base):
     data_object: Mapped[ResearchObject] = relationship(back_populates="data_imports")
     source_attachment: Mapped[Attachment] = relationship(back_populates="data_imports")
     payload: Mapped[DataPayload | None] = relationship(foreign_keys=[payload_id])
+
+
+class SampleExecution(Base):
+    __tablename__ = "sample_executions"
+    __table_args__ = (
+        UniqueConstraint("sample_id", name="uq_sample_executions_sample"),
+        CheckConstraint(
+            "status in ('planned','running','completed','cancelled')",
+            name="ck_sample_executions_status",
+        ),
+        Index("ix_sample_executions_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    sample_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    plan_snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn)
+    plan_snapshot_sha256: Mapped[str] = mapped_column(String(64))
+    observations_jsonb: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    deviation_notes_jsonb: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    sample: Mapped[ResearchObject] = relationship()
+
+
+class IdempotencyRecord(Base):
+    __tablename__ = "api_idempotency_records"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_api_idempotency_key"),
+        Index("ix_api_idempotency_created_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[str] = mapped_column(String(255))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    response_status: Mapped[int] = mapped_column(Integer)
+    response_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChangeSet(Base):
+    __tablename__ = "change_sets"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('proposed','approved','rejected','applied','stale','failed')",
+            name="ck_change_sets_status",
+        ),
+        CheckConstraint(
+            "operation_kind in ("
+            "'create_sample_record','update_sample_record',"
+            "'create_experiment_record','update_experiment_record',"
+            "'create_data_record','update_execution')",
+            name="ck_change_sets_operation_kind",
+        ),
+        Index("ix_change_sets_project_status", "project_scope_id", "status"),
+        Index("ix_change_sets_target", "target_kind", "target_id"),
+        Index("ix_change_sets_created_at", "created_at"),
+        UniqueConstraint("idempotency_key", name="uq_change_sets_idempotency_key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_scope_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="proposed")
+    operation_kind: Mapped[str] = mapped_column(String(64))
+    target_kind: Mapped[str] = mapped_column(String(32))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    base_record_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_payload_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn)
+    preview_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn)
+    diff_jsonb: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
+    source_client_name: Mapped[str] = mapped_column(String(120), default="unknown")
+    source_client_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_transport: Mapped[str] = mapped_column(String(32), default="rest")
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
+
+    project_scope: Mapped[ResearchObject] = relationship(foreign_keys=[project_scope_id])
+    revisions: Mapped[list[ObjectRevision]] = relationship(back_populates="change_set")

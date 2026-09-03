@@ -38,6 +38,7 @@ JSONB GIN, kind/scope indexes and `pg_trgm` code/title indexes support typed sea
 - `uses`: Process → Material/Sample/Equipment/Data; Process → Sample requires a non-empty role. Canonical roles are `precursor`, `subject`, `reference`, `control`; aliases normalize to those values and unknown roles are preserved after trimming.
 - `produces`: Process → Sample/Data
 - `precedes`: Process → Process
+- `includes`: Experiment → Sample non-owning membership. Its role is always null; order and optional note live in `properties_jsonb`.
 - `related_to`: weak cross-object association; never canonical provenance
 
 Foreign keys cascade when an object is removed. A PostgreSQL unique index with `NULLS NOT DISTINCT` prevents duplicate semantic edges, including two null-role edges. Quantity metadata, when supplied, is `{ "quantity": { "value": number, "unit": string } }`.
@@ -58,8 +59,14 @@ Material and Equipment usage definitions are stored on the concrete resource obj
 
 `data_imports` records source format, parser key/version, source checksum, selected sheet, headers, preview metadata, explicit mapping, warnings/errors and completion status. Only CSV/XLSX is accepted, with bounded size/rows/columns and finite numeric validation.
 
-`data_payloads` currently supports `xy_series`; `data_points` preserves source row number, ordinal, X and Y values. Import commits never interpolate, reorder, or silently convert units. Payload summaries and canonical point hashes support reproducibility.
+`data_payloads` supports `scalar`, `xy_series`, `table`, and `file`. Scalar values are finite and carry an explicit unit. Tables store explicit typed columns and ordered JSONB rows with optional source row numbers. XY payloads use `data_points` to preserve source row number, ordinal, X and Y values. File payloads reference an object attachment and preserve its checksum. Import commits never interpolate, reorder, or silently convert units. Payload summaries and canonical hashes support reproducibility.
+
+`sample_executions` is one-to-one with Sample. Starting an execution stores the current Sample Record as `plan_snapshot_jsonb` plus its hash; observations and deviation notes are appended/updated in the execution, while the current Sample Record remains the as-run side. The service returns a deterministic diff without mutating the plan snapshot.
+
+`api_idempotency_records` persists request-hash and response replay data. `change_sets` persists proposal, preview, review, apply status, source client metadata and optional base record hash; applied object revisions link back to the ChangeSet.
 
 ## Migration boundary
 
 `api/alembic/versions/0001_v0_2_research_object_graph.py` is a fresh baseline. `0002_v0_2_semantic_stabilization` adds semantic ownership/producer indexes. `0003_sample_recording_workflow` adds `research_objects.usage_schema_jsonb`; 0001 and 0002 are immutable. No previous SQLite or phase-specific migration is part of the active history.
+
+Plan 09 adds `0004_experiment_membership`, `0005_scientific_data_and_execution`, and `0006_api_idempotency_and_change_sets`. PostgreSQL remains the only supported database.

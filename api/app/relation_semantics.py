@@ -14,6 +14,10 @@ from app.models import ObjectRelation, ResearchObject
 class SemanticConflict(ValueError):
     """A graph write conflicts with a canonical domain invariant."""
 
+    def __init__(self, message: str, *, code: str = "semantic_conflict") -> None:
+        self.code = code
+        super().__init__(message)
+
 
 ROLE_ALIASES: dict[str, str] = {
     "precursor": "precursor",
@@ -68,6 +72,7 @@ def validate_relation_kinds(
 ) -> None:
     valid = {
         "contains": source.kind == "experiment" and target.kind in {"process", "sample", "data"},
+        "includes": source.kind == "experiment" and target.kind == "sample",
         "uses": source.kind == "process"
         and target.kind in {"material", "sample", "equipment", "data"},
         "produces": source.kind == "process" and target.kind in {"sample", "data"},
@@ -417,6 +422,8 @@ def validate_candidate_relations(
         validate_relation_kinds(candidate.source, candidate.target, candidate.relation_type)
         validate_relation_scope(candidate.source, candidate.target)
         validate_relation_metadata(candidate.role, candidate.properties)
+        if candidate.relation_type == "includes" and candidate.role is not None:
+            raise ValueError("Experiment Sample membership does not support a role")
         if (
             candidate.relation_type == "uses"
             and candidate.target.kind == "sample"

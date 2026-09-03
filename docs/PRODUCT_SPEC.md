@@ -10,7 +10,7 @@ The domain has exactly seven kinds:
 
 Relations are limited to:
 
-`contains` · `uses` · `produces` · `precedes` · `related_to`
+`contains` · `includes` · `uses` · `produces` · `precedes` · `related_to`
 
 The backend is the semantic authority. A relation is rejected when its source/target kinds, project scope, role, quantity, or uniqueness are invalid.
 
@@ -40,10 +40,13 @@ The demo uses a synthetic/anonymised chlorine color-response material graph. It 
 - Open Experiment context with contained samples/processes/data and derived materials/equipment.
 - Upload CSV/XLSX, preview headers/rows, explicitly map X/Y columns, commit immutable XY points, and retain source checksum/parser/mapping provenance.
 - Create and inspect append-only object revisions with snapshot hashes.
+- Group reusable Samples into Experiments with non-owning `includes` membership and deterministic comparison.
+- Record Project context/search, typed scalar/XY/table/file Data payloads, and Planned → As-run Sample execution.
+- Expose capabilities, ETags, persistent idempotency and proposal-first ChangeSets for external agents through REST and official MCP transports.
 
 ## Explicitly deferred
 
-AI generation, Compare, Evidence, Evaluation, Literature, non-owning Experiment/Sample membership, free-form graphs and Equipment Type inheritance are not Plan 08 features. They remain separate follow-up work and must not be simulated with `related_to` or exclusive `contains` ownership.
+AI generation, Evidence, Evaluation, Literature, free-form graphs and Equipment Type inheritance remain separate follow-up work. External agents are not embedded in the workspace; mutations are validated by the domain services and proposal-first ChangeSets must not be simulated with `related_to` or exclusive `contains` ownership.
 
 ## Quality bar
 
