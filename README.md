@@ -18,7 +18,7 @@ Compare、Literature、AI、Evidence 和 Evaluation 暂不属于 active v0.2 run
 要求：Node.js 22、`uv`、Docker Compose。
 
 ```bash
-docker compose up -d db
+docker compose up -d postgres
 
 cd api
 uv sync --frozen

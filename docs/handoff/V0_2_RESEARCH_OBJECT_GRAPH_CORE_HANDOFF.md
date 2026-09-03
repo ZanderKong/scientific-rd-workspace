@@ -18,17 +18,22 @@ Passed locally:
 - backend Ruff check and format check;
 - frontend Oxlint (existing warnings remain in untouched calendar/info-button components), TypeScript typecheck, Oxfmt check and Vitest.
 
-Not available on this host:
+Passed in GitHub Actions for the v0.2 implementation commits:
 
-- live PostgreSQL migration/seed/API tests, because no local PostgreSQL service or Docker runtime is installed;
-- production browser smoke against a running API.
+- PostgreSQL 17 migration, model/migration parity, repeat-safe seed, backend Ruff and all backend API tests;
+- frontend lint, format check, typecheck, Vitest and production build;
+- browser smoke confirmed the v0.2 shell, locale switch and explicit backend timeout error state.
 
-The PostgreSQL-only fixture intentionally fails rather than falling back to SQLite. `.github/workflows/v0.2-core-ci.yml` is the formal PostgreSQL gate and must be green before declaring the final Plan 07 verdict.
+Not available locally on this host:
+
+- live PostgreSQL migration/seed/API tests, because no local PostgreSQL service or Docker runtime is installed.
+
+The PostgreSQL-only fixture intentionally fails rather than falling back to SQLite. `.github/workflows/v0.2-core-ci.yml` is green for the pushed implementation; the final Plan 07 verdict is accepted.
 
 ## Runbook
 
 ```bash
-docker compose up -d db
+docker compose up -d postgres
 cd api
 uv sync --frozen
 uv run alembic upgrade head

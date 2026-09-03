@@ -22,7 +22,7 @@ The seed is synthetic/anonymised and repeat-safe. It demonstrates a chlorine col
 ## Setup
 
 ```bash
-docker compose up -d db
+docker compose up -d postgres
 cd api
 uv run alembic upgrade head
 uv run python -m app.seed
