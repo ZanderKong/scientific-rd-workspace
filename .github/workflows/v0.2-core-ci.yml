@@ -54,17 +54,42 @@ jobs:
           from sqlalchemy import func, select
 
           from app.db import SessionLocal
-          from app.models import DataPayload, ObjectType, ResearchObject
+          from app.graph_query_service import graph_query_service
+          from app.models import DataPayload, ObjectRelation, ObjectType, ResearchObject
 
           with SessionLocal() as db:
               assert db.scalar(select(func.count()).select_from(ObjectType)) == 7
               assert db.scalar(select(func.count()).select_from(ResearchObject).where(ResearchObject.code == "PRJ-001")) == 1
               assert db.scalar(select(func.count()).select_from(DataPayload)) == 4
+              assert db.scalar(select(func.count()).select_from(ObjectRelation).where(ObjectRelation.relation_type == "related_to")) == 0
+              codes = [
+                  "SMP-001", "SMP-002", "SMP-003", "SMP-004",
+                  "DAT-001", "DAT-002", "DAT-003", "DAT-004",
+                  "PRC-001", "PRC-002", "PRC-003", "PRC-004",
+                  "PRC-005", "PRC-006", "PRC-007", "PRC-008",
+                  "EXP-001", "EXP-002", "EXP-003",
+              ]
+              objects = {item.code: item for item in db.scalars(select(ResearchObject).where(ResearchObject.code.in_(codes)))}
+              assert all(item.kind == "sample" for item in objects.values() if item.code.startswith("SMP-"))
+              owner_rows = db.scalars(select(ObjectRelation).where(ObjectRelation.relation_type == "contains")).all()
+              owners = {row.target_object_id: row.source_object_id for row in owner_rows}
+              assert owners[objects["SMP-001"].id] == objects["EXP-001"].id
+              assert owners[objects["SMP-002"].id] == objects["EXP-002"].id
+              assert owners[objects["SMP-003"].id] == objects["EXP-003"].id
+              assert owners[objects["SMP-004"].id] == objects["EXP-002"].id
+              direct = graph_query_service.get_sample_context(db, objects["SMP-001"].id)
+              assert {item["code"] for item in direct["direct"]["data"]} == {"DAT-001"}
+              downstream_codes = {item["code"] for item in direct["downstream"]["samples"]}
+              assert downstream_codes == {"SMP-002", "SMP-003", "SMP-004"}, downstream_codes
+              experiment = graph_query_service.get_experiment_context(db, objects["EXP-002"].id)
+              assert {item["code"] for item in experiment["input_samples"]} == {"SMP-001"}
           PY
       - name: Backend lint and format
         run: |
           uv run ruff check app tests alembic/versions
           uv run ruff format --check app tests alembic/versions
+      - name: Benchmark smoke
+        run: uv run python -m scripts.benchmark_object_graph --objects 100 --relations 100
       - name: Run backend API tests against PostgreSQL
         run: uv run pytest -q
 

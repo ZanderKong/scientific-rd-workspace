@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ObjectKind = Literal["material", "sample", "equipment", "process", "data", "experiment", "project"]
 RelationType = Literal["contains", "uses", "produces", "precedes", "related_to"]
@@ -32,6 +32,7 @@ class ObjectTypeOut(BaseModel):
     label_en: str
     description_zh: str | None
     description_en: str | None
+    is_default: bool
     created_at: datetime
     versions: list[ObjectTypeVersionOut] = Field(default_factory=list)
 
@@ -108,6 +109,61 @@ class RelationPatch(BaseModel):
 
     role: str | None = Field(default=None, max_length=64)
     properties_jsonb: dict[str, Any] | None = None
+
+
+class ProcessCompositionCreateTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["sample", "data"]
+    title: str = Field(min_length=1, max_length=240)
+    status: str = Field(default="active", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    content_document: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("title", "status")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class ProcessCompositionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relation_id: uuid.UUID | None = None
+    relation_type: Literal["uses", "produces"]
+    target_object_id: uuid.UUID | None = None
+    create_target: ProcessCompositionCreateTarget | None = None
+    role: str | None = Field(default=None, max_length=64)
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("role")
+    @classmethod
+    def strip_role(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> ProcessCompositionItem:
+        if (self.target_object_id is None) == (self.create_target is None):
+            raise ValueError("provide exactly one of target_object_id or create_target")
+        if self.relation_id is not None and self.create_target is not None:
+            raise ValueError("relation_id cannot be used with create_target")
+        return self
+
+
+class ProcessCompositionPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ProcessCompositionItem] = Field(default_factory=list)
+
+
+class ProcessCompositionOut(BaseModel):
+    process: ResearchObjectOut
+    uses: list[ObjectRelationOut]
+    produces: list[ObjectRelationOut]
 
 
 class ObjectRelationOut(BaseModel):
@@ -242,7 +298,14 @@ class SampleDirectContext(BaseModel):
     materials: list[ResearchObjectOut]
     equipment: list[ResearchObjectOut]
     testing_processes: list[ResearchObjectOut]
+    sample_inputs: list[SampleInputContext]
     data: list[ResearchObjectOut]
+
+
+class SampleInputContext(BaseModel):
+    object: ResearchObjectOut
+    role: str
+    relation_id: uuid.UUID
 
 
 class LineageContext(BaseModel):
@@ -257,6 +320,7 @@ class ExperimentContext(BaseModel):
     experiment: ResearchObjectOut
     processes: list[ResearchObjectOut]
     samples: list[ResearchObjectOut]
+    input_samples: list[ResearchObjectOut]
     data: list[ResearchObjectOut]
     materials: list[ResearchObjectOut]
     equipment: list[ResearchObjectOut]
@@ -274,3 +338,13 @@ class ProjectSummaryOut(BaseModel):
     project: ResearchObjectOut
     counts: dict[str, int]
     recent: list[ResearchObjectOut]
+
+
+class WorkspaceSummaryOut(BaseModel):
+    counts: dict[str, int]
+    recent: list[ResearchObjectOut]
+    projects: list[ResearchObjectOut]
+
+
+SampleDirectContext.model_rebuild()
+ProcessCompositionOut.model_rebuild()

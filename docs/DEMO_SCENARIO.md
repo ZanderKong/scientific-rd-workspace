@@ -15,8 +15,9 @@ The seed is synthetic/anonymised and repeat-safe. It demonstrates a chlorine col
 
 - `PRJ-001`, `EXP-001`/`002`/`003`
 - `MAT-001`…`005`, `EQP-001`…`004`
-- `SMP-001`…`004`, `PRC-001`…`006`, `DAT-001`…`004`
-- a downstream branch from `SMP-001` to `SMP-004`
+- `SMP-001`…`004`, `PRC-001`…`008`, `DAT-001`…`004`
+- preparation and measurement are separate Processes; `SMP-001` branches to `SMP-002` and `SMP-004`, then `SMP-002` continues to `SMP-003`
+- Experiment B/C consume upstream samples without owning them; their `input_samples` context makes that boundary visible
 - four small XY payloads with attachment/import provenance
 
 ## Setup

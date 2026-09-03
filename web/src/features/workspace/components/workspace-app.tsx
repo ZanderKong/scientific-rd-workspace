@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api-client';
+import { buildSampleLineageTree, projectXYToPolyline, type LineageTreeNode } from '../presentation';
 import { RichNoteEditor } from './rich-note-editor';
 import type {
   Attachment,
@@ -14,6 +15,8 @@ import type {
   LineageContext,
   ObjectRelation,
   ObjectRevision,
+  ProcessComposition,
+  ProcessCompositionItem,
   ResearchObject,
   ResearchObjectKind,
   SampleContext
@@ -350,16 +353,9 @@ function ProjectOverview({ projectId }: { projectId: string }) {
   const locale = useLocale();
   const t = useTranslations('Workspace');
   const project = useRemote(`project:${projectId}`, () => api.getObject(projectId));
-  const objects = useRemote(`project-objects:${projectId}`, () =>
-    api.listObjects({ project_scope_id: projectId, include_global: false, limit: 200 })
-  );
-  const grouped = useMemo(() => {
-    const result = Object.fromEntries(
-      (Object.keys(KIND_META) as ResearchObjectKind[]).map((kind) => [kind, [] as ResearchObject[]])
-    ) as Record<ResearchObjectKind, ResearchObject[]>;
-    for (const object of objects.data ?? []) result[object.kind].push(object);
-    return result;
-  }, [objects.data]);
+  const summary = useRemote(`project-summary:${projectId}`, () => api.getProjectSummary(projectId));
+  const recent = summary.data?.recent ?? [];
+  const experiments = recent.filter((object) => object.kind === 'experiment');
   if (project.data && project.data.kind !== 'project')
     return (
       <div className={pageClass}>
@@ -369,8 +365,8 @@ function ProjectOverview({ projectId }: { projectId: string }) {
   return (
     <div className={pageClass}>
       <PageState
-        loading={project.loading || objects.loading}
-        error={project.error || objects.error}
+        loading={project.loading || summary.loading}
+        error={project.error || summary.error}
       />
       {project.data && (
         <>
@@ -402,7 +398,7 @@ function ProjectOverview({ projectId }: { projectId: string }) {
                 className={`${cardClass} transition hover:border-primary`}
               >
                 <p className='text-xs text-muted-foreground'>{kindLabel(kind, locale)}</p>
-                <p className='mt-2 text-2xl font-semibold'>{grouped[kind].length}</p>
+                <p className='mt-2 text-2xl font-semibold'>{summary.data?.counts[kind] ?? 0}</p>
               </Link>
             ))}
           </div>
@@ -418,9 +414,9 @@ function ProjectOverview({ projectId }: { projectId: string }) {
                 </Link>
               }
             >
-              {grouped.experiment.length ? (
+              {experiments.length ? (
                 <div className='grid gap-2'>
-                  {grouped.experiment.map((object) => (
+                  {experiments.map((object) => (
                     <ObjectLink key={object.id} object={object} locale={locale} />
                   ))}
                 </div>
@@ -430,7 +426,7 @@ function ProjectOverview({ projectId }: { projectId: string }) {
             </Section>
             <Section title={t('recentObjects')}>
               <div className='grid gap-2'>
-                {(objects.data ?? []).slice(0, 8).map((object) => (
+                {recent.slice(0, 8).map((object) => (
                   <ObjectLink key={object.id} object={object} locale={locale} />
                 ))}
               </div>
@@ -445,18 +441,9 @@ function ProjectOverview({ projectId }: { projectId: string }) {
 function Overview() {
   const locale = useLocale();
   const t = useTranslations('Workspace');
-  const projects = useRemote('projects', () => api.listObjects({ kind: 'project', limit: 200 }));
-  const objects = useRemote('all-objects', () => api.listObjects({ limit: 200 }));
-  const counts = useMemo(
-    () =>
-      Object.fromEntries(
-        (Object.keys(KIND_META) as ResearchObjectKind[]).map((kind) => [
-          kind,
-          (objects.data ?? []).filter((object) => object.kind === kind).length
-        ])
-      ) as Record<ResearchObjectKind, number>,
-    [objects.data]
-  );
+  const summary = useRemote('workspace-summary', () => api.getWorkspaceSummary());
+  const projects = summary.data?.projects ?? [];
+  const recent = summary.data?.recent ?? [];
   return (
     <div className={pageClass}>
       <div className='mb-7'>
@@ -470,15 +457,12 @@ function Overview() {
         <p className='text-sm font-medium'>{t('syntheticDemo')}</p>
         <p className='mt-1 text-xs text-muted-foreground'>{t('syntheticDescription')}</p>
       </div>
-      <PageState
-        loading={projects.loading || objects.loading}
-        error={projects.error || objects.error}
-      />
+      <PageState loading={summary.loading} error={summary.error} />
       <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
         {(['project', 'experiment', 'sample', 'data'] as ResearchObjectKind[]).map((kind) => (
           <div key={kind} className={cardClass}>
             <p className='text-xs text-muted-foreground'>{kindLabel(kind, locale)}</p>
-            <p className='mt-2 text-2xl font-semibold'>{counts[kind] ?? 0}</p>
+            <p className='mt-2 text-2xl font-semibold'>{summary.data?.counts[kind] ?? 0}</p>
           </div>
         ))}
       </div>
@@ -491,9 +475,9 @@ function Overview() {
             </Link>
           }
         >
-          {(projects.data ?? []).length ? (
+          {projects.length ? (
             <div className='grid gap-2'>
-              {(projects.data ?? []).slice(0, 6).map((project) => (
+              {projects.slice(0, 6).map((project) => (
                 <ObjectLink key={project.id} object={project} locale={locale} />
               ))}
             </div>
@@ -503,7 +487,7 @@ function Overview() {
         </Section>
         <Section title={t('recentObjects')}>
           <div className='grid gap-2'>
-            {(objects.data ?? [])
+            {recent
               .filter((object) => object.kind !== 'project')
               .slice(0, 8)
               .map((object) => (
@@ -521,11 +505,15 @@ type ObjectRef = Pick<ResearchObject, 'id' | 'code' | 'kind' | 'title'>;
 function ObjectReferencePicker({
   value,
   onChange,
-  placeholder
+  placeholder,
+  projectScopeId,
+  kinds
 }: {
   value: ObjectRef | null;
   onChange: (object: ObjectRef | null) => void;
   placeholder: string;
+  projectScopeId?: string | null;
+  kinds?: ResearchObjectKind[];
 }) {
   const [query, setQuery] = useState(value ? `@${value.code}` : '');
   const [items, setItems] = useState<ResearchObject[]>([]);
@@ -538,13 +526,19 @@ function ObjectReferencePicker({
     }
     let alive = true;
     api
-      .listObjects({ q: query.slice(1), limit: 8 })
+      .listObjects({
+        q: query.slice(1),
+        project_scope_id: projectScopeId ?? undefined,
+        kinds,
+        include_global: true,
+        limit: 8
+      })
       .then((result) => alive && setItems(result))
       .catch(() => alive && setItems([]));
     return () => {
       alive = false;
     };
-  }, [query]);
+  }, [kinds, projectScopeId, query]);
   function choose(item: ResearchObject) {
     onChange(item);
     setQuery(`@${item.code}`);
@@ -606,6 +600,7 @@ function ObjectReferencePicker({
 }
 
 type ComposerRow = {
+  relationId?: string;
   relationType: 'uses' | 'produces';
   role: string;
   object: ObjectRef | null;
@@ -615,11 +610,13 @@ type ComposerRow = {
 
 function ProcessComposer({
   object,
-  relations,
+  composition,
+  loading,
   onSaved
 }: {
   object: ResearchObject;
-  relations: ObjectRelation[];
+  composition: ProcessComposition | null;
+  loading: boolean;
   onSaved: () => void;
 }) {
   const t = useTranslations('Workspace');
@@ -630,53 +627,45 @@ function ProcessComposer({
   const composerRef = useRef<HTMLFormElement>(null);
   const saveRef = useRef<() => Promise<void>>(async () => undefined);
   useEffect(() => {
-    const next = relations
-      .filter(
-        (relation) =>
-          relation.source_object_id === object.id &&
-          (relation.relation_type === 'uses' || relation.relation_type === 'produces')
-      )
-      .map((relation) => ({
+    const next = [...(composition?.uses ?? []), ...(composition?.produces ?? [])].map(
+      (relation) => ({
+        relationId: relation.id,
         relationType: relation.relation_type as 'uses' | 'produces',
         role: relation.role ?? '',
         object: relation.target,
         value: String((relation.properties_jsonb.quantity as JsonObject | undefined)?.value ?? ''),
         unit: String((relation.properties_jsonb.quantity as JsonObject | undefined)?.unit ?? '')
-      }));
+      })
+    );
     setRows(next);
-  }, [object.id, relations]);
+  }, [composition]);
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      let output =
-        rows.find((row) => row.relationType === 'produces' && row.object)?.object ?? null;
-      if (!output && outputTitle.trim())
-        output = await api.createObject({
-          kind: 'sample',
-          title: outputTitle.trim(),
-          project_scope_id: object.project_scope_id,
-          properties_jsonb: {}
-        });
-      const finalRows =
-        output &&
-        !rows.some((row) => row.object?.id === output?.id && row.relationType === 'produces')
-          ? [
-              ...rows,
-              { relationType: 'produces' as const, role: '', object: output, value: '', unit: '' }
-            ]
-          : rows;
-      for (const row of finalRows) {
-        if (!row.object) continue;
-        await api.createRelation({
-          source_object_id: object.id,
-          target_object_id: row.object.id,
+      const items: ProcessCompositionItem[] = rows
+        .filter((row): row is ComposerRow & { object: ObjectRef } => Boolean(row.object))
+        .map((row) => ({
+          relation_id: row.relationId,
           relation_type: row.relationType,
+          target_object_id: row.object.id,
           role: row.role || null,
           properties_jsonb:
             row.value || row.unit ? { quantity: { value: Number(row.value), unit: row.unit } } : {}
+        }));
+      if (outputTitle.trim()) {
+        items.push({
+          relation_type: 'produces',
+          create_target: {
+            kind: 'sample',
+            title: outputTitle.trim(),
+            properties_jsonb: {}
+          },
+          role: null,
+          properties_jsonb: {}
         });
       }
+      await api.putComposition(object.id, items);
       setOutputTitle('');
       onSaved();
     } catch (cause) {
@@ -716,6 +705,7 @@ function ProcessComposer({
           ⌘/Ctrl + Enter
         </span>
       </div>
+      {loading && <p className='text-xs text-muted-foreground'>{t('loading')}</p>}
       <div className='grid gap-2'>
         {rows.map((row, index) => (
           <div
@@ -728,7 +718,12 @@ function ProcessComposer({
                 setRows((current) =>
                   current.map((item, itemIndex) =>
                     itemIndex === index
-                      ? { ...item, relationType: event.target.value as 'uses' | 'produces' }
+                      ? {
+                          ...item,
+                          relationType: event.target.value as 'uses' | 'produces',
+                          relationId:
+                            item.relationType === event.target.value ? item.relationId : undefined
+                        }
                       : item
                   )
                 )
@@ -747,6 +742,12 @@ function ProcessComposer({
                     itemIndex === index ? { ...item, object: value } : item
                   )
                 )
+              }
+              projectScopeId={object.project_scope_id}
+              kinds={
+                row.relationType === 'produces'
+                  ? ['sample', 'data']
+                  : ['material', 'sample', 'equipment', 'data']
               }
               placeholder='@SMP-001 / @MAT-KI'
             />
@@ -855,14 +856,16 @@ function ObjectEditor({
   const [title, setTitle] = useState(object.title);
   const [status, setStatus] = useState(object.status);
   const [properties, setProperties] = useState(JSON.stringify(object.properties_jsonb, null, 2));
-  const [note, setNote] = useState(documentText(object.content_document));
+  const [contentDocument, setContentDocument] = useState<Array<JsonObject>>(
+    object.content_document
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setTitle(object.title);
     setStatus(object.status);
     setProperties(JSON.stringify(object.properties_jsonb, null, 2));
-    setNote(documentText(object.content_document));
+    setContentDocument(object.content_document);
   }, [object]);
   async function save() {
     try {
@@ -873,9 +876,7 @@ function ObjectEditor({
         title: title.trim(),
         status,
         properties_jsonb: parsed,
-        content_document: note.trim()
-          ? [{ type: 'paragraph', content: [{ type: 'text', text: note.trim() }] }]
-          : []
+        content_document: contentDocument
       });
       onSaved(updated);
     } catch (cause) {
@@ -926,7 +927,7 @@ function ObjectEditor({
         <RichNoteEditor
           key={`${object.id}:${object.updated_at}`}
           initialContent={object.content_document}
-          onChange={(document) => setNote(documentText(document))}
+          onChange={setContentDocument}
         />
       </div>
       <div className='flex items-center justify-between gap-3'>
@@ -942,13 +943,6 @@ function ObjectEditor({
       {error && <p className='text-xs text-destructive'>{error}</p>}
     </div>
   );
-}
-
-function documentText(document: Array<JsonObject>) {
-  return document
-    .flatMap((block) => (Array.isArray(block.content) ? block.content : []))
-    .map((item) => (typeof item === 'object' && item && 'text' in item ? String(item.text) : ''))
-    .join('\n');
 }
 
 function RelationList({
@@ -1010,6 +1004,21 @@ function ContextSection({
   );
 }
 
+function LineageTree({ node }: { node: LineageTreeNode }) {
+  return (
+    <div className='space-y-2 border-l pl-3'>
+      <ObjectLink object={node.object} />
+      {node.children.length > 0 && (
+        <div className='space-y-2 pl-3'>
+          {node.children.map((child) => (
+            <LineageTree key={child.object.id} node={child} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SampleContextView({ context, locale }: { context: SampleContext; locale: string }) {
   const t = useTranslations('Workspace');
   const lineage = (section: LineageContext, title: string) => (
@@ -1023,6 +1032,17 @@ function SampleContextView({ context, locale }: { context: SampleContext; locale
         ) : (
           <p className='text-sm text-muted-foreground'>—</p>
         )}
+      </div>
+      <div className='mt-3 rounded-lg border bg-muted/30 p-3'>
+        <p className='mb-2 text-xs font-medium'>{t('lineageTree')}</p>
+        <LineageTree
+          node={buildSampleLineageTree(
+            context.current,
+            section.samples,
+            section.edges,
+            title === t('upstream') ? 'upstream' : 'downstream'
+          )}
+        />
       </div>
       {section.data.length > 0 && (
         <p className='mt-3 text-xs text-muted-foreground'>
@@ -1047,16 +1067,24 @@ function SampleContextView({ context, locale }: { context: SampleContext; locale
           />
           <ContextSection title={t('materials')} items={context.direct.materials} locale={locale} />
           <ContextSection title={t('equipment')} items={context.direct.equipment} locale={locale} />
+          <Section title={t('sampleInputs')}>
+            <div className='grid gap-2'>
+              {context.direct.sample_inputs.length ? (
+                context.direct.sample_inputs.map((input) => (
+                  <div key={input.relation_id} className='flex items-center gap-2'>
+                    <ObjectLink object={input.object} locale={locale} />
+                    <span className='shrink-0 text-xs text-muted-foreground'>{input.role}</span>
+                  </div>
+                ))
+              ) : (
+                <p className='text-sm text-muted-foreground'>—</p>
+              )}
+            </div>
+          </Section>
         </Section>
         <ContextSection title={t('currentData')} items={context.direct.data} locale={locale} />
       </div>
       <div className='space-y-8'>
-        <Section title={t('lineage')}>
-          <div className='rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground'>
-            {context.current.code} →{' '}
-            {context.downstream.samples.map((item) => item.code).join(' → ') || '…'}
-          </div>
-        </Section>
         {lineage(context.upstream, t('upstream'))}
         {lineage(context.downstream, t('downstream'))}
       </div>
@@ -1075,6 +1103,7 @@ function ExperimentContextView({
   return (
     <div className='grid gap-8 lg:grid-cols-2'>
       <ContextSection title={t('samples')} items={context.samples} locale={locale} />
+      <ContextSection title={t('inputSamples')} items={context.input_samples} locale={locale} />
       <ContextSection title={t('processes')} items={context.processes} locale={locale} />
       <ContextSection title={t('data')} items={context.data} locale={locale} />
       <ContextSection title={t('derivedMaterials')} items={context.materials} locale={locale} />
@@ -1119,12 +1148,7 @@ function DataView({ object, locale: _locale }: { object: ResearchObject; locale?
         fill='none'
         stroke='currentColor'
         strokeWidth='2'
-        points={points
-          .map(
-            (point, index) =>
-              `${20 + index * (600 / Math.max(1, points.length - 1))},${200 - ((point.y_value - Math.min(...points.map((item) => item.y_value))) / Math.max(0.0001, Math.max(...points.map((item) => item.y_value)) - Math.min(...points.map((item) => item.y_value)))) * 170}`
-          )
-          .join(' ')}
+        points={projectXYToPolyline(points, 640, 220, 20)}
       />
     </svg>
   ) : (
@@ -1311,6 +1335,10 @@ function ObjectDetail({ objectId }: { objectId: string }) {
   const relations = useRemote(`relations:${objectId}:${refresh}`, () =>
     api.listRelations(objectId)
   );
+  const composition = useRemote(
+    object.data?.kind === 'process' ? `composition:${objectId}:${refresh}` : '',
+    object.data?.kind === 'process' ? () => api.getComposition(objectId) : null
+  );
   const revisions = useRemote(`revisions:${objectId}:${refresh}`, () =>
     api.listRevisions(objectId)
   );
@@ -1377,7 +1405,8 @@ function ObjectDetail({ objectId }: { objectId: string }) {
         {item.kind === 'process' && (
           <ProcessComposer
             object={item}
-            relations={relations.data ?? []}
+            composition={composition.data}
+            loading={composition.loading}
             onSaved={() => setRefresh((value) => value + 1)}
           />
         )}

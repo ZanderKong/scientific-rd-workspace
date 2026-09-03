@@ -6,13 +6,16 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.composition_service import get_process_composition, put_process_composition
 from app.core.config import get_settings
 from app.db import get_db
 from app.graph_query_service import DEFAULT_DEPTH, MAX_DEPTH, graph_query_service
 from app.import_service import ImportValidationError, commit_import, create_preview
 from app.models import (
+    OBJECT_KINDS,
     Attachment,
     DataImport,
     DataPayload,
@@ -20,7 +23,9 @@ from app.models import (
     ObjectRelation,
     ObjectRevision,
     ObjectType,
+    ResearchObject,
 )
+from app.relation_semantics import SemanticConflict
 from app.schemas import (
     AttachmentOut,
     DataImportOut,
@@ -35,11 +40,15 @@ from app.schemas import (
     ObjectRelationOut,
     ObjectRevisionOut,
     ObjectTypeOut,
+    ProcessCompositionOut,
+    ProcessCompositionPut,
+    ProjectSummaryOut,
     RelationCreate,
     RelationPatch,
     ResearchObjectOut,
     RevisionCreate,
     SampleContextOut,
+    WorkspaceSummaryOut,
 )
 from app.services import (
     create_object,
@@ -66,6 +75,9 @@ def _storage() -> LocalStorageAdapter:
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, LookupError):
         return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (SemanticConflict, IntegrityError)):
+        detail = str(exc) if isinstance(exc, SemanticConflict) else "graph write conflict"
+        return HTTPException(status_code=409, detail=detail)
     if isinstance(exc, ValueError):
         return HTTPException(status_code=422, detail=str(exc))
     return HTTPException(status_code=500, detail="internal server error")
@@ -143,9 +155,51 @@ def get_object_type(type_id: uuid.UUID, db: Session = Depends(get_db)) -> Object
     return obj_type
 
 
+def _counts(db: Session, *, project_scope_id: uuid.UUID | None = None) -> dict[str, int]:
+    statement = select(ResearchObject.kind, func.count()).group_by(ResearchObject.kind)
+    if project_scope_id is not None:
+        statement = statement.where(ResearchObject.project_scope_id == project_scope_id)
+    counts = {kind: 0 for kind in OBJECT_KINDS}
+    counts.update({kind: count for kind, count in db.execute(statement)})
+    return counts
+
+
+@router.get("/projects/{project_id}/summary", response_model=ProjectSummaryOut)
+def project_summary(project_id: uuid.UUID, db: Session = Depends(get_db)) -> ProjectSummaryOut:
+    project = get_object(db, project_id)
+    if project is None or project.kind != "project":
+        raise HTTPException(status_code=404, detail="project not found")
+    recent = graph_query_service.search_objects(
+        db, project_scope_id=project_id, include_global=False, limit=8
+    )
+    counts = _counts(db, project_scope_id=project_id)
+    counts["project"] = 1
+    return ProjectSummaryOut.model_validate(
+        {
+            "project": object_out(project),
+            "counts": counts,
+            "recent": [object_out(item) for item in recent],
+        }
+    )
+
+
+@router.get("/workspace/summary", response_model=WorkspaceSummaryOut)
+def workspace_summary(db: Session = Depends(get_db)) -> WorkspaceSummaryOut:
+    recent = graph_query_service.search_objects(db, limit=8)
+    projects = graph_query_service.search_objects(db, kind="project", limit=8)
+    return WorkspaceSummaryOut.model_validate(
+        {
+            "counts": _counts(db),
+            "recent": [object_out(item) for item in recent],
+            "projects": [object_out(item) for item in projects],
+        }
+    )
+
+
 @router.get("/objects", response_model=list[ResearchObjectOut])
 def list_objects(
     kind: ObjectKind | None = None,
+    kinds: list[ObjectKind] | None = Query(default=None),
     project_scope_id: uuid.UUID | None = None,
     type_key: str | None = None,
     type_id: uuid.UUID | None = None,
@@ -160,19 +214,15 @@ def list_objects(
         db,
         q=q,
         kind=kind,
+        kinds=kinds,
         project_scope_id=project_scope_id,
+        type_key=type_key,
+        type_id=type_id,
         status=status,
         include_global=include_global,
         limit=limit,
         offset=offset,
     )
-    if type_id or type_key:
-        objects = [
-            item
-            for item in objects
-            if (type_id is None or item.type_version.object_type_id == type_id)
-            and (type_key is None or item.type_version.object_type.key == type_key)
-        ]
     return [ResearchObjectOut.model_validate(object_out(item)) for item in objects]
 
 
@@ -247,6 +297,35 @@ def patch_relation(
         if str(exc) == "duplicate relation":
             response.status_code = 409
         raise response from exc
+
+
+@router.get(
+    "/processes/{process_id}/composition",
+    response_model=ProcessCompositionOut,
+)
+def get_composition(process_id: uuid.UUID, db: Session = Depends(get_db)) -> ProcessCompositionOut:
+    try:
+        return ProcessCompositionOut.model_validate(get_process_composition(db, process_id))
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.put(
+    "/processes/{process_id}/composition",
+    response_model=ProcessCompositionOut,
+)
+def put_composition(
+    process_id: uuid.UUID,
+    payload: ProcessCompositionPut,
+    db: Session = Depends(get_db),
+) -> ProcessCompositionOut:
+    try:
+        return ProcessCompositionOut.model_validate(
+            put_process_composition(db, process_id, payload)
+        )
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
 
 
 @router.delete("/relations/{relation_id}", status_code=status.HTTP_204_NO_CONTENT)

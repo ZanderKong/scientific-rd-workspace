@@ -14,7 +14,7 @@ All domain records use a UUID primary key and a unique human-readable code. Code
 | material | MAT |
 | equipment | EQP |
 
-`ObjectType` identifies a type; `ObjectTypeVersion` stores the JSON Schema/UI schema. Published schema fields are immutable. New schema means a new version row; existing objects keep their exact `type_version_id`.
+`ObjectType` identifies a type and has one `is_default` row per canonical kind. `ObjectTypeVersion` stores the JSON Schema/UI schema. Published schema fields are immutable. New schema means a new version row; existing objects keep their exact `type_version_id`. When a type is omitted, the service selects the default ObjectType's highest active version.
 
 ## Objects
 
@@ -33,13 +33,15 @@ JSONB GIN, kind/scope indexes and `pg_trgm` code/title indexes support typed sea
 
 `object_relations(source_object_id, target_object_id, relation_type, role, properties_jsonb)` contains only:
 
-- `contains`: Experiment → Process/Sample/Data
-- `uses`: Process → Material/Sample/Equipment/Data
+- `contains`: Experiment → Process/Sample/Data; it is the single ownership edge and does not claim ownership of upstream inputs consumed by a process.
+- `uses`: Process → Material/Sample/Equipment/Data; Process → Sample requires a non-empty role. Canonical roles are `precursor`, `subject`, `reference`, `control`; aliases normalize to those values and unknown roles are preserved after trimming.
 - `produces`: Process → Sample/Data
 - `precedes`: Process → Process
-- `related_to`: weak cross-object association
+- `related_to`: weak cross-object association; never canonical provenance
 
 Foreign keys cascade when an object is removed. A PostgreSQL unique index with `NULLS NOT DISTINCT` prevents duplicate semantic edges, including two null-role edges. Quantity metadata, when supplied, is `{ "quantity": { "value": number, "unit": string } }`.
+
+Partial unique indexes enforce one incoming `contains` owner and one incoming `produces` producer. Relation writes also reject precursor lineage cycles, Process `precedes` cycles, invalid scope crossings and ownership conflicts. Scope changes revalidate all existing edges.
 
 ## Revisions and files
 

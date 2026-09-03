@@ -9,9 +9,13 @@ import type {
   ObjectRelation,
   ObjectRevision,
   ObjectType,
+  ProcessComposition,
+  ProcessCompositionItem,
+  ProjectSummary,
   ResearchObject,
   ResearchObjectKind,
-  SampleContext
+  SampleContext,
+  WorkspaceSummary
 } from './domain';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1').replace(
@@ -99,16 +103,25 @@ export const api = {
   listObjects: (
     params: {
       kind?: ResearchObjectKind;
+      kinds?: ResearchObjectKind[];
       project_scope_id?: string;
+      type_key?: string;
+      type_id?: string;
       q?: string;
       status?: string;
       include_global?: boolean;
       limit?: number;
+      offset?: number;
     } = {}
   ) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) query.set(key, String(value));
+      if (value === undefined) return;
+      if (key === 'kinds' && Array.isArray(value)) {
+        value.forEach((kind) => query.append(key, String(kind)));
+      } else {
+        query.set(key, String(value));
+      }
     });
     return request<ResearchObject[]>(`/objects${query.size ? `?${query.toString()}` : ''}`);
   },
@@ -131,6 +144,14 @@ export const api = {
     >
   ) => request<ResearchObject>(`/objects/${id}`, { ...json(payload), method: 'PATCH' }),
   listRelations: (id: string) => request<ObjectRelation[]>(`/objects/${id}/relations`),
+  getProjectSummary: (id: string) => request<ProjectSummary>(`/projects/${id}/summary`),
+  getWorkspaceSummary: () => request<WorkspaceSummary>('/workspace/summary'),
+  getComposition: (id: string) => request<ProcessComposition>(`/processes/${id}/composition`),
+  putComposition: (id: string, items: ProcessCompositionItem[]) =>
+    request<ProcessComposition>(`/processes/${id}/composition`, {
+      ...json({ items }),
+      method: 'PUT'
+    }),
   createRelation: (payload: {
     source_object_id: string;
     target_object_id: string;

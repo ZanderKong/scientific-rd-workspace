@@ -35,14 +35,15 @@ The Process composer is keyboard-first and keeps relation semantics visible:
 - Tab traverses relation type, reference, role, quantity and unit controls;
 - Cmd/Ctrl+Enter saves the relation set;
 - relation type, role and quantity are sent explicitly to the API.
+- the complete Process composition is reconciled with one `PUT /processes/{id}/composition`; new Sample/Data outputs can be materialized in that transaction.
 
 The server remains authoritative for semantic validation and duplicate detection; the UI renders returned errors rather than inventing local graph rules.
 
 ## Context and data
 
-Sample detail separates direct provenance, current data, upstream lineage and downstream lineage. Traversal depth is bounded by the API. Experiment detail lists contained objects and derived material/equipment context.
+Sample detail separates direct provenance, role-aware sample inputs, current data, upstream lineage and downstream lineage. Traversal depth is bounded by the API, and the lineage view renders backend edges as a tree rather than a fabricated linear chain. Experiment detail lists contained objects and input samples from other Experiment ownership contexts.
 
-Data detail separates immutable payload summary/plot from source provenance. CSV/XLSX upload shows a preview, requires explicit X/Y mapping, preserves source row order and exposes checksum/parser/import status. No fake data is shown when the API is unavailable.
+Data detail separates immutable payload summary/plot from source provenance. CSV/XLSX upload shows a preview, requires explicit X/Y mapping, preserves source row order and exposes checksum/parser/import status. XY chart coordinates use the real X values with O(n) bounds calculation. BlockNote JSON is persisted as JSON and never flattened to plain text. No fake data is shown when the API is unavailable.
 
 ## Deferred surfaces
 

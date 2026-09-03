@@ -18,6 +18,7 @@ from sqlalchemy import (
     event,
     func,
     inspect,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -41,7 +42,19 @@ RELATION_TYPES = ("contains", "uses", "produces", "precedes", "related_to")
 
 class ObjectType(Base):
     __tablename__ = "object_types"
-    __table_args__ = (UniqueConstraint("key", name="uq_object_types_key"),)
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_object_types_key"),
+        CheckConstraint(
+            "kind in ('material','sample','equipment','process','data','experiment','project')",
+            name="ck_object_types_kind",
+        ),
+        Index(
+            "uq_object_types_one_default_per_kind",
+            "kind",
+            unique=True,
+            postgresql_where=text("is_default = true"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     key: Mapped[str] = mapped_column(String(120), index=True)
@@ -50,6 +63,7 @@ class ObjectType(Base):
     label_en: Mapped[str] = mapped_column(String(120))
     description_zh: Mapped[str | None] = mapped_column(Text, nullable=True)
     description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     versions: Mapped[list[ObjectTypeVersion]] = relationship(
@@ -63,6 +77,7 @@ class ObjectTypeVersion(Base):
     __tablename__ = "object_type_versions"
     __table_args__ = (
         UniqueConstraint("object_type_id", "version", name="uq_object_type_versions"),
+        CheckConstraint("version > 0", name="ck_object_type_versions_version"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -85,6 +100,15 @@ def prevent_type_version_mutation(
     immutable_fields = ("object_type_id", "version", "json_schema", "ui_schema")
     if any(state.attrs[field].history.has_changes() for field in immutable_fields):
         raise ValueError("object type versions are immutable; create a new version")
+
+
+@event.listens_for(ObjectType, "before_update")
+def prevent_object_type_identity_mutation(
+    _mapper: Any, _connection: Any, target: ObjectType
+) -> None:
+    state = inspect(target)
+    if state.attrs.key.history.has_changes() or state.attrs.kind.history.has_changes():
+        raise ValueError("object type identity is immutable; create a new object type")
 
 
 class ResearchObject(Base):
@@ -182,6 +206,18 @@ class ObjectRelation(Base):
             "role",
             unique=True,
             postgresql_nulls_not_distinct=True,
+        ),
+        Index(
+            "uq_object_relations_one_experiment_owner",
+            "target_object_id",
+            unique=True,
+            postgresql_where=text("relation_type = 'contains'"),
+        ),
+        Index(
+            "uq_object_relations_one_producer",
+            "target_object_id",
+            unique=True,
+            postgresql_where=text("relation_type = 'produces'"),
         ),
     )
 

@@ -28,6 +28,7 @@ export interface ObjectType {
   label_en: string;
   description_zh: string | null;
   description_en: string | null;
+  is_default: boolean;
   created_at: string;
   versions: ObjectTypeVersion[];
 }
@@ -61,6 +62,30 @@ export interface ObjectRelation {
   target: ObjectSummary;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProcessCompositionCreateTarget {
+  kind: 'sample' | 'data';
+  title: string;
+  status?: string;
+  type_version_id?: string | null;
+  properties_jsonb?: JsonObject;
+  content_document?: Array<JsonObject>;
+}
+
+export interface ProcessCompositionItem {
+  relation_id?: string | null;
+  relation_type: 'uses' | 'produces';
+  target_object_id?: string | null;
+  create_target?: ProcessCompositionCreateTarget | null;
+  role?: string | null;
+  properties_jsonb?: JsonObject;
+}
+
+export interface ProcessComposition {
+  process: ResearchObject;
+  uses: ObjectRelation[];
+  produces: ObjectRelation[];
 }
 
 export type ObjectSummary = Pick<
@@ -153,6 +178,11 @@ export interface SampleContext {
     materials: ResearchObject[];
     equipment: ResearchObject[];
     testing_processes: ResearchObject[];
+    sample_inputs: Array<{
+      object: ResearchObject;
+      role: string;
+      relation_id: string;
+    }>;
     data: ResearchObject[];
   };
   upstream: LineageContext;
@@ -178,7 +208,20 @@ export interface ExperimentContext {
   experiment: ResearchObject;
   processes: ResearchObject[];
   samples: ResearchObject[];
+  input_samples: ResearchObject[];
   data: ResearchObject[];
   materials: ResearchObject[];
   equipment: ResearchObject[];
+}
+
+export interface ProjectSummary {
+  project: ResearchObject;
+  counts: Record<ResearchObjectKind, number>;
+  recent: ResearchObject[];
+}
+
+export interface WorkspaceSummary {
+  counts: Record<ResearchObjectKind, number>;
+  recent: ResearchObject[];
+  projects: ResearchObject[];
 }

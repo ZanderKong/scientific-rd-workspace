@@ -6,6 +6,8 @@
 
 - 七种 object：`material`、`sample`、`equipment`、`process`、`data`、`experiment`、`project`。
 - 五种 relation：`contains`、`uses`、`produces`、`precedes`、`related_to`。
+- `sample` 保持 object kind；`precursor` / `subject` / `reference` / `control` 是 `uses` 角色，只有前驱体驱动 lineage、只有 subject 驱动当前 Data。
+- Experiment ownership 与 Process producer cardinality 由 PostgreSQL partial unique index 和后端语义校验共同保证；Process composition 使用单次 desired-state PUT。
 - JSON Schema 驱动类型版本、并发安全 code counter、PostgreSQL JSONB/pg_trgm 索引。
 - Sample direct/upstream/downstream lineage 与 Experiment context API。
 - CSV/XLSX 预览、显式 X/Y 映射、immutable XY payload、source checksum 和 provenance guard。
@@ -63,3 +65,5 @@ API tests 需要 PostgreSQL；仓库不会以 SQLite 作为替代。CI 使用 Po
 - `docs/DEMO_SCENARIO.md` — synthetic/anonymised demo 路径
 - `docs/exec-plans/07-v0.2-research-object-graph-core-cutover.md` — 本次执行计划
 - `docs/handoff/V0_2_RESEARCH_OBJECT_GRAPH_CORE_HANDOFF.md` — 交付与验证记录
+- `docs/exec-plans/07.1-v0.2-core-semantic-stabilization.md` — 核心语义稳定化计划
+- `docs/handoff/V0_2_CORE_SEMANTIC_STABILIZATION_HANDOFF.md` — 语义稳定化交付与验证记录

@@ -9,7 +9,7 @@ from app.main import app
 from app.models import ObjectRelation, ObjectType, ObjectTypeVersion, ResearchObject
 from app.schemas import ObjectCreate, RelationCreate
 from app.seed import _schema
-from app.services import create_object, create_relation, sha256_json
+from app.services import create_object, create_relation, get_type_version, sha256_json
 
 client = TestClient(app)
 
@@ -27,7 +27,13 @@ TYPE_LABELS = {
 def install_types(db) -> dict[str, ObjectTypeVersion]:
     versions = {}
     for kind, (zh, en) in TYPE_LABELS.items():
-        object_type = ObjectType(key=f"{kind}.generic", kind=kind, label_zh=zh, label_en=en)
+        object_type = ObjectType(
+            key=f"{kind}.generic",
+            kind=kind,
+            label_zh=zh,
+            label_en=en,
+            is_default=True,
+        )
         db.add(object_type)
         db.flush()
         version = ObjectTypeVersion(
@@ -194,7 +200,9 @@ def graph(db):
     create_relation(
         db,
         RelationCreate(
-            source_object_id=process1.id, target_object_id=sample2.id, relation_type="produces"
+            source_object_id=process_branch.id,
+            target_object_id=sample2.id,
+            relation_type="produces",
         ),
     )
     return locals()
@@ -396,3 +404,253 @@ def test_data_import_preview_commit_and_provenance_delete_guard(db, monkeypatch,
         },
     )
     assert duplicate.status_code == 409
+
+
+def test_sample_roles_are_normalized_and_only_subject_drives_current_data(db):
+    values = graph(db)
+    extra_sample = make(db, "sample", "Extra role sample", values["project"].id)
+    for role, target in (
+        ("reference", values["sample0"]),
+        ("参照", values["sample2"]),
+        ("control", values["sample_branch"]),
+        ("对照样品", extra_sample),
+    ):
+        response = client.post(
+            "/api/v1/relations",
+            json={
+                "source_object_id": str(values["process1"].id),
+                "target_object_id": str(target.id),
+                "relation_type": "uses",
+                "role": role,
+            },
+        )
+        assert response.status_code == 201
+    alias_duplicate = client.post(
+        "/api/v1/relations",
+        json={
+            "source_object_id": str(values["process1"].id),
+            "target_object_id": str(values["sample0"].id),
+            "relation_type": "uses",
+            "role": "参考样品",
+        },
+    )
+    assert alias_duplicate.status_code == 409
+    missing_role = client.post(
+        "/api/v1/relations",
+        json={
+            "source_object_id": str(values["process1"].id),
+            "target_object_id": str(values["sample2"].id),
+            "relation_type": "uses",
+        },
+    )
+    assert missing_role.status_code == 422
+    context = client.get(f"/api/v1/samples/{values['sample1'].id}/context").json()
+    assert values["data1"].code in {item["code"] for item in context["direct"]["data"]}
+    assert values["data0"].code not in {item["code"] for item in context["direct"]["data"]}
+    assert {item["role"] for item in context["direct"]["sample_inputs"]} == {
+        "precursor",
+        "reference",
+        "control",
+        "subject",
+    }
+
+
+def test_one_owner_and_one_producer_are_enforced(db):
+    values = graph(db)
+    other_experiment = make(db, "experiment", "Other experiment", values["project"].id)
+    owner_conflict = client.post(
+        "/api/v1/relations",
+        json={
+            "source_object_id": str(other_experiment.id),
+            "target_object_id": str(values["sample1"].id),
+            "relation_type": "contains",
+        },
+    )
+    assert owner_conflict.status_code == 409
+    producer_conflict = client.post(
+        "/api/v1/relations",
+        json={
+            "source_object_id": str(values["process0"].id),
+            "target_object_id": str(values["sample1"].id),
+            "relation_type": "produces",
+        },
+    )
+    assert producer_conflict.status_code == 409
+
+
+def test_lineage_and_precedes_cycles_are_rejected(db):
+    values = graph(db)
+    process_a = make(db, "process", "Cycle A", values["project"].id)
+    process_b = make(db, "process", "Cycle B", values["project"].id)
+    sample_a = make(db, "sample", "Cycle sample A", values["project"].id)
+    sample_b = make(db, "sample", "Cycle sample B", values["project"].id)
+    for source, target, relation_type, role in [
+        (process_a, sample_b, "uses", "precursor"),
+        (process_a, sample_a, "produces", None),
+        (process_b, sample_a, "uses", "precursor"),
+    ]:
+        create_relation(
+            db,
+            RelationCreate(
+                source_object_id=source.id,
+                target_object_id=target.id,
+                relation_type=relation_type,
+                role=role,
+            ),
+        )
+    cycle = client.post(
+        "/api/v1/relations",
+        json={
+            "source_object_id": str(process_b.id),
+            "target_object_id": str(sample_b.id),
+            "relation_type": "produces",
+        },
+    )
+    assert cycle.status_code == 409
+    create_relation(
+        db,
+        RelationCreate(
+            source_object_id=process_a.id,
+            target_object_id=process_b.id,
+            relation_type="precedes",
+        ),
+    )
+    precedes_cycle = client.post(
+        "/api/v1/relations",
+        json={
+            "source_object_id": str(process_b.id),
+            "target_object_id": str(process_a.id),
+            "relation_type": "precedes",
+        },
+    )
+    assert precedes_cycle.status_code == 409
+
+
+def test_scope_mutation_revalidates_existing_relations(db):
+    values = graph(db)
+    other_project = make(db, "project", "Other project")
+    response = client.patch(
+        f"/api/v1/objects/{values['sample1'].id}",
+        json={"project_scope_id": str(other_project.id)},
+    )
+    assert response.status_code == 422
+
+
+def test_default_type_selects_highest_active_version_and_identity_is_immutable(db):
+    versions = install_types(db)
+    versions["sample"].object_type.is_default = False
+    custom = ObjectType(
+        key="sample.special",
+        kind="sample",
+        label_zh="特殊样品",
+        label_en="Special sample",
+        is_default=True,
+    )
+    db.add(custom)
+    db.flush()
+    db.add(
+        ObjectTypeVersion(
+            object_type_id=custom.id,
+            version=1,
+            json_schema=_schema("sample"),
+            is_active=True,
+        )
+    )
+    version2 = ObjectTypeVersion(
+        object_type_id=custom.id,
+        version=2,
+        json_schema=_schema("sample"),
+        is_active=True,
+    )
+    db.add(version2)
+    db.commit()
+    project = make(db, "project", "Project")
+    sample = make(db, "sample", "Sample", project.id)
+    assert sample.type_version_id == version2.id
+    assert get_type_version(db, "sample").id == version2.id
+    custom.key = "sample.renamed"
+    with pytest.raises(ValueError, match="identity is immutable"):
+        db.commit()
+    db.rollback()
+
+
+def test_experiment_context_exposes_cross_experiment_inputs(db):
+    values = graph(db)
+    context = client.get(f"/api/v1/experiments/{values['experiment'].id}/context")
+    assert context.status_code == 200
+    assert values["sample0"].code in {item["code"] for item in context.json()["input_samples"]}
+    assert values["sample0"].code not in {item["code"] for item in context.json()["samples"]}
+
+
+def test_process_composition_is_desired_state_atomic_and_auto_owns_outputs(db):
+    values = graph(db)
+    composition = client.get(f"/api/v1/processes/{values['process1'].id}/composition")
+    assert composition.status_code == 200
+    body = composition.json()
+    items = [
+        {
+            "relation_id": relation["id"],
+            "relation_type": relation["relation_type"],
+            "target_object_id": relation["target_object_id"],
+            "role": relation["role"],
+            "properties_jsonb": relation["properties_jsonb"],
+        }
+        for relation in body["uses"] + body["produces"]
+    ]
+    items.append(
+        {
+            "relation_type": "produces",
+            "create_target": {"kind": "sample", "title": "Atomic output"},
+        }
+    )
+    saved = client.put(
+        f"/api/v1/processes/{values['process1'].id}/composition", json={"items": items}
+    )
+    assert saved.status_code == 200
+    created = next(
+        item for item in saved.json()["produces"] if item["target"]["title"] == "Atomic output"
+    )
+    owner = db.scalar(
+        select(ObjectRelation).where(
+            ObjectRelation.relation_type == "contains",
+            ObjectRelation.target_object_id == created["target_object_id"],
+        )
+    )
+    assert owner is not None and owner.source_object_id == values["experiment"].id
+
+    failed = client.put(
+        f"/api/v1/processes/{values['process1'].id}/composition",
+        json={
+            "items": [
+                {
+                    "relation_type": "produces",
+                    "create_target": {"kind": "sample", "title": "Rolled back"},
+                },
+                {
+                    "relation_type": "uses",
+                    "target_object_id": str(values["experiment"].id),
+                    "role": "subject",
+                },
+            ]
+        },
+    )
+    assert failed.status_code == 422
+    assert db.scalar(select(ResearchObject).where(ResearchObject.title == "Rolled back")) is None
+
+
+def test_search_filters_are_applied_before_pagination(db):
+    values = graph(db)
+    response = client.get(
+        "/api/v1/objects",
+        params=[
+            ("kinds", "sample"),
+            ("kinds", "data"),
+            ("project_scope_id", str(values["project"].id)),
+            ("type_key", "sample.generic"),
+            ("limit", 1),
+            ("offset", 0),
+        ],
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["kind"] == "sample"

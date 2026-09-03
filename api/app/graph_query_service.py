@@ -5,7 +5,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import ObjectRelation, ObjectTypeVersion, ResearchObject
+from app.models import ObjectRelation, ObjectType, ObjectTypeVersion, ResearchObject
+from app.relation_semantics import normalize_relation_role
 from app.services import OBJECT_ALIASES, get_object, object_out
 
 DEFAULT_DEPTH = 3
@@ -69,6 +70,8 @@ def _direct_data(
     testing_processes: list[ResearchObject] = []
     data: list[ResearchObject] = []
     for relation in _relations(db, target_id=sample_id, relation_type="uses"):
+        if normalize_relation_role(relation.role) != "subject":
+            continue
         process = relation.source_object
         if process.kind != "process":
             continue
@@ -98,13 +101,15 @@ def _lineage(
         next_frontier: set[uuid.UUID] = set()
         for current_id in frontier:
             if direction == "upstream":
-                processes = _relations(db, target_id=current_id, relation_type="produces")
-                for produced in processes:
+                produced_relations = _relations(db, target_id=current_id, relation_type="produces")
+                for produced in produced_relations:
                     process = produced.source_object
                     for used in _relations(db, source_id=process.id, relation_type="uses"):
-                        candidate = used.target_object
-                        if candidate.kind != "sample":
+                        if used.target_object.kind != "sample":
                             continue
+                        if normalize_relation_role(used.role) != "precursor":
+                            continue
+                        candidate = used.target_object
                         edges.extend([_edge(used), _edge(produced)])
                         if candidate.id not in visited:
                             visited.add(candidate.id)
@@ -115,6 +120,8 @@ def _lineage(
             else:
                 uses = _relations(db, target_id=current_id, relation_type="uses")
                 for used in uses:
+                    if normalize_relation_role(used.role) != "precursor":
+                        continue
                     process = used.source_object
                     if process.kind != "process":
                         continue
@@ -151,18 +158,26 @@ def _experiment_context(db: Session, experiment: ResearchObject) -> dict[str, ob
     processes = _unique([item for item in contained if item.kind == "process"])
     samples = _unique([item for item in contained if item.kind == "sample"])
     data = _unique([item for item in contained if item.kind == "data"])
+    owned_sample_ids = {item.id for item in samples}
+    input_samples: list[ResearchObject] = []
     materials: list[ResearchObject] = []
     equipment: list[ResearchObject] = []
     for process in processes:
         for relation in _relations(db, source_id=process.id, relation_type="uses"):
-            if relation.target_object.kind == "material":
+            if (
+                relation.target_object.kind == "sample"
+                and relation.target_object.id not in owned_sample_ids
+            ):
+                input_samples.append(relation.target_object)
+            elif relation.target_object.kind == "material":
                 materials.append(relation.target_object)
-            if relation.target_object.kind == "equipment":
+            elif relation.target_object.kind == "equipment":
                 equipment.append(relation.target_object)
     return {
         "experiment": object_out(experiment),
         "processes": [object_out(item) for item in processes],
         "samples": [object_out(item) for item in samples],
+        "input_samples": [object_out(item) for item in _unique(input_samples)],
         "data": [object_out(item) for item in data],
         "materials": [object_out(item) for item in _unique(materials)],
         "equipment": [object_out(item) for item in _unique(equipment)],
@@ -194,12 +209,23 @@ class GraphQueryService:
             if item.source_object.kind == "process"
         ]
         precursors: list[ResearchObject] = []
+        sample_inputs: list[dict[str, object]] = []
         materials: list[ResearchObject] = []
         equipment: list[ResearchObject] = []
         for process in producing_processes:
             for relation in _relations(db, source_id=process.id, relation_type="uses"):
                 if relation.target_object.kind == "sample":
-                    precursors.append(relation.target_object)
+                    role = normalize_relation_role(relation.role)
+                    if role is not None:
+                        sample_inputs.append(
+                            {
+                                "object": object_out(relation.target_object),
+                                "role": role,
+                                "relation_id": relation.id,
+                            }
+                        )
+                    if role == "precursor":
+                        precursors.append(relation.target_object)
                 elif relation.target_object.kind == "material":
                     materials.append(relation.target_object)
                 elif relation.target_object.kind == "equipment":
@@ -208,21 +234,16 @@ class GraphQueryService:
         upstream = _lineage(db, sample.id, direction="upstream", depth=depth)
         downstream = _lineage(db, sample.id, direction="downstream", depth=depth)
         experiment = None
-        if sample.project_scope_id:
-            experiment_relation = db.scalar(
-                select(ObjectRelation)
-                .where(
-                    ObjectRelation.relation_type == "contains",
-                    ObjectRelation.target_object_id == sample.id,
-                )
-                .options(selectinload(ObjectRelation.source_object))
+        experiment_relation = db.scalar(
+            select(ObjectRelation)
+            .where(
+                ObjectRelation.relation_type == "contains",
+                ObjectRelation.target_object_id == sample.id,
             )
-            if experiment_relation and experiment_relation.source_object.kind == "experiment":
-                experiment = _experiment_context(
-                    db,
-                    get_object(db, experiment_relation.source_object_id)
-                    or experiment_relation.source_object,
-                )
+            .options(selectinload(ObjectRelation.source_object))
+        )
+        if experiment_relation and experiment_relation.source_object.kind == "experiment":
+            experiment = _experiment_context(db, experiment_relation.source_object)
         return {
             "current": object_out(sample),
             "direct": {
@@ -231,6 +252,7 @@ class GraphQueryService:
                 "materials": [object_out(item) for item in _unique(materials)],
                 "equipment": [object_out(item) for item in _unique(equipment)],
                 "testing_processes": [object_out(item) for item in testing_processes],
+                "sample_inputs": sample_inputs,
                 "data": [object_out(item) for item in direct_data],
             },
             "upstream": {
@@ -270,22 +292,41 @@ class GraphQueryService:
         *,
         q: str | None = None,
         kind: str | None = None,
+        kinds: list[str] | None = None,
         project_scope_id: uuid.UUID | None = None,
+        type_key: str | None = None,
+        type_id: uuid.UUID | None = None,
         status: str | None = None,
         include_global: bool = True,
         limit: int = 50,
         offset: int = 0,
     ) -> list[ResearchObject]:
-        statement = select(ResearchObject).options(
-            selectinload(ResearchObject.type_version).selectinload(ObjectTypeVersion.object_type)
+        statement = (
+            select(ResearchObject)
+            .join(ObjectTypeVersion, ResearchObject.type_version_id == ObjectTypeVersion.id)
+            .join(ObjectType, ObjectTypeVersion.object_type_id == ObjectType.id)
+            .options(
+                selectinload(ResearchObject.type_version).selectinload(
+                    ObjectTypeVersion.object_type
+                )
+            )
         )
         if kind:
             statement = statement.where(ResearchObject.kind == kind)
+        if kinds:
+            statement = statement.where(ResearchObject.kind.in_(kinds))
+        if type_key:
+            statement = statement.where(ObjectType.key == type_key)
+        if type_id:
+            statement = statement.where(ObjectType.id == type_id)
         if project_scope_id:
             if include_global:
                 statement = statement.where(
                     (ResearchObject.project_scope_id == project_scope_id)
-                    | (ResearchObject.project_scope_id.is_(None))
+                    | (
+                        ResearchObject.kind.in_(["material", "equipment"])
+                        & ResearchObject.project_scope_id.is_(None)
+                    )
                 )
             else:
                 statement = statement.where(ResearchObject.project_scope_id == project_scope_id)

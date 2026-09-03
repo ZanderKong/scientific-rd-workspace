@@ -5,7 +5,7 @@ import io
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.db import SessionLocal
@@ -19,11 +19,21 @@ from app.models import (
     ObjectTypeVersion,
     ResearchObject,
 )
+from app.relation_semantics import normalize_relation_role
 from app.schemas import ObjectCreate, RelationCreate
 from app.services import create_object, create_relation
 from app.storage import LocalStorageAdapter, sanitise_filename
 
 DEMO_TAGS = ["synthetic", "anonymised", "demo"]
+TYPE_DEFINITIONS = [
+    ("material.generic", "material", "原料 / 试剂", "Material / reagent"),
+    ("sample.generic", "sample", "样品", "Sample"),
+    ("equipment.generic", "equipment", "设备", "Equipment"),
+    ("process.generic", "process", "过程 / 操作", "Process"),
+    ("data.generic", "data", "数据 / 测试结果", "Data / test result"),
+    ("experiment.generic", "experiment", "实验", "Experiment"),
+    ("project.generic", "project", "项目 / Vault", "Project / Vault"),
+]
 
 
 def _schema(kind: str) -> dict[str, Any]:
@@ -59,20 +69,39 @@ def _schema(kind: str) -> dict[str, Any]:
         "experiment": {"objective": {"type": "string"}, "note": {"type": "string"}},
         "project": {"description": {"type": "string"}},
     }
-    result = dict(common)
-    result["properties"] = {**common["properties"], **properties[kind]}
-    return result
+    return {**common, "properties": {**common["properties"], **properties[kind]}}
 
 
 def _type(db, key: str, kind: str, zh: str, en: str) -> ObjectTypeVersion:
     obj_type = db.scalar(select(ObjectType).where(ObjectType.key == key))
     if obj_type is None:
-        obj_type = ObjectType(key=key, kind=kind, label_zh=zh, label_en=en)
+        for sibling in db.scalars(
+            select(ObjectType).where(
+                ObjectType.kind == kind,
+                ObjectType.is_default.is_(True),
+            )
+        ):
+            sibling.is_default = False
+        obj_type = ObjectType(key=key, kind=kind, label_zh=zh, label_en=en, is_default=True)
         db.add(obj_type)
+        db.flush()
+    else:
+        obj_type.label_zh = zh
+        obj_type.label_en = en
+        for sibling in db.scalars(
+            select(ObjectType).where(
+                ObjectType.kind == kind,
+                ObjectType.id != obj_type.id,
+                ObjectType.is_default.is_(True),
+            )
+        ):
+            sibling.is_default = False
+        obj_type.is_default = True
         db.flush()
     version = db.scalar(
         select(ObjectTypeVersion).where(
-            ObjectTypeVersion.object_type_id == obj_type.id, ObjectTypeVersion.version == 1
+            ObjectTypeVersion.object_type_id == obj_type.id,
+            ObjectTypeVersion.version == 1,
         )
     )
     if version is None:
@@ -84,8 +113,7 @@ def _type(db, key: str, kind: str, zh: str, en: str) -> ObjectTypeVersion:
             is_active=True,
         )
         db.add(version)
-        db.commit()
-        db.refresh(version)
+        db.flush()
     return version
 
 
@@ -122,6 +150,7 @@ def _relation(
     role: str | None = None,
     properties: dict[str, Any] | None = None,
 ) -> None:
+    role = normalize_relation_role(role)
     existing = db.scalar(
         select(ObjectRelation).where(
             ObjectRelation.source_object_id == source.id,
@@ -146,15 +175,10 @@ def _relation(
 def _seed_data(
     db,
     data_object: ResearchObject,
-    sample: ResearchObject,
-    equipment: ResearchObject,
     adapter: LocalStorageAdapter,
     index: int,
 ) -> None:
-    if (
-        db.scalar(select(DataPayload).where(DataPayload.data_object_id == data_object.id))
-        is not None
-    ):
+    if db.scalar(select(DataPayload).where(DataPayload.data_object_id == data_object.id)):
         return
     rows = [
         (400.0, 0.16 + index * 0.04),
@@ -209,7 +233,11 @@ def _seed_data(
     db.add_all(
         [
             DataPoint(
-                payload_id=payload.id, ordinal=i, source_row_number=i + 2, x_value=x, y_value=y
+                payload_id=payload.id,
+                ordinal=i,
+                source_row_number=i + 2,
+                x_value=x,
+                y_value=y,
             )
             for i, (x, y) in enumerate(rows)
         ]
@@ -241,23 +269,15 @@ def _seed_data(
         )
     )
     db.commit()
-    _relation(db, equipment, data_object, "related_to", "measurement-output")
-    _relation(db, data_object, sample, "related_to", "subject")
 
 
 def seed() -> None:
     adapter = LocalStorageAdapter(get_settings().storage_root)
     with SessionLocal() as db:
-        for key, kind, zh, en in [
-            ("material.generic", "material", "原料 / 试剂", "Material / reagent"),
-            ("sample.generic", "sample", "样品", "Sample"),
-            ("equipment.generic", "equipment", "设备", "Equipment"),
-            ("process.generic", "process", "过程 / 操作", "Process"),
-            ("data.generic", "data", "数据 / 测试结果", "Data / test result"),
-            ("experiment.generic", "experiment", "实验", "Experiment"),
-            ("project.generic", "project", "项目 / Vault", "Project / Vault"),
-        ]:
+        for key, kind, zh, en in TYPE_DEFINITIONS:
             _type(db, key, kind, zh, en)
+        db.commit()
+
         project = _object(
             db,
             "PRJ-001",
@@ -266,213 +286,98 @@ def seed() -> None:
             None,
             {"description": "Demo dataset — synthetic / anonymised", "demo_tags": DEMO_TAGS},
         )
-        material_a = _object(
-            db,
-            "MAT-001",
-            "material",
-            "Material A / 2-POA anonymized",
-            project.id,
-            {"supplier": "Synthetic supplier", "lot": "DEMO-A", "demo_tags": DEMO_TAGS},
-        )
-        ethanol = _object(
-            db,
-            "MAT-002",
-            "material",
-            "Ethanol",
-            project.id,
-            {"supplier": "Synthetic supplier", "lot": "DEMO-ETOH", "demo_tags": DEMO_TAGS},
-        )
-        ki = _object(
-            db,
-            "MAT-003",
-            "material",
-            "Potassium iodide (KI)",
-            project.id,
-            {"supplier": "Synthetic supplier", "lot": "DEMO-KI", "demo_tags": DEMO_TAGS},
-        )
-        starch = _object(
-            db,
-            "MAT-004",
-            "material",
-            "Starch",
-            project.id,
-            {"supplier": "Synthetic supplier", "lot": "DEMO-STARCH", "demo_tags": DEMO_TAGS},
-        )
-        substrate = _object(
-            db,
-            "MAT-005",
-            "material",
-            "Base substrate",
-            project.id,
-            {"supplier": "Synthetic supplier", "lot": "DEMO-BASE", "demo_tags": DEMO_TAGS},
-        )
-        eq_imp = _object(
-            db,
-            "EQP-001",
-            "equipment",
-            "Impregnation setup",
-            project.id,
-            {"asset_number": "DEMO-IMP", "capabilities": ["impregnation"], "demo_tags": DEMO_TAGS},
-        )
-        eq_oven = _object(
-            db,
-            "EQP-002",
-            "equipment",
-            "Drying oven",
-            project.id,
-            {"asset_number": "DEMO-OVEN", "capabilities": ["drying"], "demo_tags": DEMO_TAGS},
-        )
-        eq_spec = _object(
-            db,
-            "EQP-003",
-            "equipment",
-            "Spectrometer",
-            project.id,
-            {
-                "asset_number": "DEMO-SPEC",
-                "capabilities": ["spectral measurement"],
-                "demo_tags": DEMO_TAGS,
-            },
-        )
-        eq_gas = _object(
-            db,
-            "EQP-004",
-            "equipment",
-            "Gas exposure setup",
-            project.id,
-            {"asset_number": "DEMO-GAS", "capabilities": ["gas exposure"], "demo_tags": DEMO_TAGS},
-        )
-        exp1 = _object(
-            db,
-            "EXP-001",
-            "experiment",
-            "基准配方",
-            project.id,
-            {"objective": "建立基准显色响应", "demo_tags": DEMO_TAGS},
-        )
-        exp2 = _object(
-            db,
-            "EXP-002",
-            "experiment",
-            "KI 改性",
-            project.id,
-            {"objective": "观察 KI 改性后的响应", "demo_tags": DEMO_TAGS},
-        )
-        exp3 = _object(
-            db,
-            "EXP-003",
-            "experiment",
-            "KI + starch",
-            project.id,
-            {"objective": "观察 KI + starch 组合的响应", "demo_tags": DEMO_TAGS},
-        )
+        materials = {
+            code: _object(db, code, "material", title, project.id, props)
+            for code, title, props in [
+                (
+                    "MAT-001",
+                    "Material A / 2-POA anonymized",
+                    {"supplier": "Synthetic supplier", "lot": "DEMO-A"},
+                ),
+                (
+                    "MAT-002",
+                    "Ethanol",
+                    {"supplier": "Synthetic supplier", "lot": "DEMO-ETOH"},
+                ),
+                (
+                    "MAT-003",
+                    "Potassium iodide (KI)",
+                    {"supplier": "Synthetic supplier", "lot": "DEMO-KI"},
+                ),
+                (
+                    "MAT-004",
+                    "Starch",
+                    {"supplier": "Synthetic supplier", "lot": "DEMO-STARCH"},
+                ),
+                (
+                    "MAT-005",
+                    "Base substrate",
+                    {"supplier": "Synthetic supplier", "lot": "DEMO-BASE"},
+                ),
+            ]
+        }
+        equipment = {
+            code: _object(db, code, "equipment", title, project.id, props)
+            for code, title, props in [
+                (
+                    "EQP-001",
+                    "Impregnation setup",
+                    {"asset_number": "DEMO-IMP", "capabilities": ["impregnation"]},
+                ),
+                (
+                    "EQP-002",
+                    "Drying oven",
+                    {"asset_number": "DEMO-OVEN", "capabilities": ["drying"]},
+                ),
+                (
+                    "EQP-003",
+                    "Spectrometer",
+                    {"asset_number": "DEMO-SPEC", "capabilities": ["spectral measurement"]},
+                ),
+                (
+                    "EQP-004",
+                    "Gas exposure setup",
+                    {"asset_number": "DEMO-GAS", "capabilities": ["gas exposure"]},
+                ),
+            ]
+        }
+        experiments = {
+            code: _object(db, code, "experiment", title, project.id, {"objective": objective})
+            for code, title, objective in [
+                ("EXP-001", "基准配方", "建立基准显色响应"),
+                ("EXP-002", "KI 改性与分支", "观察 KI 改性及分支响应"),
+                ("EXP-003", "KI + starch", "观察 KI + starch 组合的响应"),
+            ]
+        }
         samples = {
-            "SMP-001": _object(
-                db,
-                "SMP-001",
-                "sample",
-                "Baseline sample",
-                project.id,
-                {"batch": "baseline", "demo_tags": DEMO_TAGS},
-            ),
-            "SMP-002": _object(
-                db,
-                "SMP-002",
-                "sample",
-                "Baseline + KI",
-                project.id,
-                {"batch": "ki", "demo_tags": DEMO_TAGS},
-            ),
-            "SMP-003": _object(
-                db,
-                "SMP-003",
-                "sample",
-                "Baseline + KI + starch",
-                project.id,
-                {"batch": "ki-starch", "demo_tags": DEMO_TAGS},
-            ),
-            "SMP-004": _object(
-                db,
-                "SMP-004",
-                "sample",
-                "Baseline branch",
-                project.id,
-                {"batch": "branch", "demo_tags": DEMO_TAGS},
-            ),
+            code: _object(db, code, "sample", title, project.id, {"batch": batch})
+            for code, title, batch in [
+                ("SMP-001", "Baseline sample", "baseline"),
+                ("SMP-002", "Baseline + KI", "ki"),
+                ("SMP-003", "Baseline + KI + starch", "ki-starch"),
+                ("SMP-004", "Baseline branch", "branch"),
+            ]
         }
         processes = {
-            "PRC-001": _object(
-                db,
-                "PRC-001",
-                "process",
-                "Solution preparation",
-                project.id,
-                {"parameters": {"duration": {"value": 10, "unit": "min"}}, "demo_tags": DEMO_TAGS},
-            ),
-            "PRC-002": _object(
-                db,
-                "PRC-002",
-                "process",
-                "Baseline impregnation",
-                project.id,
-                {
-                    "parameters": {
-                        "duration": {"value": 30, "unit": "min"},
-                        "temperature": {"value": 25, "unit": "°C"},
-                    },
-                    "demo_tags": DEMO_TAGS,
-                },
-            ),
-            "PRC-003": _object(
-                db,
-                "PRC-003",
-                "process",
-                "KI modification",
-                project.id,
-                {
-                    "parameters": {
-                        "duration": {"value": 30, "unit": "min"},
-                        "temperature": {"value": 25, "unit": "°C"},
-                    },
-                    "demo_tags": DEMO_TAGS,
-                },
-            ),
-            "PRC-004": _object(
-                db,
-                "PRC-004",
-                "process",
-                "KI + starch modification",
-                project.id,
-                {
-                    "parameters": {
-                        "duration": {"value": 30, "unit": "min"},
-                        "temperature": {"value": 25, "unit": "°C"},
-                    },
-                    "demo_tags": DEMO_TAGS,
-                },
-            ),
-            "PRC-005": _object(
-                db,
-                "PRC-005",
-                "process",
-                "Branch preparation",
-                project.id,
-                {"parameters": {"duration": {"value": 20, "unit": "min"}}, "demo_tags": DEMO_TAGS},
-            ),
-            "PRC-006": _object(
-                db,
-                "PRC-006",
-                "process",
-                "Drying",
-                project.id,
-                {
-                    "parameters": {
-                        "temperature": {"value": 60, "unit": "°C"},
-                        "duration": {"value": 20, "unit": "min"},
-                    },
-                    "demo_tags": DEMO_TAGS,
-                },
-            ),
+            code: _object(db, code, "process", title, project.id, {"parameters": parameters})
+            for code, title, parameters in [
+                ("PRC-001", "Solution preparation", {"duration": {"value": 10, "unit": "min"}}),
+                ("PRC-002", "Baseline measurement", {"duration": {"value": 30, "unit": "min"}}),
+                ("PRC-003", "KI modification", {"duration": {"value": 30, "unit": "min"}}),
+                ("PRC-004", "KI spectral measurement", {"duration": {"value": 30, "unit": "min"}}),
+                ("PRC-005", "Branch preparation", {"duration": {"value": 20, "unit": "min"}}),
+                (
+                    "PRC-006",
+                    "Branch spectral measurement",
+                    {"duration": {"value": 20, "unit": "min"}},
+                ),
+                ("PRC-007", "KI + starch modification", {"duration": {"value": 30, "unit": "min"}}),
+                (
+                    "PRC-008",
+                    "KI + starch spectral measurement",
+                    {"duration": {"value": 30, "unit": "min"}},
+                ),
+            ]
         }
         data = {
             code: _object(
@@ -487,7 +392,6 @@ def seed() -> None:
                     "x_unit": "nm",
                     "y_label": "Response",
                     "y_unit": "a.u.",
-                    "demo_tags": DEMO_TAGS,
                 },
             )
             for code, title in [
@@ -497,98 +401,120 @@ def seed() -> None:
                 ("DAT-004", "Branch spectral response"),
             ]
         }
-        for experiment, object_codes in [
-            (exp1, ["PRC-001", "PRC-002", "PRC-006", "SMP-001", "SMP-004", "DAT-001", "DAT-004"]),
-            (exp2, ["PRC-003", "SMP-002", "DAT-002"]),
-            (exp3, ["PRC-004", "SMP-003", "DAT-003"]),
+        all_demo_objects = list(materials.values()) + list(equipment.values())
+        all_demo_objects += list(experiments.values()) + list(samples.values())
+        all_demo_objects += list(processes.values()) + list(data.values()) + [project]
+        demo_ids = [item.id for item in all_demo_objects]
+        db.execute(
+            delete(ObjectRelation).where(
+                (ObjectRelation.source_object_id.in_(demo_ids))
+                | (ObjectRelation.target_object_id.in_(demo_ids))
+            )
+        )
+        db.commit()
+
+        ownership = {
+            "EXP-001": ["PRC-001", "SMP-001", "PRC-002", "DAT-001"],
+            "EXP-002": [
+                "PRC-003",
+                "SMP-002",
+                "PRC-004",
+                "DAT-002",
+                "PRC-005",
+                "SMP-004",
+                "PRC-006",
+                "DAT-004",
+            ],
+            "EXP-003": ["PRC-007", "SMP-003", "PRC-008", "DAT-003"],
+        }
+        lookup = {**processes, **samples, **data}
+        for experiment_code, object_codes in ownership.items():
+            for object_code in object_codes:
+                _relation(db, experiments[experiment_code], lookup[object_code], "contains")
+
+        prep = processes["PRC-001"]
+        _relation(
+            db,
+            prep,
+            materials["MAT-001"],
+            "uses",
+            "material",
+            {"quantity": {"value": 5, "unit": "g"}},
+        )
+        _relation(
+            db,
+            prep,
+            materials["MAT-002"],
+            "uses",
+            "solvent",
+            {"quantity": {"value": 90, "unit": "g"}},
+        )
+        _relation(db, prep, equipment["EQP-001"], "uses", "equipment")
+        _relation(db, prep, samples["SMP-001"], "produces")
+
+        measurements = [
+            ("PRC-002", "SMP-001", "DAT-001"),
+            ("PRC-004", "SMP-002", "DAT-002"),
+            ("PRC-006", "SMP-004", "DAT-004"),
+            ("PRC-008", "SMP-003", "DAT-003"),
+        ]
+        for process_code, sample_code, data_code in measurements:
+            process = processes[process_code]
+            _relation(db, process, samples[sample_code], "uses", "subject")
+            _relation(db, process, equipment["EQP-003"], "uses", "equipment")
+            _relation(db, process, equipment["EQP-004"], "uses", "environment")
+            _relation(db, process, data[data_code], "produces")
+
+        for process_code, sample_code in [
+            ("PRC-003", "SMP-001"),
+            ("PRC-005", "SMP-001"),
+            ("PRC-007", "SMP-002"),
         ]:
-            for code in object_codes:
-                _relation(db, experiment, (processes | samples | data)[code], "contains")
-        _relation(
-            db,
-            processes["PRC-001"],
-            material_a,
-            "uses",
-            "material",
-            {"quantity": {"value": 5, "unit": "g"}},
-        )
-        _relation(
-            db,
-            processes["PRC-001"],
-            ethanol,
-            "uses",
-            "solvent",
-            {"quantity": {"value": 90, "unit": "g"}},
-        )
-        _relation(
-            db,
-            processes["PRC-002"],
-            material_a,
-            "uses",
-            "material",
-            {"quantity": {"value": 5, "unit": "g"}},
-        )
-        _relation(
-            db,
-            processes["PRC-002"],
-            ethanol,
-            "uses",
-            "solvent",
-            {"quantity": {"value": 90, "unit": "g"}},
-        )
-        _relation(db, processes["PRC-002"], eq_imp, "uses", "equipment")
-        _relation(db, processes["PRC-002"], samples["SMP-001"], "produces")
-        _relation(db, processes["PRC-003"], samples["SMP-001"], "uses", "precursor")
+            _relation(db, processes[process_code], samples[sample_code], "uses", "precursor")
+        for process_code, sample_code in [
+            ("PRC-003", "SMP-002"),
+            ("PRC-005", "SMP-004"),
+            ("PRC-007", "SMP-003"),
+        ]:
+            _relation(db, processes[process_code], samples[sample_code], "produces")
         _relation(
             db,
             processes["PRC-003"],
-            ki,
+            materials["MAT-003"],
             "uses",
             "additive",
             {"quantity": {"value": 1, "unit": "g"}},
         )
-        _relation(db, processes["PRC-003"], eq_imp, "uses", "equipment")
-        _relation(db, processes["PRC-003"], samples["SMP-002"], "produces")
-        _relation(db, processes["PRC-004"], samples["SMP-002"], "uses", "precursor")
+        _relation(db, processes["PRC-005"], materials["MAT-005"], "uses", "substrate")
         _relation(
             db,
-            processes["PRC-004"],
-            ki,
+            processes["PRC-007"],
+            materials["MAT-003"],
             "uses",
             "additive",
             {"quantity": {"value": 1, "unit": "g"}},
         )
         _relation(
             db,
-            processes["PRC-004"],
-            starch,
+            processes["PRC-007"],
+            materials["MAT-004"],
             "uses",
             "additive",
             {"quantity": {"value": 1, "unit": "g"}},
         )
-        _relation(db, processes["PRC-004"], eq_imp, "uses", "equipment")
-        _relation(db, processes["PRC-004"], samples["SMP-003"], "produces")
-        _relation(db, processes["PRC-005"], samples["SMP-001"], "uses", "precursor")
-        _relation(db, processes["PRC-005"], substrate, "uses", "substrate")
-        _relation(db, processes["PRC-005"], samples["SMP-004"], "produces")
-        for process in processes.values():
-            if process.code in {"PRC-002", "PRC-003", "PRC-004", "PRC-005"}:
-                _relation(db, process, eq_oven, "uses", "equipment")
-        for process, sample, datum in [
-            (processes["PRC-002"], samples["SMP-001"], data["DAT-001"]),
-            (processes["PRC-003"], samples["SMP-002"], data["DAT-002"]),
-            (processes["PRC-004"], samples["SMP-003"], data["DAT-003"]),
-            (processes["PRC-005"], samples["SMP-004"], data["DAT-004"]),
+
+        for source, target in [
+            ("PRC-001", "PRC-002"),
+            ("PRC-003", "PRC-004"),
+            ("PRC-005", "PRC-006"),
+            ("PRC-007", "PRC-008"),
         ]:
-            _relation(db, process, sample, "uses", "subject")
-            _relation(db, process, eq_spec, "uses", "equipment")
-            _relation(db, process, eq_gas, "uses", "environment")
-            _relation(db, process, datum, "produces")
-            _seed_data(db, datum, sample, eq_spec, adapter, int(datum.code[-1]))
-        _relation(db, processes["PRC-002"], processes["PRC-003"], "precedes")
-        _relation(db, processes["PRC-003"], processes["PRC-004"], "precedes")
+            _relation(db, processes[source], processes[target], "precedes")
+
+        for index, datum in enumerate(data.values(), start=1):
+            _seed_data(db, datum, adapter, index)
         db.commit()
-    print("Seeded v0.2 synthetic/anonymised research object graph (repeat-safe).")
+    print("Seeded v0.2 semantic synthetic/anonymised research object graph (repeat-safe).")
 
 
 if __name__ == "__main__":

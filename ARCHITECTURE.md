@@ -18,11 +18,11 @@ PostgreSQL is mandatory. `api/app/db.py` rejects non-PostgreSQL URLs, the Alembi
 
 - `ResearchObject` is the only domain record for material, sample, equipment, process, data, experiment and project.
 - `ObjectType` plus immutable `ObjectTypeVersion` supplies JSON Schema and UI metadata.
-- `ObjectRelation` is the typed graph edge. Service validation enforces scope, allowed source/target kinds, no self-edge, valid quantity metadata and semantic uniqueness.
+- `ObjectRelation` is the typed graph edge. Centralized semantic validation enforces scope, allowed source/target kinds, role aliases, no self-edge, valid quantity metadata, one Experiment owner, one producer, and cycle-free precursor/precedes graphs. `related_to` is never used for canonical provenance.
 - `ObjectRevision` stores an immutable JSONB snapshot and SHA-256 digest. Revision numbers are allocated under a row lock.
 - `Attachment` stores object-centric provenance metadata; bytes remain outside PostgreSQL.
 - `DataImport` preserves source checksum, parser version, mapping, warnings and errors. `DataPayload` and `DataPoint` store validated immutable XY values without interpolation or unit conversion.
-- `GraphQueryService` owns direct provenance and bounded upstream/downstream traversal. Default depth is 3, maximum depth is 8, and visited-node guards prevent cycles.
+- `GraphQueryService` owns direct provenance and bounded upstream/downstream traversal. Default depth is 3, maximum depth is 8, and visited-node guards prevent cycles. Only subject relations drive current Data; only precursor relations drive lineage. Process composition is reconciled as a single desired-state transaction.
 
 ## API surface
 
@@ -34,6 +34,8 @@ The active router is `api/app/routers/objects.py` under `/api/v1`:
 - `/objects/{id}/revisions`
 - `/objects/{id}/attachments` and `/attachments/{id}`
 - `/samples/{id}/context` and `/experiments/{id}/context`
+- `/processes/{id}/composition`
+- `/projects/{id}/summary` and `/workspace/summary`
 - `/data/{id}/imports`, `/data/{id}/payloads` and `/data-payloads/{id}`
 
 The old project/experiment/measurement/AI/literature/evaluation routers are not active runtime.
@@ -42,7 +44,7 @@ The old project/experiment/measurement/AI/literature/evaluation routers are not 
 
 `web/src/features/workspace/components/workspace-app.tsx` is the v0.2 object-centric surface. It provides one shared list/detail/editor/composer implementation for all seven kinds, with route-specific pages only selecting the kind. The shell provides Project/Vault scope switching and navigation for Overview, Experiments, Samples, Processes, Data, Materials and Equipment.
 
-The structured process composer is keyboard-first: `@` reference search, arrow selection, Enter selection, Tab traversal, Escape close and Cmd/Ctrl+Enter save. Context pages keep direct provenance, upstream/downstream lineage and current data visibly separate.
+The structured process composer is keyboard-first: `@` reference search, arrow selection, Enter selection, Tab traversal, Escape close and Cmd/Ctrl+Enter save. It submits one desired-state composition PUT; it does not loop over relation POSTs. Context pages keep direct provenance, upstream/downstream lineage and current data visibly separate, and render lineage as a backend-edge tree.
 
 ## Non-goals
 
