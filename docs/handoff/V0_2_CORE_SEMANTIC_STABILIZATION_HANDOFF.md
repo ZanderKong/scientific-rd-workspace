@@ -24,8 +24,8 @@ Plan 07.1 stabilizes the v0.2 Research Object Graph on top of baseline commit `a
 - Backend import/mapper check and Alembic offline `0001 → 0002`: passed locally.
 - Frontend lint, typecheck, format, Vitest and production build: executed by CI; local unit/type gates are also run before handoff.
 - PostgreSQL API tests and live migration/seed/benchmark require the CI PostgreSQL 17 service; this host has no local PostgreSQL/Docker service.
-- Final commit: `e4a6c27e2b88b91cc6447dc8550b1590ef0ffae8`.
-- Final green CI: [run 33728192210](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33728192210), including PostgreSQL 17 migration/parity, repeat-safe seed assertions, benchmark smoke, backend tests, and all frontend gates.
+- Final commit before this handoff record update: `6fc51b56cf5ce610f171113a5bd4151d29727347`.
+- Green CI for that implementation: [run 33728347057](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33728347057), including PostgreSQL 17 migration/parity, repeat-safe seed assertions, benchmark smoke, backend tests, and all frontend gates.
 
 ## Runbook
 
