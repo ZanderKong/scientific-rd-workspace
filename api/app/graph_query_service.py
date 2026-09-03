@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import ObjectRelation, ObjectType, ObjectTypeVersion, ResearchObject
@@ -349,11 +349,17 @@ class GraphQueryService:
             else:
                 pattern = f"%{q.strip().lstrip('@')}%"
                 statement = statement.where(
-                    ResearchObject.code.ilike(pattern) | ResearchObject.title.ilike(pattern)
+                    or_(
+                        ResearchObject.code.ilike(pattern),
+                        ResearchObject.title.ilike(pattern),
+                        cast(ResearchObject.properties_jsonb, String).ilike(pattern),
+                    )
                 )
         return list(
             db.scalars(
-                statement.order_by(ResearchObject.updated_at.desc()).offset(offset).limit(limit)
+                statement.order_by(ResearchObject.updated_at.desc(), ResearchObject.code.asc())
+                .offset(offset)
+                .limit(limit)
             )
         )
 

@@ -15,6 +15,9 @@ import type {
   ResearchObject,
   ResearchObjectKind,
   SampleContext,
+  SampleRecord,
+  SampleRecordCreatePayload,
+  SampleRecordPutPayload,
   WorkspaceSummary
 } from './domain';
 
@@ -132,6 +135,7 @@ export const api = {
     project_scope_id?: string | null;
     status?: string;
     properties_jsonb?: JsonObject;
+    usage_schema_jsonb?: JsonObject;
     content_document?: JsonObject[];
   }) => request<ResearchObject>('/objects', json(payload)),
   updateObject: (
@@ -139,7 +143,12 @@ export const api = {
     payload: Partial<
       Pick<
         ResearchObject,
-        'title' | 'status' | 'project_scope_id' | 'properties_jsonb' | 'content_document'
+        | 'title'
+        | 'status'
+        | 'project_scope_id'
+        | 'properties_jsonb'
+        | 'usage_schema_jsonb'
+        | 'content_document'
       >
     >
   ) => request<ResearchObject>(`/objects/${id}`, { ...json(payload), method: 'PATCH' }),
@@ -152,6 +161,11 @@ export const api = {
       ...json({ items }),
       method: 'PUT'
     }),
+  getSampleRecord: (id: string) => request<SampleRecord>(`/samples/${id}/record`),
+  createSampleRecord: (payload: SampleRecordCreatePayload) =>
+    request<SampleRecord>('/sample-records', json(payload)),
+  updateSampleRecord: (id: string, payload: SampleRecordPutPayload) =>
+    request<SampleRecord>(`/samples/${id}/record`, { ...json(payload), method: 'PUT' }),
   createRelation: (payload: {
     source_object_id: string;
     target_object_id: string;

@@ -153,6 +153,9 @@ class ResearchObject(Base):
     )
     type_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object_type_versions.id"))
     properties_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
+    usage_schema_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JsonColumn, default=dict, server_default=text("'{}'::jsonb")
+    )
     content_document: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

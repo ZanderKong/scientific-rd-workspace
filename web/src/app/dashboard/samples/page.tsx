@@ -1,5 +1,7 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { SampleList } from '@/features/workspace/sample-record/sample-list';
+import { getLocale } from 'next-intl/server';
 
-export default function SamplesPage() {
-  return <WorkspaceApp view='list' kind='sample' />;
+export default async function SamplesPage() {
+  const locale = await getLocale();
+  return <SampleList zh={locale === 'zh-CN'} />;
 }

@@ -8,6 +8,86 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 ObjectKind = Literal["material", "sample", "equipment", "process", "data", "experiment", "project"]
 RelationType = Literal["contains", "uses", "produces", "precedes", "related_to"]
+UsageValueType = Literal["number", "text", "boolean", "select"]
+
+
+class UsageFieldDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=120)
+    value_type: UsageValueType
+    default_value: Any = None
+    default_unit: str | None = Field(default=None, max_length=64)
+    required: bool = False
+    options: list[str] = Field(default_factory=list)
+    order: int = Field(default=0, ge=0)
+
+    @field_validator("key", "label")
+    @classmethod
+    def strip_field_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("default_unit")
+    @classmethod
+    def strip_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def validate_options(self) -> UsageFieldDefinition:
+        if self.value_type == "select" and not self.options:
+            raise ValueError("select usage fields require options")
+        if self.value_type != "select" and self.options:
+            raise ValueError("options are only supported for select usage fields")
+        if len(set(self.options)) != len(self.options):
+            raise ValueError("usage field options must be unique")
+        return self
+
+
+class UsageSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fields: list[UsageFieldDefinition] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_keys(self) -> UsageSchema:
+        keys = [field.key for field in self.fields]
+        if len(set(keys)) != len(keys):
+            raise ValueError("usage field keys must be unique")
+        return self
+
+
+class UsageValue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: Any
+    unit: str | None = Field(default=None, max_length=64)
+
+    @field_validator("unit")
+    @classmethod
+    def strip_usage_unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def validate_scalar_value(self) -> UsageValue:
+        if isinstance(self.value, (dict, list, tuple, set)):
+            raise ValueError("usage value must be scalar")
+        return self
+
+
+def _validate_usage_schema_payload(value: dict[str, Any]) -> dict[str, Any]:
+    if value == {}:
+        return {}
+    return UsageSchema.model_validate(value).model_dump(exclude_none=True)
 
 
 class ObjectTypeVersionOut(BaseModel):
@@ -53,6 +133,7 @@ class ResearchObjectOut(ObjectSummary):
     type_version_id: uuid.UUID
     type_version: int
     properties_jsonb: dict[str, Any]
+    usage_schema_jsonb: dict[str, Any]
     content_document: list[dict[str, Any]]
     created_at: datetime
     updated_at: datetime
@@ -68,7 +149,13 @@ class ObjectCreate(BaseModel):
     project_scope_id: uuid.UUID | None = None
     type_version_id: uuid.UUID | None = None
     properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    usage_schema_jsonb: dict[str, Any] = Field(default_factory=dict)
     content_document: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("usage_schema_jsonb")
+    @classmethod
+    def validate_usage_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_usage_schema_payload(value)
 
     @field_validator("title", "status")
     @classmethod
@@ -86,7 +173,13 @@ class ObjectPatch(BaseModel):
     status: str | None = Field(default=None, min_length=1, max_length=32)
     project_scope_id: uuid.UUID | None = None
     properties_jsonb: dict[str, Any] | None = None
+    usage_schema_jsonb: dict[str, Any] | None = None
     content_document: list[dict[str, Any]] | None = None
+
+    @field_validator("usage_schema_jsonb")
+    @classmethod
+    def validate_optional_usage_schema(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _validate_usage_schema_payload(value) if value is not None else None
 
 
 class RelationCreate(BaseModel):
@@ -177,6 +270,152 @@ class ObjectRelationOut(BaseModel):
     target: ObjectSummary
     created_at: datetime
     updated_at: datetime
+
+
+class SampleRecordResourceCreateTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["material", "equipment"]
+    title: str = Field(min_length=1, max_length=240)
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    status: str = Field(default="active", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    usage_schema_jsonb: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("title", "status")
+    @classmethod
+    def strip_resource_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("usage_schema_jsonb")
+    @classmethod
+    def validate_resource_usage_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_usage_schema_payload(value)
+
+
+class SampleRecordResourceDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relation_id: uuid.UUID | None = None
+    target_object_id: uuid.UUID | None = None
+    create_target: SampleRecordResourceCreateTarget | None = None
+    role: str | None = Field(default=None, max_length=64)
+    usage_values: dict[str, UsageValue] = Field(default_factory=dict)
+    usage_schema_additions: list[UsageFieldDefinition] = Field(default_factory=list)
+
+    @field_validator("role")
+    @classmethod
+    def strip_resource_role(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_resource_target(self) -> SampleRecordResourceDraft:
+        if (self.target_object_id is None) == (self.create_target is None):
+            raise ValueError("provide exactly one of target_object_id or create_target")
+        keys = [field.key for field in self.usage_schema_additions]
+        if len(set(keys)) != len(keys):
+            raise ValueError("usage schema additions must have unique keys")
+        return self
+
+
+class SampleRecordProcessDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    process_id: uuid.UUID | None = None
+    title: str = Field(min_length=1, max_length=240)
+    status: str = Field(default="active", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    content_document: list[dict[str, Any]] = Field(default_factory=list)
+    resources: list[SampleRecordResourceDraft] = Field(default_factory=list)
+
+    @field_validator("title", "status")
+    @classmethod
+    def strip_process_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class SampleRecordSampleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=240)
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    status: str = Field(default="draft", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    content_document: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("title", "status")
+    @classmethod
+    def strip_sample_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class SampleRecordSampleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    status: str | None = Field(default=None, min_length=1, max_length=32)
+    properties_jsonb: dict[str, Any] | None = None
+    content_document: list[dict[str, Any]] | None = None
+
+    @field_validator("title", "status")
+    @classmethod
+    def strip_optional_sample_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class SampleRecordCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_scope_id: uuid.UUID
+    sample: SampleRecordSampleCreate
+    steps: list[SampleRecordProcessDraft] = Field(min_length=1)
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class SampleRecordPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sample: SampleRecordSampleUpdate = Field(default_factory=SampleRecordSampleUpdate)
+    steps: list[SampleRecordProcessDraft] = Field(min_length=1)
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class SampleRecordResourceOut(BaseModel):
+    relation_id: uuid.UUID
+    object: ResearchObjectOut
+    role: str
+    usage_values: dict[str, UsageValue]
+
+
+class SampleRecordStepOut(BaseModel):
+    process: ResearchObjectOut
+    ordinal: int
+    resources: list[SampleRecordResourceOut]
+
+
+class SampleRecordOut(BaseModel):
+    sample: ResearchObjectOut
+    steps: list[SampleRecordStepOut]
+    data: list[ResearchObjectOut]
+    editable: bool
+    edit_blockers: list[str]
 
 
 class RevisionCreate(BaseModel):

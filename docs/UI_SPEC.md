@@ -2,21 +2,15 @@
 
 ## Shell
 
-The shell is Chinese-first with English switchable and no locale URL prefix. The sidebar contains only active v0.2 routes:
+The shell is Chinese-first with English switchable and no locale URL prefix. The primary sidebar is intentionally restrained:
 
 ```text
-Workspace
-├── Overview
-└── Projects
 Research
 ├── Experiments
-├── Samples
-├── Processes
-└── Data
-Library
-├── Materials
-└── Equipment
+└── Samples
 ```
+
+The generic Process, Data, Material, Equipment, Project and Overview routes remain available directly and through existing object links; they are not deleted by the navigation cut.
 
 The Project/Vault switcher persists the selected project locally and adds `?project=<uuid>` to scoped list routes. Breadcrumbs, locale switcher, theme toggle, skip link and visible loading/error/empty states are part of the shell contract.
 
@@ -27,6 +21,15 @@ Every object kind uses the same typed list/detail language: code, title, status,
 Object editing has an explicit Save action. Structured properties and rich/block content remain separate. Stored scientific values, codes, filenames and API enum values are not translated.
 
 ## Composer interaction
+
+Samples use a dedicated Sample-first Composer rather than the generic raw-properties editor. A new record starts with one Process Block. The same component tree is used for create and edit.
+
+- `/` opens active Process definitions from `ObjectType` / `ObjectTypeVersion`, with a Custom Process fallback.
+- `@` opens a two-pane resolver for Material, Equipment and optional precursor Sample. Material and Equipment may be mixed in one token stream; tokens are compact and semantically color-coded.
+- Resource identity is previewable, but actual quantity/rpm/temperature/etc. values are rendered as dynamic fields on the current Process use. Adding a field updates that concrete Material/Equipment usage schema; it does not create a new resource.
+- Process-own parameters stay in `Process.properties_jsonb.parameters`; resource-use values stay on the Process → resource relation.
+- Save uses the aggregate Sample Record API once. The UI never loops over relation POST/PATCH calls to assemble one workflow.
+- `基于此样品新建` removes Sample/Process/relation IDs from the draft, keeps existing resource IDs and values, and cannot mutate the source record merely by opening it.
 
 The Process composer is keyboard-first and keeps relation semantics visible:
 

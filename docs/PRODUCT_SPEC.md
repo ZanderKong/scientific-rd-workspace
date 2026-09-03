@@ -18,10 +18,10 @@ The backend is the semantic authority. A relation is rejected when its source/ta
 
 ```text
 Project / Vault
-  → Experiment
-  → Process
+  → Sample Record
+  → Process Blocks
   → Material + Equipment + Sample
-  → Data
+  → current Data
   → direct provenance and bounded lineage
   → revision snapshot
 ```
@@ -32,6 +32,9 @@ The demo uses a synthetic/anonymised chlorine color-response material graph. It 
 
 - Switch the active Project/Vault scope from the shell.
 - Browse and search object lists; create and edit typed objects with schema validation.
+- Create and edit a Sample Record as one aggregate workflow. A record starts with one Process Block; `/` chooses a Process definition and `@` resolves resources.
+- Store Material/Equipment identity on objects and actual use values on Process relations, with persisted per-resource usage-field definitions.
+- Clone a Sample Record into a new draft with new Sample/Process IDs and reused resource identities.
 - Compose process inputs/outputs using `@` references and explicit relation metadata.
 - Open Sample context with direct provenance, upstream/downstream samples, and current Data separated.
 - Open Experiment context with contained samples/processes/data and derived materials/equipment.
@@ -40,7 +43,7 @@ The demo uses a synthetic/anonymised chlorine color-response material graph. It 
 
 ## Explicitly deferred
 
-AI generation, Compare, Evidence, Evaluation and Literature are not active v0.2 features. They are Plan 2 work and must not remain as misleading active navigation or API runtime.
+AI generation, Compare, Evidence, Evaluation, Literature, non-owning Experiment/Sample membership, free-form graphs and Equipment Type inheritance are not Plan 08 features. They remain separate follow-up work and must not be simulated with `related_to` or exclusive `contains` ownership.
 
 ## Quality bar
 

@@ -98,16 +98,31 @@ def validate_relation_metadata(role: str | None, properties: dict[str, object]) 
     if role is not None and not role.strip():
         raise ValueError("relation role must not be blank")
     quantity = properties.get("quantity")
-    if quantity is None:
+    if quantity is not None:
+        if (
+            not isinstance(quantity, dict)
+            or not isinstance(quantity.get("value"), (int, float))
+            or isinstance(quantity.get("value"), bool)
+        ):
+            raise ValueError("quantity.value must be numeric")
+        if not isinstance(quantity.get("unit"), str) or not quantity["unit"].strip():
+            raise ValueError("quantity.unit must be a non-empty string")
+    usage_values = properties.get("usage_values")
+    if usage_values is None:
         return
-    if (
-        not isinstance(quantity, dict)
-        or not isinstance(quantity.get("value"), (int, float))
-        or isinstance(quantity.get("value"), bool)
-    ):
-        raise ValueError("quantity.value must be numeric")
-    if not isinstance(quantity.get("unit"), str) or not quantity["unit"].strip():
-        raise ValueError("quantity.unit must be a non-empty string")
+    if not isinstance(usage_values, Mapping):
+        raise ValueError("usage_values must be an object")
+    for key, payload in usage_values.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("usage_values keys must be non-empty strings")
+        if not isinstance(payload, Mapping) or "value" not in payload:
+            raise ValueError("each usage value must contain a scalar value")
+        value = payload["value"]
+        if isinstance(value, (dict, list, tuple, set)):
+            raise ValueError("usage value must be scalar")
+        if "unit" in payload and payload["unit"] is not None:
+            if not isinstance(payload["unit"], str) or not payload["unit"].strip():
+                raise ValueError("usage value unit must be a non-empty string")
 
 
 def _excluded(statement, exclude_ids: set[uuid.UUID]):

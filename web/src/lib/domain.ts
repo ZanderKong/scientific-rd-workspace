@@ -9,6 +9,27 @@ export type ResearchObjectKind =
 
 export type RelationType = 'contains' | 'uses' | 'produces' | 'precedes' | 'related_to';
 export type JsonObject = Record<string, unknown>;
+export type UsageValueType = 'number' | 'text' | 'boolean' | 'select';
+
+export interface UsageFieldDefinition {
+  key: string;
+  label: string;
+  value_type: UsageValueType;
+  default_value?: unknown;
+  default_unit?: string | null;
+  required?: boolean;
+  options?: string[];
+  order?: number;
+}
+
+export interface UsageSchema {
+  fields: UsageFieldDefinition[];
+}
+
+export interface UsageValue {
+  value: unknown;
+  unit?: string | null;
+}
 
 export interface ObjectTypeVersion {
   id: string;
@@ -46,6 +67,7 @@ export interface ResearchObject {
   type_version_id: string;
   type_version: number;
   properties_jsonb: JsonObject;
+  usage_schema_jsonb: JsonObject;
   content_document: Array<JsonObject>;
   created_at: string;
   updated_at: string;
@@ -86,6 +108,85 @@ export interface ProcessComposition {
   process: ResearchObject;
   uses: ObjectRelation[];
   produces: ObjectRelation[];
+}
+
+export interface SampleRecordResourceCreateTarget {
+  kind: 'material' | 'equipment';
+  title: string;
+  code?: string | null;
+  status?: string;
+  type_version_id?: string | null;
+  properties_jsonb?: JsonObject;
+  usage_schema_jsonb?: JsonObject;
+}
+
+export interface SampleRecordResourceDraft {
+  relation_id?: string | null;
+  target_object_id?: string | null;
+  create_target?: SampleRecordResourceCreateTarget | null;
+  role?: string | null;
+  usage_values?: Record<string, UsageValue>;
+  usage_schema_additions?: UsageFieldDefinition[];
+}
+
+export interface SampleRecordProcessDraft {
+  process_id?: string | null;
+  title: string;
+  status?: string;
+  type_version_id?: string | null;
+  properties_jsonb?: JsonObject;
+  content_document?: Array<JsonObject>;
+  resources: SampleRecordResourceDraft[];
+}
+
+export interface SampleRecordSampleCreate {
+  title: string;
+  code?: string | null;
+  status?: string;
+  type_version_id?: string | null;
+  properties_jsonb?: JsonObject;
+  content_document?: Array<JsonObject>;
+}
+
+export interface SampleRecordSampleUpdate {
+  title?: string;
+  status?: string;
+  properties_jsonb?: JsonObject;
+  content_document?: Array<JsonObject>;
+}
+
+export interface SampleRecordCreatePayload {
+  project_scope_id: string;
+  sample: SampleRecordSampleCreate;
+  steps: SampleRecordProcessDraft[];
+  change_note?: string | null;
+}
+
+export interface SampleRecordPutPayload {
+  sample?: SampleRecordSampleUpdate;
+  steps: SampleRecordProcessDraft[];
+  change_note?: string | null;
+}
+
+export interface SampleRecordResource {
+  relation_id: string;
+  object: ResearchObject;
+  role: string;
+  usage_values: Record<string, UsageValue>;
+}
+
+export interface SampleRecordStep {
+  process: ResearchObject;
+  ordinal: number;
+  resources: SampleRecordResource[];
+}
+
+export interface SampleRecord {
+  sample: ResearchObject;
+  steps: SampleRecordStep[];
+  data: ResearchObject[];
+  editable: boolean;
+  edit_blockers: string[];
 }
 
 export type ObjectSummary = Pick<

@@ -24,6 +24,7 @@ All domain records use a UUID primary key and a unique human-readable code. Code
 - nullable `project_scope_id` (projects are scopes; materials/equipment may be global or scoped)
 - `type_version_id`
 - `properties_jsonb` for typed structured fields
+- `usage_schema_jsonb` for per-object Material/Equipment usage-field definitions; all other kinds return `{}`
 - `content_document` for rich/block content, kept separate from properties
 - timestamps
 
@@ -43,6 +44,10 @@ Foreign keys cascade when an object is removed. A PostgreSQL unique index with `
 
 Partial unique indexes enforce one incoming `contains` owner and one incoming `produces` producer. Relation writes also reject precursor lineage cycles, Process `precedes` cycles, invalid scope crossings and ownership conflicts. Scope changes revalidate all existing edges.
 
+Material and Equipment usage definitions are stored on the concrete resource object as `usage_schema_jsonb.fields[]`. Supported field types are `number`, `text`, `boolean` and `select`; defaults are suggestions, not evidence, and units are metadata with no implicit conversion. A Sample Record's actual use values are stored on the Process → resource `uses` relation under `properties_jsonb.usage_values`, for example `{ "usage_values": { "quantity": { "value": 10, "unit": "g" } } }`. Legacy top-level `quantity` remains readable through the Sample Record projection.
+
+`GET /api/v1/samples/{id}/record` reconstructs a linear chain backwards from the Sample's single producing Process through `precedes`. A branched or externally dependent graph is viewable but returns `editable: false` with blockers; it is never silently flattened. `POST /api/v1/sample-records` and `PUT /api/v1/samples/{id}/record` are aggregate desired-state transactions. Removing a safe composer-owned Process archives it after disconnecting it from the active chain; it is not hard-deleted.
+
 ## Revisions and files
 
 `object_revisions` is append-only from the service contract. Each row stores a monotonically allocated revision number, a JSONB snapshot of the object/direct relations/attachment metadata/payload summary, and a SHA-256 of canonical JSON.
@@ -57,4 +62,4 @@ Partial unique indexes enforce one incoming `contains` owner and one incoming `p
 
 ## Migration boundary
 
-`api/alembic/versions/0001_v0_2_research_object_graph.py` is a fresh baseline. It enables `pg_trgm`, creates all tables/constraints/indexes, and seeds the seven counter rows. No previous SQLite or phase-specific migration is part of the active history.
+`api/alembic/versions/0001_v0_2_research_object_graph.py` is a fresh baseline. `0002_v0_2_semantic_stabilization` adds semantic ownership/producer indexes. `0003_sample_recording_workflow` adds `research_objects.usage_schema_jsonb`; 0001 and 0002 are immutable. No previous SQLite or phase-specific migration is part of the active history.

@@ -8,6 +8,8 @@
 - 五种 relation：`contains`、`uses`、`produces`、`precedes`、`related_to`。
 - `sample` 保持 object kind；`precursor` / `subject` / `reference` / `control` 是 `uses` 角色，只有前驱体驱动 lineage、只有 subject 驱动当前 Data。
 - Experiment ownership 与 Process producer cardinality 由 PostgreSQL partial unique index 和后端语义校验共同保证；Process composition 使用单次 desired-state PUT。
+- Sample-first recording 使用 `GET /samples/{id}/record`、`POST /sample-records` 和 `PUT /samples/{id}/record`；Sample Composer 将 Process、自身参数、资源 identity 与本次使用值一次性提交。
+- Material/Equipment 的 `usage_schema_jsonb` 定义具体资源可记录的使用字段；实际值写在 Process `uses` relation，`基于此样品新建` 会生成新的 Sample/Process IDs 并复用资源 identity。
 - JSON Schema 驱动类型版本、并发安全 code counter、PostgreSQL JSONB/pg_trgm 索引。
 - Sample direct/upstream/downstream lineage 与 Experiment context API。
 - CSV/XLSX 预览、显式 X/Y 映射、immutable XY payload、source checksum 和 provenance guard。
@@ -67,3 +69,6 @@ API tests 需要 PostgreSQL；仓库不会以 SQLite 作为替代。CI 使用 Po
 - `docs/handoff/V0_2_RESEARCH_OBJECT_GRAPH_CORE_HANDOFF.md` — 交付与验证记录
 - `docs/exec-plans/07.1-v0.2-core-semantic-stabilization.md` — 核心语义稳定化计划
 - `docs/handoff/V0_2_CORE_SEMANTIC_STABILIZATION_HANDOFF.md` — 语义稳定化交付与验证记录
+- `docs/exec-plans/08-sample-first-recording-editor.md` — Sample-first recording/editor execution contract
+- `docs/agent/SAMPLE_RECORDING.md` — external agent contract
+- `docs/agent/SAMPLE_RECORDING_API_EXAMPLES.md` — aggregate API examples

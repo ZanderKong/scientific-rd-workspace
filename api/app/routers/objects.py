@@ -26,6 +26,7 @@ from app.models import (
     ResearchObject,
 )
 from app.relation_semantics import SemanticConflict
+from app.sample_record_service import create_sample_record, get_sample_record, update_sample_record
 from app.schemas import (
     AttachmentOut,
     DataImportOut,
@@ -48,6 +49,9 @@ from app.schemas import (
     ResearchObjectOut,
     RevisionCreate,
     SampleContextOut,
+    SampleRecordCreate,
+    SampleRecordOut,
+    SampleRecordPut,
     WorkspaceSummaryOut,
 )
 from app.services import (
@@ -483,6 +487,36 @@ def sample_context(
             graph_query_service.get_sample_context(db, sample_id, depth)
         )
     except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/samples/{sample_id}/record", response_model=SampleRecordOut)
+def sample_record(sample_id: uuid.UUID, db: Session = Depends(get_db)) -> SampleRecordOut:
+    try:
+        return SampleRecordOut.model_validate(get_sample_record(db, sample_id))
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/sample-records", response_model=SampleRecordOut, status_code=status.HTTP_201_CREATED)
+def post_sample_record(
+    payload: SampleRecordCreate, db: Session = Depends(get_db)
+) -> SampleRecordOut:
+    try:
+        return SampleRecordOut.model_validate(create_sample_record(db, payload))
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.put("/samples/{sample_id}/record", response_model=SampleRecordOut)
+def put_sample_record(
+    sample_id: uuid.UUID, payload: SampleRecordPut, db: Session = Depends(get_db)
+) -> SampleRecordOut:
+    try:
+        return SampleRecordOut.model_validate(update_sample_record(db, sample_id, payload))
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
         raise _error(exc) from exc
 
 

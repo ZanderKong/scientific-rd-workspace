@@ -1,4 +1,5 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { SampleDetail } from '@/features/workspace/sample-record/sample-detail';
+import { getLocale } from 'next-intl/server';
 
 export default async function SampleDetailPage({
   params
@@ -6,5 +7,6 @@ export default async function SampleDetailPage({
   params: Promise<{ sampleId: string }>;
 }) {
   const { sampleId } = await params;
-  return <WorkspaceApp view='detail' objectId={sampleId} />;
+  const locale = await getLocale();
+  return <SampleDetail sampleId={sampleId} zh={locale === 'zh-CN'} />;
 }

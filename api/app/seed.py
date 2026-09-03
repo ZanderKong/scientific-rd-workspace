@@ -125,9 +125,12 @@ def _object(
     scope: uuid.UUID | None,
     properties: dict[str, Any],
     status: str = "active",
+    usage_schema: dict[str, Any] | None = None,
 ) -> ResearchObject:
     existing = db.scalar(select(ResearchObject).where(ResearchObject.code == code))
     if existing is not None:
+        if usage_schema and not existing.usage_schema_jsonb:
+            existing.usage_schema_jsonb = usage_schema
         return existing
     return create_object(
         db,
@@ -138,6 +141,7 @@ def _object(
             status=status,
             project_scope_id=scope,
             properties_jsonb=properties,
+            usage_schema_jsonb=usage_schema or {},
         ),
     )
 
@@ -286,38 +290,166 @@ def seed() -> None:
             None,
             {"description": "Demo dataset — synthetic / anonymised", "demo_tags": DEMO_TAGS},
         )
+        material_usage_schema = {
+            "fields": [
+                {
+                    "key": "quantity",
+                    "label": "用量",
+                    "value_type": "number",
+                    "default_value": None,
+                    "default_unit": "g",
+                    "required": False,
+                    "options": [],
+                    "order": 0,
+                }
+            ]
+        }
         materials = {
-            code: _object(db, code, "material", title, project.id, props)
+            code: _object(
+                db,
+                code,
+                "material",
+                title,
+                project.id,
+                props,
+                usage_schema=material_usage_schema,
+            )
             for code, title, props in [
                 (
                     "MAT-001",
                     "Material A / 2-POA anonymized",
-                    {"supplier": "Synthetic supplier", "lot": "DEMO-A"},
+                    {
+                        "supplier": "Synthetic supplier",
+                        "lot": "DEMO-A",
+                        "cas": "DEMO-CAS-001",
+                    },
                 ),
                 (
                     "MAT-002",
                     "Ethanol",
-                    {"supplier": "Synthetic supplier", "lot": "DEMO-ETOH"},
+                    {
+                        "supplier": "Synthetic supplier",
+                        "lot": "DEMO-ETOH",
+                        "cas": "64-17-5",
+                    },
                 ),
                 (
                     "MAT-003",
                     "Potassium iodide (KI)",
-                    {"supplier": "Synthetic supplier", "lot": "DEMO-KI"},
+                    {
+                        "supplier": "Synthetic supplier",
+                        "lot": "DEMO-KI",
+                        "cas": "7681-11-0",
+                    },
                 ),
                 (
                     "MAT-004",
                     "Starch",
-                    {"supplier": "Synthetic supplier", "lot": "DEMO-STARCH"},
+                    {
+                        "supplier": "Synthetic supplier",
+                        "lot": "DEMO-STARCH",
+                        "cas": "9005-25-8",
+                    },
                 ),
                 (
                     "MAT-005",
                     "Base substrate",
-                    {"supplier": "Synthetic supplier", "lot": "DEMO-BASE"},
+                    {
+                        "supplier": "Synthetic supplier",
+                        "lot": "DEMO-BASE",
+                        "cas": "DEMO-CAS-005",
+                    },
                 ),
             ]
         }
+        equipment_usage_schemas = {
+            "EQP-001": {
+                "fields": [
+                    {
+                        "key": "rpm",
+                        "label": "转速",
+                        "value_type": "number",
+                        "default_value": 700,
+                        "default_unit": "rpm",
+                        "required": False,
+                        "options": [],
+                        "order": 0,
+                    },
+                    {
+                        "key": "duration",
+                        "label": "时间",
+                        "value_type": "number",
+                        "default_value": 10,
+                        "default_unit": "min",
+                        "required": False,
+                        "options": [],
+                        "order": 1,
+                    },
+                ]
+            },
+            "EQP-002": {
+                "fields": [
+                    {
+                        "key": "temperature",
+                        "label": "温度",
+                        "value_type": "number",
+                        "default_value": 60,
+                        "default_unit": "°C",
+                        "required": False,
+                        "options": [],
+                        "order": 0,
+                    },
+                    {
+                        "key": "duration",
+                        "label": "时间",
+                        "value_type": "number",
+                        "default_value": 20,
+                        "default_unit": "min",
+                        "required": False,
+                        "options": [],
+                        "order": 1,
+                    },
+                ]
+            },
+            "EQP-003": {
+                "fields": [
+                    {
+                        "key": "duration",
+                        "label": "时间",
+                        "value_type": "number",
+                        "default_value": 30,
+                        "default_unit": "min",
+                        "required": False,
+                        "options": [],
+                        "order": 0,
+                    }
+                ]
+            },
+            "EQP-004": {
+                "fields": [
+                    {
+                        "key": "duration",
+                        "label": "时间",
+                        "value_type": "number",
+                        "default_value": 10,
+                        "default_unit": "min",
+                        "required": False,
+                        "options": [],
+                        "order": 0,
+                    }
+                ]
+            },
+        }
         equipment = {
-            code: _object(db, code, "equipment", title, project.id, props)
+            code: _object(
+                db,
+                code,
+                "equipment",
+                title,
+                project.id,
+                props,
+                usage_schema=equipment_usage_schemas[code],
+            )
             for code, title, props in [
                 (
                     "EQP-001",

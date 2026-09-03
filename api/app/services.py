@@ -31,7 +31,7 @@ from app.relation_semantics import (
     validate_relation_scope,
     validate_scope_mutation,
 )
-from app.schemas import ObjectCreate, RelationCreate, RelationPatch
+from app.schemas import ObjectCreate, RelationCreate, RelationPatch, UsageSchema
 
 CODE_PREFIX = {
     "material": "MAT",
@@ -118,6 +118,15 @@ def validate_object_scope(db: Session, kind: str, project_scope_id: uuid.UUID | 
             raise ValueError("project_scope_id must point to a Project object")
 
 
+def normalize_usage_schema(kind: str, usage_schema: dict[str, Any] | None) -> dict[str, Any]:
+    payload = usage_schema or {}
+    if not payload:
+        return {}
+    if kind not in {"material", "equipment"}:
+        raise ValueError("usage_schema_jsonb is only supported for material and equipment objects")
+    return UsageSchema.model_validate(payload).model_dump(exclude_none=True)
+
+
 def _object_query() -> Any:
     return select(ResearchObject).options(
         selectinload(ResearchObject.type_version).selectinload(ObjectTypeVersion.object_type)
@@ -163,6 +172,7 @@ def _create_object_in_session(db: Session, payload: ObjectCreate) -> ResearchObj
     version = get_type_version(db, payload.kind, payload.type_version_id)
     validate_object_scope(db, payload.kind, payload.project_scope_id)
     validate_properties(version, payload.properties_jsonb)
+    usage_schema = normalize_usage_schema(payload.kind, payload.usage_schema_jsonb)
     code = (payload.code or _next_code(db, payload.kind)).strip()
     if get_object_by_code(db, code) is not None:
         raise SemanticConflict("object code already exists")
@@ -174,6 +184,7 @@ def _create_object_in_session(db: Session, payload: ObjectCreate) -> ResearchObj
         project_scope_id=payload.project_scope_id,
         type_version_id=version.id,
         properties_jsonb=copy.deepcopy(payload.properties_jsonb),
+        usage_schema_jsonb=copy.deepcopy(usage_schema),
         content_document=copy.deepcopy(payload.content_document),
     )
     db.add(obj)
@@ -195,17 +206,26 @@ def create_object(db: Session, payload: ObjectCreate) -> ResearchObject:
 def _validate_object_changes(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> None:
     next_scope = changes.get("project_scope_id", obj.project_scope_id)
     next_properties = changes.get("properties_jsonb", obj.properties_jsonb)
+    next_usage_schema = changes.get("usage_schema_jsonb", obj.usage_schema_jsonb)
     validate_object_scope(db, obj.kind, next_scope)
     if next_scope != obj.project_scope_id:
         validate_scope_mutation(db, obj, next_scope)
     validate_properties(obj.type_version, next_properties)
+    normalize_usage_schema(obj.kind, next_usage_schema)
 
 
 def _update_object_in_session(
     db: Session, obj: ResearchObject, changes: dict[str, Any]
 ) -> ResearchObject:
     _validate_object_changes(db, obj, changes)
-    for field in ("title", "status", "project_scope_id", "properties_jsonb", "content_document"):
+    for field in (
+        "title",
+        "status",
+        "project_scope_id",
+        "properties_jsonb",
+        "usage_schema_jsonb",
+        "content_document",
+    ):
         if field in changes:
             value = changes[field]
             if field in {"title", "status"}:
@@ -373,6 +393,7 @@ def object_out(obj: ResearchObject) -> dict[str, Any]:
         "type_version_id": str(obj.type_version_id),
         "type_version": obj.type_version.version,
         "properties_jsonb": obj.properties_jsonb or {},
+        "usage_schema_jsonb": obj.usage_schema_jsonb or {},
         "content_document": obj.content_document or [],
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
         "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,
@@ -425,7 +446,9 @@ def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
     }
 
 
-def create_revision(db: Session, object_id: uuid.UUID, change_note: str | None) -> ObjectRevision:
+def _create_revision_in_session(
+    db: Session, object_id: uuid.UUID, change_note: str | None
+) -> ObjectRevision:
     obj = db.scalar(select(ResearchObject).where(ResearchObject.id == object_id).with_for_update())
     if obj is None:
         raise LookupError("object not found")
@@ -445,8 +468,13 @@ def create_revision(db: Session, object_id: uuid.UUID, change_note: str | None) 
         change_note=change_note.strip() if change_note else None,
     )
     db.add(revision)
+    db.flush()
+    return revision
+
+
+def create_revision(db: Session, object_id: uuid.UUID, change_note: str | None) -> ObjectRevision:
+    revision = _create_revision_in_session(db, object_id, change_note)
     db.commit()
-    db.refresh(revision)
     return revision
 
 

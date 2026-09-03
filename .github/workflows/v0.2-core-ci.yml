@@ -119,3 +119,92 @@ jobs:
         run: npm test -- --run
       - name: Production build
         run: npm run build
+
+  browser-acceptance:
+    name: Browser / Sample Record acceptance
+    needs: [backend-postgresql, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      API_URL: http://127.0.0.1:8000/api/v1
+      WEB_URL: http://127.0.0.1:3000
+      ARTIFACT_DIR: output/playwright/plan08
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install backend dependencies and seed PostgreSQL 17
+        working-directory: api
+        run: |
+          uv sync --locked
+          uv run alembic upgrade head
+          uv run python -m app.seed
+          uv run python -m app.seed
+      - name: Start API
+        working-directory: api
+        run: |
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$GITHUB_WORKSPACE/api-browser.log" 2>&1 &
+          for attempt in {1..30}; do
+            curl --fail --silent "$API_URL/health" && exit 0
+            sleep 1
+          done
+          cat "$GITHUB_WORKSPACE/api-browser.log"
+          exit 1
+      - name: Install and build frontend
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+        run: |
+          npm ci
+          npm run build
+      - name: Start frontend
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+        run: |
+          nohup npm run start -- --hostname 127.0.0.1 --port 3000 > "$GITHUB_WORKSPACE/web-browser.log" 2>&1 &
+          for attempt in {1..30}; do
+            curl --fail --silent "$WEB_URL/dashboard/samples" >/dev/null && exit 0
+            sleep 1
+          done
+          cat "$GITHUB_WORKSPACE/web-browser.log"
+          exit 1
+      - name: Install Chromium for Playwright CLI
+        working-directory: web
+        run: npx --yes --package @playwright/cli playwright-cli install-browser chromium
+      - name: Run real browser Sample Record acceptance
+        run: bash .github/scripts/plan08-browser-smoke.sh
+      - name: Upload browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan08-browser-acceptance
+          path: |
+            output/playwright/plan08
+            api-browser.log
+            web-browser.log
+          if-no-files-found: warn
