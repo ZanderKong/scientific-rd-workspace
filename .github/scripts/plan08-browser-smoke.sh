@@ -10,6 +10,10 @@ run_label="${GITHUB_RUN_ID:-local}"
 sample_title="Plan 08 browser ${run_label}"
 clone_title="Plan 08 browser clone ${run_label}"
 
+repo_root="$(pwd)"
+if [[ "$artifact_dir" != /* ]]; then
+  artifact_dir="${repo_root}/${artifact_dir}"
+fi
 mkdir -p "$artifact_dir"
 cd "$artifact_dir"
 
@@ -49,6 +53,7 @@ snapshot 01-samples
 assert_snapshot 01-samples 'Samples'
 assert_snapshot 01-samples '新建 Sample'
 
+run_code "await page.locator('[data-sidebar=trigger]').click(); await page.waitForTimeout(200)"
 run_code "await page.getByRole('combobox', {name: 'Project Scope'}).selectOption('${project_id}'); await page.waitForTimeout(500)"
 snapshot 02-scoped-samples
 assert_snapshot 02-scoped-samples '新建 Sample'
