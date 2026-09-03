@@ -29,7 +29,7 @@ snapshot() {
 assert_snapshot() {
   local name="$1"
   local pattern="$2"
-  rg -q "$pattern" "${name}.snapshot.txt"
+  grep -Fq -- "$pattern" "${name}.snapshot.txt"
 }
 
 project_json="$(curl --fail --silent --show-error "$api_url/objects?kind=project&q=${project_code}&limit=1")"

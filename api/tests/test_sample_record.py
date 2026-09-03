@@ -383,9 +383,12 @@ def test_sample_record_edit_updates_relation_values_and_usage_schema(db):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["sample"]["title"] == "KI strip edited"
-    assert body["steps"][0]["resources"][1]["usage_values"].get("torque", {}).get("value") == 2, (
-        body
+    edited_equipment = next(
+        resource
+        for resource in body["steps"][0]["resources"]
+        if resource["object"]["id"] == str(equipment.id)
     )
+    assert edited_equipment["usage_values"]["torque"]["value"] == 2
     assert db.get(ResearchObject, material.id).properties_jsonb["supplier"] == "Synthetic"
     assert db.get(ResearchObject, equipment.id).properties_jsonb["asset_number"] == "MX-03"
     assert any(
