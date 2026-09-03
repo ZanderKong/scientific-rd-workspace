@@ -69,7 +69,10 @@ def _validate_payload(db: Session, proposal: ChangeSetProposal) -> dict[str, Any
         parsed = SampleExecutionUpdate.model_validate(body)
     else:
         raise ValueError("unsupported ChangeSet operation")
-    return parsed.model_dump(mode="json")
+    # Update DTOs use None to mean "not supplied". Keep that distinction when
+    # persisting the proposal so approval does not turn omitted JSON objects into
+    # explicit nulls on the second validation pass.
+    return parsed.model_dump(mode="json", exclude_none=True)
 
 
 def _diff(current: dict[str, Any] | None, requested: dict[str, Any]) -> list[dict[str, Any]]:
