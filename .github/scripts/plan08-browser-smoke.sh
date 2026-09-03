@@ -21,6 +21,10 @@ pw() {
   fi
 }
 
+run_code() {
+  pw run-code "async (page) => { $1 }"
+}
+
 snapshot() {
   local name="$1"
   pw snapshot > "${name}.snapshot.txt"
@@ -45,18 +49,18 @@ snapshot 01-samples
 assert_snapshot 01-samples 'Samples'
 assert_snapshot 01-samples '新建 Sample'
 
-pw run-code "await page.getByRole('combobox', {name: 'Project Scope'}).selectOption('${project_id}'); await page.waitForTimeout(500)"
+run_code "await page.getByRole('combobox', {name: 'Project Scope'}).selectOption('${project_id}'); await page.waitForTimeout(500)"
 snapshot 02-scoped-samples
 assert_snapshot 02-scoped-samples '新建 Sample'
 pw screenshot --filename 02-scoped-samples-1440.png --full-page
 
-pw run-code "await page.getByRole('button', {name: '新建 Sample'}).click(); await page.waitForTimeout(500)"
+run_code "await page.getByRole('button', {name: '新建 Sample'}).click(); await page.waitForTimeout(500)"
 snapshot 03-new-composer
 assert_snapshot 03-new-composer 'Process Blocks'
 assert_snapshot 03-new-composer '第 1 个 Process'
 
-pw run-code "await page.getByRole('textbox', {name: 'Sample 标题'}).fill('${sample_title}')"
-pw run-code "await page.getByRole('textbox', {name: '第 1 个 Process'}).press('/'); await page.waitForTimeout(250)"
+run_code "await page.getByRole('textbox', {name: 'Sample 标题'}).fill('${sample_title}')"
+run_code "await page.getByRole('textbox', {name: '第 1 个 Process'}).press('/'); await page.waitForTimeout(250)"
 snapshot 04-process-command
 assert_snapshot 04-process-command '自定义过程'
 pw press ArrowDown
@@ -64,28 +68,28 @@ pw press Enter
 snapshot 05-process-selected
 assert_snapshot 05-process-selected '过程 / 操作'
 
-pw run-code "const input = page.getByRole('textbox', {name: '资源解析器'}); await input.fill('@7681-11-0'); await page.waitForTimeout(500)"
+run_code "const input = page.getByRole('textbox', {name: '资源解析器'}); await input.fill('@7681-11-0'); await page.waitForTimeout(500)"
 snapshot 06-material-resolver
 assert_snapshot 06-material-resolver 'Potassium iodide'
-pw run-code "const resolver = page.getByTestId('resource-resolver'); if (!(await resolver.innerText()).includes('身份来自对象库')) throw new Error('material identity preview missing')"
-pw run-code "await page.getByRole('button', {name: /Potassium iodide/}).first().click(); await page.waitForTimeout(200)"
+run_code "const resolver = page.getByTestId('resource-resolver'); if (!(await resolver.innerText()).includes('身份来自对象库')) throw new Error('material identity preview missing')"
+run_code "await page.getByRole('button', {name: /Potassium iodide/}).first().click(); await page.waitForTimeout(200)"
 
-pw run-code "const input = page.getByRole('textbox', {name: '资源解析器'}); await input.fill('@DEMO-IMP'); await page.waitForTimeout(500)"
+run_code "const input = page.getByRole('textbox', {name: '资源解析器'}); await input.fill('@DEMO-IMP'); await page.waitForTimeout(500)"
 snapshot 07-equipment-resolver
 assert_snapshot 07-equipment-resolver 'Impregnation setup'
-pw run-code "await page.getByRole('button', {name: /Impregnation setup/}).first().click(); await page.waitForTimeout(200)"
+run_code "await page.getByRole('button', {name: /Impregnation setup/}).first().click(); await page.waitForTimeout(200)"
 
-pw run-code "const strip = page.getByTestId('resource-token-strip'); if (await strip.locator('button').count() !== 2) throw new Error('expected mixed Material and Equipment tokens'); const classes = await Promise.all([strip.locator('button').nth(0).getAttribute('class'), strip.locator('button').nth(1).getAttribute('class')]); if (!classes.some((value) => value?.includes('amber')) || !classes.some((value) => value?.includes('sky'))) throw new Error('semantic token colors missing'); const text = await strip.innerText(); if (text.includes('原料') || text.includes('设备')) throw new Error('token strip has category heading')"
+run_code "const strip = page.getByTestId('resource-token-strip'); if (await strip.locator('button').count() !== 2) throw new Error('expected mixed Material and Equipment tokens'); const classes = await Promise.all([strip.locator('button').nth(0).getAttribute('class'), strip.locator('button').nth(1).getAttribute('class')]); if (!classes.some((value) => value?.includes('amber')) || !classes.some((value) => value?.includes('sky'))) throw new Error('semantic token colors missing'); const text = await strip.innerText(); if (text.includes('原料') || text.includes('设备')) throw new Error('token strip has category heading')"
 
-pw run-code "const usage = page.getByTestId('usage-fields'); await usage.nth(0).getByRole('spinbutton').fill('5'); await usage.nth(1).getByRole('spinbutton').nth(0).fill('700'); await usage.nth(1).getByRole('spinbutton').nth(1).fill('12')"
-pw run-code "const usage = page.getByTestId('usage-fields').nth(1); await usage.getByRole('button', {name: '+ 属性'}).click(); await usage.getByRole('textbox', {name: '属性 key'}).fill('torque'); await usage.getByRole('button', {name: '添加'}).click(); await usage.getByRole('spinbutton').last().fill('2')"
+run_code "const usage = page.getByTestId('usage-fields'); await usage.nth(0).getByRole('spinbutton').fill('5'); await usage.nth(1).getByRole('spinbutton').nth(0).fill('700'); await usage.nth(1).getByRole('spinbutton').nth(1).fill('12')"
+run_code "const usage = page.getByTestId('usage-fields').nth(1); await usage.getByRole('button', {name: '+ 属性'}).click(); await usage.getByRole('textbox', {name: '属性 key'}).fill('torque'); await usage.getByRole('button', {name: '添加'}).click(); await usage.getByRole('spinbutton').last().fill('2')"
 
-pw run-code "await page.getByRole('button', {name: '添加 Process'}).first().click(); await page.getByRole('textbox', {name: '第 2 个 Process'}).fill('Drying'); await page.waitForTimeout(200)"
+run_code "await page.getByRole('button', {name: '添加 Process'}).first().click(); await page.getByRole('textbox', {name: '第 2 个 Process'}).fill('Drying'); await page.waitForTimeout(200)"
 snapshot 08-composer-filled
 assert_snapshot 08-composer-filled 'Drying'
 pw screenshot --filename 08-composer-filled-1440.png --full-page
 
-pw run-code "await page.getByTestId('save-sample-record').click(); await page.waitForSelector('[data-testid=sample-success]');"
+run_code "await page.getByTestId('save-sample-record').click(); await page.waitForSelector('[data-testid=sample-success]');"
 snapshot 09-create-success
 assert_snapshot 09-create-success 'Sample Record 已保存'
 pw screenshot --filename 09-create-success-1440.png --full-page
@@ -98,23 +102,23 @@ if [[ -z "$sample_id" ]]; then
   exit 1
 fi
 
-pw run-code "await page.getByRole('link', {name: '查看样品'}).click(); await page.waitForTimeout(500)"
+run_code "await page.getByRole('link', {name: '查看样品'}).click(); await page.waitForTimeout(500)"
 snapshot 10-detail
 assert_snapshot 10-detail '当前 Data / provenance'
 assert_snapshot 10-detail 'Process step'
 pw screenshot --filename 10-detail-1440.png --full-page
 
-pw run-code "await page.getByRole('button', {name: '编辑记录'}).click(); await page.waitForTimeout(300)"
+run_code "await page.getByRole('button', {name: '编辑记录'}).click(); await page.waitForTimeout(300)"
 snapshot 11-edit-composer
 assert_snapshot 11-edit-composer '编辑 Sample Record'
 pw resize 1024 900
 pw screenshot --filename 11-edit-composer-1024.png --full-page
 
-pw run-code "await page.getByRole('button', {name: '取消'}).click(); await page.waitForTimeout(200); await page.getByRole('button', {name: '基于此样品新建'}).click(); await page.waitForTimeout(500)"
+run_code "await page.getByRole('button', {name: '取消'}).click(); await page.waitForTimeout(200); await page.getByRole('button', {name: '基于此样品新建'}).click(); await page.waitForTimeout(500)"
 snapshot 12-clone-draft
 assert_snapshot 12-clone-draft '记录一个新 Sample'
-pw run-code "await page.getByRole('textbox', {name: 'Sample 标题'}).fill('${clone_title}')"
-pw run-code "await page.getByTestId('save-sample-record').click(); await page.waitForSelector('[data-testid=sample-success]');"
+run_code "await page.getByRole('textbox', {name: 'Sample 标题'}).fill('${clone_title}')"
+run_code "await page.getByTestId('save-sample-record').click(); await page.waitForSelector('[data-testid=sample-success]');"
 snapshot 13-clone-success
 assert_snapshot 13-clone-success 'Sample Record 已保存'
 pw screenshot --filename 13-clone-success-1024.png --full-page
