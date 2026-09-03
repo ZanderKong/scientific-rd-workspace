@@ -68,7 +68,7 @@ export function SampleComposer({
   useEffect(() => {
     api
       .listTypes()
-      .then((items) => setTypes(items.filter((item) => item.kind === 'process')))
+      .then(setTypes)
       .catch((cause) => setTypeError(readableError(cause)));
   }, []);
 

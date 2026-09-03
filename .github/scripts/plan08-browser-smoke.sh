@@ -53,8 +53,7 @@ snapshot 01-samples
 assert_snapshot 01-samples 'Samples'
 assert_snapshot 01-samples '新建 Sample'
 
-run_code "await page.locator('[data-sidebar=trigger]').click(); await page.waitForTimeout(200)"
-run_code "const scope = page.getByRole('combobox', {name: 'Project Scope'}); await scope.getByRole('option', {name: /${project_code}/}).waitFor({state: 'attached'}); await scope.selectOption('${project_id}'); await page.waitForTimeout(500)"
+run_code "const scope = page.locator('select[aria-label=\"Project Scope\"]'); if (!(await scope.isVisible())) { await page.locator('[data-sidebar=trigger]').click(); } await scope.waitFor({state: 'visible'}); await page.evaluate((code) => { const select = document.querySelector('select[aria-label=\"Project Scope\"]'); if (!(select instanceof HTMLSelectElement)) throw new Error('Project Scope select is missing'); const option = Array.from(select.options).find((candidate) => candidate.textContent?.includes(code)); if (!option) throw new Error('Seeded project option is missing'); select.value = option.value; select.dispatchEvent(new Event('change', {bubbles: true})); }, '${project_code}'); await page.waitForTimeout(500)"
 snapshot 02-scoped-samples
 assert_snapshot 02-scoped-samples '新建 Sample'
 pw screenshot --filename 02-scoped-samples-1440.png --full-page

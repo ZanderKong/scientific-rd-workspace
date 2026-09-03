@@ -36,11 +36,13 @@ export function ProcessCommand({
     () =>
       [
         { key: 'custom', label: zh ? '自定义过程' : 'Custom Process', version: undefined },
-        ...types.map((type) => ({
-          key: type.id,
-          label: zh ? type.label_zh : type.label_en,
-          version: activeVersion(type)
-        }))
+        ...types
+          .filter((type) => type.kind === 'process')
+          .map((type) => ({
+            key: type.id,
+            label: zh ? type.label_zh : type.label_en,
+            version: activeVersion(type)
+          }))
       ].filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase())),
     [query, types, zh]
   );

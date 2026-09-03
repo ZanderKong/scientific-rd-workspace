@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api-client';
-import type { ResearchObject, ResearchObjectKind } from '@/lib/domain';
+import type { ObjectType, ResearchObject, ResearchObjectKind } from '@/lib/domain';
 import { objectKindLabel } from './model';
 
 type ResourceResolverProps = {
   projectId: string;
+  types?: ObjectType[];
   zh: boolean;
   onAttach: (object: ResearchObject) => void;
   onCreateDraft: (draft: {
@@ -33,8 +34,15 @@ function previewProperty(object: ResearchObject, keys: string[]) {
   return object.type_label_zh;
 }
 
+function identityFieldLabel(field: string) {
+  if (field === 'cas') return 'CAS';
+  if (field === 'asset_number') return 'Asset number';
+  return field.replaceAll('_', ' ');
+}
+
 export function ResourceResolver({
   projectId,
+  types = [],
   zh,
   onAttach,
   onCreateDraft
@@ -49,7 +57,21 @@ export function ResourceResolver({
   const [inlineCreate, setInlineCreate] = useState(false);
   const [createKind, setCreateKind] = useState<'material' | 'equipment'>('material');
   const [createTitle, setCreateTitle] = useState('');
-  const [createIdentity, setCreateIdentity] = useState('');
+  const [createProperties, setCreateProperties] = useState<Record<string, string>>({});
+
+  function identityFields(kind: 'material' | 'equipment') {
+    const objectType = types.find((candidate) => candidate.kind === kind && candidate.is_default);
+    const activeVersion =
+      objectType?.versions.find((version) => version.is_active) ?? objectType?.versions[0];
+    const properties = activeVersion?.json_schema.properties;
+    if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
+      const fields = Object.keys(properties).filter((key) => key !== 'demo_tags');
+      if (fields.length) return fields;
+    }
+    return [kind === 'material' ? 'cas' : 'asset_number'];
+  }
+
+  const createFields = identityFields(createKind);
 
   useEffect(() => {
     if (!open) return;
@@ -99,12 +121,12 @@ export function ResourceResolver({
     onCreateDraft({
       kind: createKind,
       title: createTitle.trim(),
-      properties_jsonb: createIdentity.trim()
-        ? { [createKind === 'material' ? 'cas' : 'asset_number']: createIdentity.trim() }
-        : {}
+      properties_jsonb: Object.fromEntries(
+        Object.entries(createProperties).filter(([, value]) => value.trim())
+      )
     });
     setCreateTitle('');
-    setCreateIdentity('');
+    setCreateProperties({});
     close();
   }
 
@@ -166,35 +188,54 @@ export function ResourceResolver({
                     {zh ? '没有匹配对象，可直接创建。' : 'No match. Create an object inline.'}
                   </p>
                 )}
-                {objects.map((object, index) => (
-                  <button
-                    type='button'
-                    key={object.id}
-                    aria-label={`${object.title} ${object.code}`}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onClick={() => {
-                      onAttach(object);
-                      setQuery('');
-                      close();
-                    }}
-                    className={`mb-1 flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition ${index === selectedIndex ? 'bg-accent' : 'hover:bg-muted'}`}
-                    data-testid={`resource-option-${object.id}`}
-                  >
-                    <span
-                      className={`mt-0.5 size-2 shrink-0 rounded-full ${object.kind === 'material' ? 'bg-amber-500' : object.kind === 'equipment' ? 'bg-sky-500' : 'bg-violet-500'}`}
-                    />
-                    <span className='min-w-0'>
-                      <span className='block truncate text-sm font-medium'>{object.title}</span>
-                      <span className='block truncate font-mono text-[10px] text-muted-foreground'>
-                        {object.code}
-                      </span>
-                    </span>
-                  </button>
-                ))}
+                {(['material', 'equipment', 'sample'] as const).map((kind) => {
+                  const matches = objects
+                    .map((object, index) => ({ object, index }))
+                    .filter(({ object }) => object.kind === kind);
+                  if (!matches.length) return null;
+                  return (
+                    <div key={kind} data-testid={`resource-group-${kind}`}>
+                      <p className='px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'>
+                        {objectKindLabel(kind, zh)}
+                      </p>
+                      {matches.map(({ object, index }) => (
+                        <button
+                          type='button'
+                          key={object.id}
+                          aria-label={`${object.title} ${object.code}`}
+                          onMouseEnter={() => setSelectedIndex(index)}
+                          onClick={() => {
+                            onAttach(object);
+                            setQuery('');
+                            close();
+                          }}
+                          className={`mb-1 flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition ${index === selectedIndex ? 'bg-accent' : 'hover:bg-muted'}`}
+                          data-testid={`resource-option-${object.id}`}
+                        >
+                          <span
+                            className={`mt-0.5 size-2 shrink-0 rounded-full ${object.kind === 'material' ? 'bg-amber-500' : object.kind === 'equipment' ? 'bg-sky-500' : 'bg-violet-500'}`}
+                          />
+                          <span className='min-w-0'>
+                            <span className='block truncate text-sm font-medium'>
+                              {object.title}
+                            </span>
+                            <span className='block truncate font-mono text-[10px] text-muted-foreground'>
+                              {object.code}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
               <button
                 type='button'
-                onClick={() => setInlineCreate(true)}
+                onClick={() => {
+                  setCreateTitle(query.trim());
+                  setCreateProperties({});
+                  setInlineCreate(true);
+                }}
                 className='mt-1 w-full rounded-xl border border-dashed px-2 py-2 text-left text-xs text-muted-foreground transition hover:border-foreground/30 hover:text-foreground'
               >
                 + {zh ? '内联创建 Material / Equipment' : 'Create Material / Equipment inline'}
@@ -257,9 +298,10 @@ export function ResourceResolver({
               <div className='grid gap-2 sm:grid-cols-[8rem_1fr_1fr_auto]'>
                 <select
                   value={createKind}
-                  onChange={(event) =>
-                    setCreateKind(event.target.value as 'material' | 'equipment')
-                  }
+                  onChange={(event) => {
+                    setCreateKind(event.target.value as 'material' | 'equipment');
+                    setCreateProperties({});
+                  }}
                   className='h-8 rounded-lg border bg-background px-2 text-xs'
                 >
                   <option value='material'>{zh ? 'Material' : 'Material'}</option>
@@ -272,12 +314,24 @@ export function ResourceResolver({
                   placeholder={zh ? '名称' : 'Title'}
                   className='h-8 rounded-lg border bg-background px-2 text-xs'
                 />
-                <input
-                  value={createIdentity}
-                  onChange={(event) => setCreateIdentity(event.target.value)}
-                  placeholder={createKind === 'material' ? 'CAS' : 'Asset number'}
-                  className='h-8 rounded-lg border bg-background px-2 text-xs'
-                />
+                <div className='contents'>
+                  {createFields.map((field) => (
+                    <label key={field} className='grid gap-1 text-[10px] text-muted-foreground'>
+                      {identityFieldLabel(field)}
+                      <input
+                        value={createProperties[field] ?? ''}
+                        onChange={(event) =>
+                          setCreateProperties((current) => ({
+                            ...current,
+                            [field]: event.target.value
+                          }))
+                        }
+                        placeholder={identityFieldLabel(field)}
+                        className='h-8 rounded-lg border bg-background px-2 text-xs text-foreground'
+                      />
+                    </label>
+                  ))}
+                </div>
                 <button
                   type='button'
                   onClick={submitInlineCreate}

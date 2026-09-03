@@ -380,6 +380,7 @@ export function ProcessBlock({
             </div>
             <ResourceResolver
               projectId={projectId}
+              types={types}
               zh={zh}
               onAttach={attach}
               onCreateDraft={addInlineResource}
