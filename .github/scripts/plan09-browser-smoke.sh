@@ -39,8 +39,12 @@ assert_snapshot() {
 resolve_id() {
   local kind="$1"
   local code="$2"
+  local scope_filter="&include_global=false"
+  if [[ "$kind" == "project" ]]; then
+    scope_filter=""
+  fi
   curl --fail --silent --show-error \
-    "$api_url/objects?kind=${kind}&q=${code}&include_global=false&limit=1" \
+    "$api_url/objects?kind=${kind}&q=${code}${scope_filter}&limit=1" \
     | jq -r '.[0].id // empty'
 }
 
