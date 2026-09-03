@@ -26,7 +26,7 @@ Both are aggregate desired-state transactions. A successful request may create/u
 ## Semantic rules
 
 - Canonical object kinds are `material`, `sample`, `equipment`, `process`, `data`, `experiment`, and `project`.
-- Canonical relations are `contains`, `uses`, `produces`, `precedes`, and `related_to`.
+- Canonical relations are `contains`, `includes`, `uses`, `produces`, `precedes`, and `related_to`. `includes` is reserved for non-owning Experiment → Sample membership; it is not part of Sample Record composition.
 - `Experiment contains Process/Sample/Data` is exclusive ownership. It is not multi-Experiment membership.
 - `precursor`, `subject`, `reference`, and `control` are roles on Process → Sample `uses`; only `precursor` drives lineage and only `subject` drives current Data.
 - Sample and Data have at most one producer. Process `precedes` and precursor lineage are cycle-protected.

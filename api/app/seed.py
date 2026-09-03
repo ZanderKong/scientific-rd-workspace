@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import uuid
 from typing import Any
 
@@ -14,6 +15,8 @@ from app.models import (
     DataImport,
     DataPayload,
     DataPoint,
+    DataScalar,
+    DataTableRow,
     ObjectRelation,
     ObjectType,
     ObjectTypeVersion,
@@ -272,6 +275,68 @@ def _seed_data(
             row_count=len(rows),
         )
     )
+    db.commit()
+
+
+def _seed_variant_payloads(db, data: dict[str, ResearchObject]) -> None:
+    scalar_data = data["DAT-001"]
+    if not db.scalar(
+        select(DataPayload).where(
+            DataPayload.data_object_id == scalar_data.id, DataPayload.payload_kind == "scalar"
+        )
+    ):
+        payload = DataPayload(
+            data_object_id=scalar_data.id,
+            payload_kind="scalar",
+            name="Synthetic response time",
+            schema_key="scalar",
+            schema_version=1,
+            metadata_jsonb={"measurement": "response_time"},
+            summary_jsonb={"value": 8.3, "unit": "s"},
+            payload_sha256=hashlib.sha256(b"DAT-001-response-time-8.3-s").hexdigest(),
+        )
+        db.add(payload)
+        db.flush()
+        db.add(DataScalar(payload_id=payload.id, value=8.3, unit="s"))
+
+    table_data = data["DAT-002"]
+    if not db.scalar(
+        select(DataPayload).where(
+            DataPayload.data_object_id == table_data.id, DataPayload.payload_kind == "table"
+        )
+    ):
+        columns = [
+            {"key": "concentration", "label": "浓度", "value_type": "number", "unit": "ppm"},
+            {"key": "response", "label": "响应", "value_type": "number", "unit": "%"},
+            {"key": "note", "label": "备注", "value_type": "text"},
+        ]
+        rows = [
+            {"concentration": 10.0, "response": 0.31, "note": "low"},
+            {"concentration": 20.0, "response": 0.52, "note": "mid"},
+        ]
+        payload = DataPayload(
+            data_object_id=table_data.id,
+            payload_kind="table",
+            name="Synthetic tabular response",
+            schema_key="table",
+            schema_version=1,
+            metadata_jsonb={"columns": columns},
+            summary_jsonb={"rows_count": len(rows), "columns_count": len(columns)},
+            payload_sha256=hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest(),
+        )
+        db.add(payload)
+        db.flush()
+        db.add_all(
+            [
+                DataTableRow(
+                    payload_id=payload.id,
+                    ordinal=ordinal,
+                    source_row_number=ordinal + 1,
+                    values_jsonb=row,
+                )
+                for ordinal, row in enumerate(rows)
+            ]
+        )
     db.commit()
 
 
@@ -564,6 +629,13 @@ def seed() -> None:
             for object_code in object_codes:
                 _relation(db, experiments[experiment_code], lookup[object_code], "contains")
 
+        for experiment_code, sample_code in [
+            ("EXP-001", "SMP-001"),
+            ("EXP-002", "SMP-001"),
+            ("EXP-003", "SMP-002"),
+        ]:
+            _relation(db, experiments[experiment_code], samples[sample_code], "includes")
+
         prep = processes["PRC-001"]
         _relation(
             db,
@@ -645,6 +717,7 @@ def seed() -> None:
 
         for index, datum in enumerate(data.values(), start=1):
             _seed_data(db, datum, adapter, index)
+        _seed_variant_payloads(db, data)
         db.commit()
     print("Seeded v0.2 semantic synthetic/anonymised research object graph (repeat-safe).")
 
