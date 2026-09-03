@@ -1,11 +1,13 @@
 # Plan 08 — Sample-first Recording & Editing Workflow Rebuild
 
-**Status:** READY FOR EXECUTION  
+**Status:** COMPLETE — HANDOFF RECORDED
 **Target branch:** `main`  
 **Verified baseline:** `e3362f6f882cb78d0c6e64208a2f72f782da52e0`  
 **Core implementation baseline:** `6fc51b56cf5ce610f171113a5bd4151d29727347`  
 **Alembic head at baseline:** `0002_v0_2_semantic_stabilization`  
 **Verified CI:** GitHub Actions run `33728614776` — `v0.2 Research Object Graph CI` — **success**
+
+**Closeout implementation:** `0c5c082` — verified by GitHub Actions run `33766298541`; see [Sample Recording Workflow Handoff](../handoff/SAMPLE_RECORDING_WORKFLOW_HANDOFF.md).
 
 ---
 
