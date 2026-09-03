@@ -5,14 +5,15 @@
 ## 当前能力
 
 - 七种 object：`material`、`sample`、`equipment`、`process`、`data`、`experiment`、`project`。
-- 五种 relation：`contains`、`uses`、`produces`、`precedes`、`related_to`。
+- 六种 relation：`contains`、`includes`、`uses`、`produces`、`precedes`、`related_to`；其中 `includes` 是 Experiment → Sample 的非拥有成员关系。
 - `sample` 保持 object kind；`precursor` / `subject` / `reference` / `control` 是 `uses` 角色，只有前驱体驱动 lineage、只有 subject 驱动当前 Data。
 - Experiment ownership 与 Process producer cardinality 由 PostgreSQL partial unique index 和后端语义校验共同保证；Process composition 使用单次 desired-state PUT。
 - Sample-first recording 使用 `GET /samples/{id}/record`、`POST /sample-records` 和 `PUT /samples/{id}/record`；Sample Composer 将 Process、自身参数、资源 identity 与本次使用值一次性提交。
 - Material/Equipment 的 `usage_schema_jsonb` 定义具体资源可记录的使用字段；实际值写在 Process `uses` relation，`基于此样品新建` 会生成新的 Sample/Process IDs 并复用资源 identity。
 - JSON Schema 驱动类型版本、并发安全 code counter、PostgreSQL JSONB/pg_trgm 索引。
 - Sample direct/upstream/downstream lineage 与 Experiment context API。
-- CSV/XLSX 预览、显式 X/Y 映射、immutable XY payload、source checksum 和 provenance guard。
+- CSV/XLSX 预览、显式 X/Y 映射、immutable XY payload、scalar/table/file typed payload、source checksum 和 provenance guard。
+- Project/Experiment/Data/Execution domain records、ETag/idempotency、ChangeSet review 和官方 MCP stdio/Streamable HTTP adapter。
 - 中文优先的 Next.js shell、Project/Vault switcher、`@` reference composer、双语 UI。
 
 Compare、Literature、AI、Evidence 和 Evaluation 暂不属于 active v0.2 runtime；详见 `docs/PRODUCT_SPEC.md`。
@@ -70,5 +71,8 @@ API tests 需要 PostgreSQL；仓库不会以 SQLite 作为替代。CI 使用 Po
 - `docs/exec-plans/07.1-v0.2-core-semantic-stabilization.md` — 核心语义稳定化计划
 - `docs/handoff/V0_2_CORE_SEMANTIC_STABILIZATION_HANDOFF.md` — 语义稳定化交付与验证记录
 - `docs/exec-plans/08-sample-first-recording-editor.md` — Sample-first recording/editor execution contract
+- `docs/exec-plans/09-scientific-workspace-agent-platform.md` — Plan 09 completion record
 - `docs/agent/SAMPLE_RECORDING.md` — external agent contract
 - `docs/agent/SAMPLE_RECORDING_API_EXAMPLES.md` — aggregate API examples
+- `docs/api/DOMAIN_API.md` and `docs/api/ERRORS_AND_CONCURRENCY.md` — domain API contracts
+- `docs/agent/MCP_TOOLS.md`, `docs/agent/MCP_RESOURCES.md`, `docs/agent/CHANGE_SET_WORKFLOW.md` — external agent contract
