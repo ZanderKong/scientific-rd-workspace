@@ -94,20 +94,40 @@ class ResearchObject(Base):
             "kind in ('material','sample','equipment','process','data','experiment','project')",
             name="ck_research_objects_kind",
         ),
+        UniqueConstraint("code", name="uq_research_objects_code"),
+        Index("ix_research_objects_code", "code"),
+        Index("ix_research_objects_kind", "kind"),
+        Index("ix_research_objects_project_scope_id", "project_scope_id"),
         Index("ix_research_objects_project_kind", "project_scope_id", "kind"),
+        Index("ix_research_objects_type_version", "type_version_id"),
+        Index(
+            "ix_research_objects_properties_gin",
+            "properties_jsonb",
+            postgresql_using="gin",
+        ),
+        Index(
+            "ix_research_objects_code_trgm",
+            "code",
+            postgresql_using="gin",
+            postgresql_ops={"code": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_research_objects_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    kind: Mapped[str] = mapped_column(String(32), index=True)
+    code: Mapped[str] = mapped_column(String(32))
+    kind: Mapped[str] = mapped_column(String(32))
     title: Mapped[str] = mapped_column(String(240))
     status: Mapped[str] = mapped_column(String(32), default="active")
     project_scope_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("research_objects.id"), nullable=True, index=True
+        ForeignKey("research_objects.id"), nullable=True
     )
-    type_version_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("object_type_versions.id"), index=True
-    )
+    type_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("object_type_versions.id"))
     properties_jsonb: Mapped[dict[str, Any]] = mapped_column(JsonColumn, default=dict)
     content_document: Mapped[list[dict[str, Any]]] = mapped_column(JsonColumn, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -154,6 +174,15 @@ class ObjectRelation(Base):
         ),
         Index("ix_object_relations_source_type", "source_object_id", "relation_type"),
         Index("ix_object_relations_target_type", "target_object_id", "relation_type"),
+        Index(
+            "uq_object_relations_semantic",
+            "source_object_id",
+            "target_object_id",
+            "relation_type",
+            "role",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
