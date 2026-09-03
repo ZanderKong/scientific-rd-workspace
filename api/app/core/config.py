@@ -10,7 +10,9 @@ class Settings(BaseSettings):
 
     app_name: str = "Scientific R&D Workspace API"
     database_url: str = "postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+    )
     storage_root: Path = Path("../data/uploads")
     max_upload_bytes: int = 25 * 1024 * 1024
     max_import_bytes: int = 10 * 1024 * 1024
