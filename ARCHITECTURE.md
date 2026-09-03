@@ -1,323 +1,49 @@
-# Architecture
+# Architecture — v0.2 Research Object Graph
 
-## 1. Architecture Goal
-
-Scientific R&D Workspace 是一个科研研发工作流产品，而不是多个开源 ELN 的 UI 聚合器。
-
-核心原则：
-
-> 一个 Workspace Shell + 一个 Canonical Scientific Data Model + 可替换的专业能力组件。
-
-Phase 1 保持架构朴素。
+## System shape
 
 ```text
-Browser
-  │
-  ▼
-Next.js Web
-  │ REST/JSON
-  ▼
-FastAPI
-  ├── Domain Services
-  ├── Repository Layer
-  ├── StorageAdapter
-  │      └── Local file storage (Phase 1)
-  └── SQLAlchemy
-          │
-          ▼
-      PostgreSQL
+Next.js App Router
+       │ typed REST /api/v1
+       ▼
+FastAPI object-graph router
+       │ domain services + GraphQueryService
+       ├── PostgreSQL (canonical objects, relations, revisions, payload metadata)
+       └── LocalStorageAdapter (attachment bytes)
 ```
 
-## 2. Repository Layout
+PostgreSQL is mandatory. `api/app/db.py` rejects non-PostgreSQL URLs, the Alembic history is a fresh v0.2 baseline, and tests require `TEST_DATABASE_URL` or the configured PostgreSQL URL.
 
-目标结构：
+## Canonical backend
 
-```text
-/
-├── AGENTS.md
-├── ARCHITECTURE.md
-├── README.md
-├── docker-compose.yml
-├── web/
-│   ├── app/
-│   ├── components/
-│   ├── features/
-│   ├── lib/
-│   └── ...
-├── api/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── core/
-│   │   ├── db/
-│   │   ├── domains/
-│   │   │   ├── projects/
-│   │   │   ├── experiments/
-│   │   │   ├── revisions/
-│   │   │   └── attachments/
-│   │   └── storage/
-│   ├── alembic/
-│   └── tests/
-├── data/
-│   └── uploads/
-└── docs/
-```
+- `ResearchObject` is the only domain record for material, sample, equipment, process, data, experiment and project.
+- `ObjectType` plus immutable `ObjectTypeVersion` supplies JSON Schema and UI metadata.
+- `ObjectRelation` is the typed graph edge. Service validation enforces scope, allowed source/target kinds, no self-edge, valid quantity metadata and semantic uniqueness.
+- `ObjectRevision` stores an immutable JSONB snapshot and SHA-256 digest. Revision numbers are allocated under a row lock.
+- `Attachment` stores object-centric provenance metadata; bytes remain outside PostgreSQL.
+- `DataImport` preserves source checksum, parser version, mapping, warnings and errors. `DataPayload` and `DataPoint` store validated immutable XY values without interpolation or unit conversion.
+- `GraphQueryService` owns direct provenance and bounded upstream/downstream traversal. Default depth is 3, maximum depth is 8, and visited-node guards prevent cycles.
 
-不要求机械遵循目录名，但依赖方向必须保持。
+## API surface
 
-## 3. Frontend Boundaries
+The active router is `api/app/routers/objects.py` under `/api/v1`:
 
-### 3.1 Web responsibilities
+- `/object-types`
+- `/objects` and `/objects/{id}`
+- `/relations`
+- `/objects/{id}/revisions`
+- `/objects/{id}/attachments` and `/attachments/{id}`
+- `/samples/{id}/context` and `/experiments/{id}/context`
+- `/data/{id}/imports`, `/data/{id}/payloads` and `/data-payloads/{id}`
 
-Web 负责：
+The old project/experiment/measurement/AI/literature/evaluation routers are not active runtime.
 
-- 页面与导航
-- 表单和编辑器呈现
-- 本地交互状态
-- API 调用
-- 数据可视化
-- error/loading/empty state
+## Frontend shape
 
-Web 不负责：
+`web/src/features/workspace/components/workspace-app.tsx` is the v0.2 object-centric surface. It provides one shared list/detail/editor/composer implementation for all seven kinds, with route-specific pages only selecting the kind. The shell provides Project/Vault scope switching and navigation for Overview, Experiments, Samples, Processes, Data, Materials and Equipment.
 
-- 直接数据库操作
-- 生成 authoritative ID
-- revision snapshot 的业务规则
-- 文件最终存储规则
-- canonical validation 的唯一实现
+The structured process composer is keyboard-first: `@` reference search, arrow selection, Enter selection, Tab traversal, Escape close and Cmd/Ctrl+Enter save. Context pages keep direct provenance, upstream/downstream lineage and current data visibly separate.
 
-### 3.2 Main UI libraries
+## Non-goals
 
-- Dashboard shell：Kiranism next-shadcn-dashboard-starter
-- UI primitives：shadcn/ui
-- Table：优先复用 starter 已有 TanStack Table pattern
-- Rich text：BlockNote 非 XL packages
-- Structured schema editor：JSON Forms
-- Phase 1 不增加第二个 rich-text editor 或 form engine
-
-## 4. Backend Boundaries
-
-FastAPI 是唯一业务 API。
-
-建议 domain layering：
-
-```text
-router
-  ↓
-service
-  ↓
-repository / storage
-```
-
-不要为了「clean architecture」建立 8 层空壳。目标是：
-
-- router：HTTP contract
-- service：业务规则
-- repository：DB persistence
-- storage：binary persistence
-
-### 4.1 Phase 3 scientific analysis boundary (M1–M10)
-
-Scientific Analysis is an additive backend capability. The router delegates to explicit Python
-services that build a frozen, canonical context in PostgreSQL, make one structured provider call,
-recompute scientific references, apply the deterministic Evidence Gate, and persist Findings.
-`AIProvider` is the only model boundary: `FixtureProvider` is deterministic for tests and demos;
-`LiteLLMProvider` embeds the LiteLLM SDK without the LiteLLM Gateway. Profiles declare exactly one
-structured-output mode (`native_schema` or `json_object`), and both modes are validated again by
-Workspace-owned Pydantic and scientific-reference checks. Prompt text is versioned and hashed in
-the repository.
-
-PostgreSQL remains authoritative for AnalysisRun, immutable context snapshots, Findings, Evidence
-links, and append-only ReviewDecisions. Direct Structured Support is limited to server-verified
-Measurement comparisons, structured Experiment differences, and immutable Revision observations;
-it can support descriptive/comparative claims but never proves causality. Curated EvidenceRecords
-remain an explicit, project-scoped selection. The model cannot write Experiments or other scientific
-records. M5 Analysis/Review and M6–M7 Evaluation capabilities are implemented with a single
-in-process worker boundary. After an eligible Finding review, M8 exposes a read-only suggested-
-experiment prefill. The scientist must edit and explicitly submit through the normal Experiment
-template validation path; the AI never creates an Experiment directly. The submit transaction creates
-a draft Experiment, preserves normal parent lineage, and writes one immutable
-`ExperimentProvenanceLink` containing Finding, AnalysisRun, enabling ReviewDecision, suggestion hash/
-snapshot and submitted values. Stale review, suggestion hash or template identity returns `409`
-without creating either record. The deterministic PRJ-001 seed contains exactly three fixture/synthetic
-Reference Cases and three Bad Cases with immutable review provenance. Evaluation remains sequential in
-one API process/worker; multi-worker deployment is unsupported.
-
-## 5. Data Storage
-
-### 5.1 PostgreSQL
-
-保存：
-
-- Project
-- Experiment
-- ExperimentTemplate
-- ExperimentRevision
-- Attachment metadata
-- structured_data JSONB
-- note_document JSONB
-
-### 5.2 Attachments
-
-Phase 1：
-
-```text
-data/uploads/{experiment_id}/{attachment_id}/{sanitised_filename}
-```
-
-数据库保存：
-
-- original_filename
-- storage_key
-- content_type
-- size_bytes
-- checksum
-- created_at
-
-必须通过 `StorageAdapter`，使 Phase 2 或后续可替换成 S3/MinIO 而不改变业务 service。
-
-## 6. Scientific Record Separation
-
-Experiment 是一个聚合对象，但内部至少区分：
-
-```text
-Experiment
-├── system metadata
-├── structured_data
-├── note_document
-├── attachments
-└── revisions
-```
-
-### structured_data
-
-机器可读，Schema 驱动：
-
-```json
-{
-  "material": "2-POA",
-  "concentration": {"value": 5, "unit": "wt%"},
-  "drying_temperature": {"value": 60, "unit": "°C"}
-}
-```
-
-### note_document
-
-BlockNote 原生 JSON document。
-
-不得把 structured_data 作为 Markdown 文本塞进 note。
-
-## 7. Revision Model
-
-Phase 1 不做 event sourcing。
-
-采用显式 snapshot：
-
-```text
-ExperimentRevision
-├── revision_number
-├── snapshot_json
-├── created_at
-└── change_note
-```
-
-snapshot 至少包含：
-
-- title
-- status
-- template/schema identity
-- structured_data
-- note_document
-- attachment metadata references
-
-Binary attachments 本身不复制。
-
-## 8. Clone Semantics
-
-Clone Experiment：
-
-- 新 UUID
-- 新 experiment code
-- 同 project
-- `parent_experiment_id = source.id`
-- 拷贝当前 structured_data
-- 拷贝当前 note_document
-- 默认不复制 binary attachments
-- UI 允许后续明确选择是否复用附件，但 Phase 1 P0 不实现
-- revision history 从新实体 revision 1 开始
-
-## 9. API Convention
-
-Base：
-
-```text
-/api/v1
-```
-
-P0 endpoints：
-
-```text
-GET    /health
-
-GET    /projects
-POST   /projects
-GET    /projects/{project_id}
-PATCH  /projects/{project_id}
-
-GET    /projects/{project_id}/experiments
-POST   /projects/{project_id}/experiments
-GET    /experiments/{experiment_id}
-PATCH  /experiments/{experiment_id}
-POST   /experiments/{experiment_id}/clone
-
-GET    /experiment-templates
-GET    /experiment-templates/{template_id}
-
-POST   /experiments/{experiment_id}/attachments
-GET    /experiments/{experiment_id}/attachments
-DELETE /attachments/{attachment_id}
-GET    /attachments/{attachment_id}/download
-
-POST   /experiments/{experiment_id}/revisions
-GET    /experiments/{experiment_id}/revisions
-GET    /experiments/{experiment_id}/revisions/{revision_number}
-```
-
-API contracts 以 OpenAPI 实际输出为准。前端不得猜字段。
-
-## 10. Phase Boundaries
-
-### Phase 1
-ELN Core only.
-
-### Phase 2
-增加 Measurement、Import、Compare、Literature、Evidence、lineage 扩展。
-
-### Phase 3
-增加 AI Finding、Evidence Gate、Human Review、Bad Case、Evaluation。
-
-禁止 Phase 1 提前引入 Phase 3 的 Agent orchestration。
-
-## 11. Future Extension Points
-
-只保留接口，不实现：
-
-```text
-StorageAdapter
-LiteratureProvider
-AIProvider
-EvaluationProvider
-MeasurementParser
-```
-
-不要为了这些 future adapters 创建假实现或复杂 plugin framework。
-
-## 12. Failure Philosophy
-
-科研系统必须保护 provenance：
-
-- 不 silently coerce unit。
-- 不 silently drop unknown structured fields。
-- 不覆盖 revision。
-- clone 不修改 source。
-- 删除附件必须明确确认。
-- API validation error 要返回可理解的字段错误。
+No React Flow, SQLite fallback, new queue, second database, full form engine, multiplayer/RBAC, instrument integration, inventory ERP, or restored Plan 2 AI/Compare/Evidence/Evaluation/Literature runtime.

@@ -7,325 +7,408 @@ import re
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
+from jsonschema import Draft202012Validator
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
-    Experiment,
-    ExperimentLiteratureLink,
-    ExperimentProvenanceLink,
-    ExperimentRevision,
-    ExperimentTemplate,
-    Finding,
-    Measurement,
-    Project,
-    ReviewDecision,
+    Attachment,
+    DataPayload,
+    ObjectCodeCounter,
+    ObjectRelation,
+    ObjectRevision,
+    ObjectType,
+    ObjectTypeVersion,
+    ResearchObject,
 )
-from app.schemas import (
-    CloneRequest,
-    ExperimentCreate,
-    ExperimentPrefillOut,
-    ExperimentSuggestionOrigin,
-    ExperimentUpdate,
-    ProjectCreate,
-    ProjectUpdate,
-)
-from app.storage import sanitise_filename
-from app.validation import validate_template_data
+from app.schemas import ObjectCreate, RelationCreate, RelationPatch
+
+CODE_PREFIX = {
+    "material": "MAT",
+    "sample": "SMP",
+    "equipment": "EQP",
+    "process": "PRC",
+    "data": "DAT",
+    "experiment": "EXP",
+    "project": "PRJ",
+}
+OBJECT_ALIASES = {
+    "material": {"material", "reagent", "mat", "原料", "试剂"},
+    "sample": {"sample", "smp", "样品"},
+    "equipment": {"equipment", "eqp", "设备", "仪器"},
+    "process": {"process", "prc", "过程", "操作"},
+    "data": {"data", "dat", "数据", "测试结果"},
+    "experiment": {"experiment", "exp", "实验"},
+    "project": {"project", "prj", "项目", "vault", "scope"},
+}
 
 
-def _next_code(db: Session, model: type[Project] | type[Experiment], prefix: str) -> str:
-    values = db.scalars(select(model.code).where(model.code.like(f"{prefix}-%"))).all()
-    numbers = [
-        int(match.group(1))
-        for value in values
-        if (match := re.fullmatch(rf"{prefix}-(\d+)", value))
-    ]
-    return f"{prefix}-{max(numbers, default=0) + 1:03d}"
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def create_project(db: Session, payload: ProjectCreate) -> Project:
-    project = Project(code=_next_code(db, Project, "PRJ"), **payload.model_dump())
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    return project
+def sha256_json(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def update_project(db: Session, project: Project, payload: ProjectUpdate) -> Project:
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(project, key, value)
-    db.commit()
-    db.refresh(project)
-    return project
+def _type_version_query() -> Any:
+    return select(ObjectTypeVersion).options(selectinload(ObjectTypeVersion.object_type))
 
 
-def get_template_or_raise(db: Session, template_id: uuid.UUID) -> ExperimentTemplate:
-    template = db.get(ExperimentTemplate, template_id)
-    if template is None:
-        raise LookupError("experiment template not found")
-    if not template.is_active:
-        raise ValueError("experiment template is not active")
-    return template
-
-
-def canonical_json_hash(value: Any) -> str:
-    encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _suggestion_prefill_or_raise(
-    db: Session, finding_id: uuid.UUID, origin: ExperimentSuggestionOrigin | None = None
-) -> tuple[Finding, ReviewDecision, dict[str, Any], Experiment]:
-    finding = db.scalar(
-        select(Finding).where(Finding.id == finding_id).options(selectinload(Finding.analysis_run))
+def get_type_version(
+    db: Session, kind: str, type_version_id: uuid.UUID | None = None
+) -> ObjectTypeVersion:
+    if type_version_id is not None:
+        version = db.scalar(_type_version_query().where(ObjectTypeVersion.id == type_version_id))
+        if version is None:
+            raise LookupError("object type version not found")
+        if version.object_type.kind != kind:
+            raise ValueError("type version kind does not match object kind")
+        return version
+    version = db.scalar(
+        _type_version_query()
+        .join(ObjectType)
+        .where(ObjectType.kind == kind, ObjectTypeVersion.is_active.is_(True))
+        .order_by(ObjectTypeVersion.version.desc())
     )
-    if finding is None:
-        raise LookupError("finding not found")
-    latest = db.scalar(
-        select(ReviewDecision)
-        .where(ReviewDecision.finding_id == finding_id)
-        .order_by(ReviewDecision.sequence_number.desc())
+    if version is None:
+        raise LookupError(f"active object type for {kind} not found")
+    return version
+
+
+def validate_properties(version: ObjectTypeVersion, properties: dict[str, Any]) -> None:
+    errors = sorted(
+        Draft202012Validator(version.json_schema).iter_errors(properties),
+        key=lambda error: list(error.path),
     )
-    if latest is None or latest.decision not in {"accept", "needs_evidence"}:
-        raise ValueError("suggestion_review_not_eligible")
-    suggestion = finding.suggested_next_experiment_json
-    if not suggestion or suggestion.get("validation_status") != "valid":
-        raise ValueError("suggestion_invalid")
-    prefill = suggestion.get("prefill")
-    if not isinstance(prefill, dict):
-        raise ValueError("suggestion_invalid")
-    expected_hash = canonical_json_hash(prefill)
-    if suggestion.get("suggestion_hash") != expected_hash:
-        raise ValueError("suggestion_hash_mismatch")
-    if origin is not None:
-        try:
-            origin_template_id = uuid.UUID(str(prefill["template_id"]))
-            origin_parent_id = uuid.UUID(str(prefill["parent_experiment_id"]))
-            origin_template_version = int(prefill["template_version"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("suggestion_invalid") from exc
-        if (
-            origin.finding_id != finding.id
-            or origin.analysis_run_id != finding.analysis_run_id
-            or origin.enabling_review_decision_id != latest.id
-            or origin.suggestion_hash != expected_hash
-            or origin.template_id != origin_template_id
-            or origin.template_version != origin_template_version
-            or origin.parent_experiment_id != origin_parent_id
-        ):
-            raise ValueError("suggestion_review_changed")
-    try:
-        parent_id = uuid.UUID(str(prefill["parent_experiment_id"]))
-        template_id = uuid.UUID(str(prefill["template_id"]))
-        template_version = int(prefill["template_version"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("suggestion_invalid") from exc
-    parent = db.scalar(
-        select(Experiment)
-        .where(Experiment.id == parent_id)
-        .options(selectinload(Experiment.template))
-    )
-    if parent is None or parent.project_id != finding.project_id:
-        raise ValueError("suggestion_base_experiment_changed")
-    if parent.template_id != template_id or parent.template_version != template_version:
-        raise ValueError("suggestion_template_changed")
-    template = db.get(ExperimentTemplate, template_id)
-    if template is None or not template.is_active or template.version != template_version:
-        raise ValueError("suggestion_template_changed")
-    try:
-        validate_template_data(template.json_schema, prefill["structured_data"])
-    except ValueError as exc:
-        raise ValueError("suggestion_invalid") from exc
-    return finding, latest, prefill, parent
-
-
-def suggested_experiment_prefill(db: Session, finding_id: uuid.UUID) -> ExperimentPrefillOut:
-    finding, latest, prefill, _parent = _suggestion_prefill_or_raise(db, finding_id)
-    return ExperimentPrefillOut(
-        project_id=finding.project_id,
-        finding_id=finding.id,
-        analysis_run_id=finding.analysis_run_id,
-        enabling_review_decision_id=latest.id,
-        review_sequence_number=latest.sequence_number,
-        review_decision=latest.decision,
-        suggestion_hash=canonical_json_hash(prefill),
-        template_id=uuid.UUID(str(prefill["template_id"])),
-        template_version=int(prefill["template_version"]),
-        parent_experiment_id=uuid.UUID(str(prefill["parent_experiment_id"])),
-        title=prefill["title"],
-        objective=prefill["objective"],
-        structured_data=prefill["structured_data"],
-        control_strategy=prefill["control_strategy"],
-        addresses_missing_evidence_codes=prefill.get("addresses_missing_evidence_codes", []),
-        change_operations=prefill.get("change_operations", []),
-    )
-
-
-def create_experiment(db: Session, project: Project, payload: ExperimentCreate) -> Experiment:
-    template = get_template_or_raise(db, payload.template_id)
-    validate_template_data(template.json_schema, payload.structured_data)
-    origin = payload.suggestion_origin
-    finding = review = prefill = parent = None
-    if origin is not None:
-        if payload.status != "draft":
-            raise ValueError("suggested_experiment_must_be_draft")
-        finding, review, prefill, parent = _suggestion_prefill_or_raise(
-            db, origin.finding_id, origin
+    if errors:
+        details = []
+        for error in errors[:20]:
+            path = ".".join(str(item) for item in error.path) or "$"
+            details.append({"path": path, "message": error.message})
+        raise ValueError(
+            json.dumps({"code": "schema_validation_failed", "errors": details}, ensure_ascii=False)
         )
-        if finding.project_id != project.id or payload.template_id != template.id:
-            raise ValueError("suggestion_project_or_template_changed")
-    experiment = Experiment(
-        code=_next_code(db, Experiment, "EXP"),
-        project_id=project.id,
-        template_id=template.id,
-        template_version=template.version,
-        parent_experiment_id=parent.id if parent is not None else None,
-        **payload.model_dump(exclude={"template_id", "suggestion_origin"}),
+
+
+def _validate_scope(db: Session, kind: str, project_scope_id: uuid.UUID | None) -> None:
+    if kind == "project":
+        if project_scope_id is not None:
+            raise ValueError("project objects cannot have a project scope")
+        return
+    if kind not in {"material", "equipment"} and project_scope_id is None:
+        raise ValueError(f"{kind} objects require project_scope_id")
+    if project_scope_id is not None:
+        scope = db.get(ResearchObject, project_scope_id)
+        if scope is None or scope.kind != "project":
+            raise ValueError("project_scope_id must point to a Project object")
+
+
+def _object_query() -> Any:
+    return select(ResearchObject).options(
+        selectinload(ResearchObject.type_version).selectinload(ObjectTypeVersion.object_type)
     )
-    db.add(experiment)
-    if origin is not None and finding is not None and review is not None and prefill is not None:
+
+
+def get_object(db: Session, object_id: uuid.UUID) -> ResearchObject | None:
+    return db.scalar(_object_query().where(ResearchObject.id == object_id))
+
+
+def get_object_by_code(db: Session, code: str) -> ResearchObject | None:
+    return db.scalar(_object_query().where(ResearchObject.code == code))
+
+
+def _next_code(db: Session, kind: str) -> str:
+    counter = db.scalar(
+        select(ObjectCodeCounter).where(ObjectCodeCounter.kind == kind).with_for_update()
+    )
+    if counter is None:
+        counter = ObjectCodeCounter(kind=kind, next_value=1)
+        db.add(counter)
         db.flush()
-        db.add(
-            ExperimentProvenanceLink(
-                experiment_id=experiment.id,
-                finding_id=finding.id,
-                analysis_run_id=finding.analysis_run_id,
-                enabling_review_decision_id=review.id,
-                suggestion_snapshot_json=copy.deepcopy(finding.suggested_next_experiment_json),
-                submitted_values_snapshot_json={
-                    "title": payload.title,
-                    "objective": payload.objective,
-                    "template_id": str(payload.template_id),
-                    "template_version": template.version,
-                    "status": payload.status,
-                    "structured_data": copy.deepcopy(payload.structured_data),
-                    "note_document": copy.deepcopy(payload.note_document),
-                },
+    value = counter.next_value
+    counter.next_value = value + 1
+    return f"{CODE_PREFIX[kind]}-{value:03d}"
+
+
+def _advance_counter(db: Session, kind: str, code: str) -> None:
+    match = re.fullmatch(rf"{CODE_PREFIX[kind]}-(\d+)", code.upper())
+    if not match:
+        return
+    number = int(match.group(1))
+    counter = db.scalar(
+        select(ObjectCodeCounter).where(ObjectCodeCounter.kind == kind).with_for_update()
+    )
+    if counter is None:
+        db.add(ObjectCodeCounter(kind=kind, next_value=number + 1))
+    elif counter.next_value <= number:
+        counter.next_value = number + 1
+
+
+def create_object(db: Session, payload: ObjectCreate) -> ResearchObject:
+    version = get_type_version(db, payload.kind, payload.type_version_id)
+    _validate_scope(db, payload.kind, payload.project_scope_id)
+    validate_properties(version, payload.properties_jsonb)
+    code = payload.code or _next_code(db, payload.kind)
+    if get_object_by_code(db, code) is not None:
+        raise ValueError("object code already exists")
+    obj = ResearchObject(
+        code=code,
+        kind=payload.kind,
+        title=payload.title.strip(),
+        status=payload.status.strip(),
+        project_scope_id=payload.project_scope_id,
+        type_version_id=version.id,
+        properties_jsonb=copy.deepcopy(payload.properties_jsonb),
+        content_document=copy.deepcopy(payload.content_document),
+    )
+    db.add(obj)
+    _advance_counter(db, payload.kind, code)
+    db.commit()
+    return get_object(db, obj.id) or obj
+
+
+def update_object(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> ResearchObject:
+    next_scope = changes.get("project_scope_id", obj.project_scope_id)
+    next_properties = changes.get("properties_jsonb", obj.properties_jsonb)
+    _validate_scope(db, obj.kind, next_scope)
+    validate_properties(obj.type_version, next_properties)
+    for field in ("title", "status", "project_scope_id", "properties_jsonb", "content_document"):
+        if field in changes:
+            value = changes[field]
+            if field in {"title", "status"}:
+                value = value.strip()
+                if not value:
+                    raise ValueError(f"{field} must not be blank")
+            setattr(obj, field, copy.deepcopy(value))
+    db.commit()
+    return get_object(db, obj.id) or obj
+
+
+def _scope_id(obj: ResearchObject) -> uuid.UUID | None:
+    return obj.id if obj.kind == "project" else obj.project_scope_id
+
+
+def _validate_relation_scope(source: ResearchObject, target: ResearchObject) -> None:
+    source_scope = _scope_id(source)
+    target_scope = _scope_id(target)
+    if source_scope is not None and target_scope is not None and source_scope != target_scope:
+        global_target = target.kind in {"material", "equipment"} and target.project_scope_id is None
+        global_source = source.kind in {"material", "equipment"} and source.project_scope_id is None
+        if not global_target and not global_source:
+            raise ValueError("relation crosses project scopes")
+
+
+def validate_relation(source: ResearchObject, target: ResearchObject, relation_type: str) -> None:
+    valid = {
+        "contains": source.kind == "experiment" and target.kind in {"process", "sample", "data"},
+        "uses": source.kind == "process"
+        and target.kind in {"material", "sample", "equipment", "data"},
+        "produces": source.kind == "process" and target.kind in {"sample", "data"},
+        "precedes": source.kind == "process" and target.kind == "process",
+        "related_to": True,
+    }
+    if not valid.get(relation_type, False):
+        raise ValueError(f"invalid {relation_type} relation for source/target kinds")
+    if source.id == target.id:
+        raise ValueError("self relations are not allowed")
+    _validate_relation_scope(source, target)
+
+
+def _validate_relation_metadata(role: str | None, properties: dict[str, Any]) -> None:
+    if role is not None and not role.strip():
+        raise ValueError("relation role must not be blank")
+    quantity = properties.get("quantity")
+    if quantity is not None:
+        if (
+            not isinstance(quantity, dict)
+            or not isinstance(quantity.get("value"), (int, float))
+            or isinstance(quantity.get("value"), bool)
+        ):
+            raise ValueError("quantity.value must be numeric")
+        if not isinstance(quantity.get("unit"), str) or not quantity["unit"].strip():
+            raise ValueError("quantity.unit must be a non-empty string")
+
+
+def create_relation(db: Session, payload: RelationCreate) -> ObjectRelation:
+    source = get_object(db, payload.source_object_id)
+    target = get_object(db, payload.target_object_id)
+    if source is None or target is None:
+        raise LookupError("source or target object not found")
+    validate_relation(source, target, payload.relation_type)
+    _validate_relation_metadata(payload.role, payload.properties_jsonb)
+    duplicate = db.scalar(
+        select(ObjectRelation).where(
+            ObjectRelation.source_object_id == source.id,
+            ObjectRelation.target_object_id == target.id,
+            ObjectRelation.relation_type == payload.relation_type,
+            ObjectRelation.role.is_not_distinct_from(payload.role),
+        )
+    )
+    if duplicate is not None:
+        raise ValueError("duplicate relation")
+    relation = ObjectRelation(
+        source_object_id=source.id,
+        target_object_id=target.id,
+        relation_type=payload.relation_type,
+        role=payload.role,
+        properties_jsonb=copy.deepcopy(payload.properties_jsonb),
+    )
+    db.add(relation)
+    db.commit()
+    return get_relation(db, relation.id) or relation
+
+
+def get_relation(db: Session, relation_id: uuid.UUID) -> ObjectRelation | None:
+    return db.scalar(
+        select(ObjectRelation)
+        .where(ObjectRelation.id == relation_id)
+        .options(
+            selectinload(ObjectRelation.source_object)
+            .selectinload(ResearchObject.type_version)
+            .selectinload(ObjectTypeVersion.object_type),
+            selectinload(ObjectRelation.target_object)
+            .selectinload(ResearchObject.type_version)
+            .selectinload(ObjectTypeVersion.object_type),
+        )
+    )
+
+
+def update_relation(
+    db: Session, relation: ObjectRelation, payload: RelationPatch
+) -> ObjectRelation:
+    changes = payload.model_dump(exclude_unset=True)
+    role = changes.get("role", relation.role)
+    properties = changes.get("properties_jsonb", relation.properties_jsonb)
+    _validate_relation_metadata(role, properties)
+    duplicate = db.scalar(
+        select(ObjectRelation).where(
+            ObjectRelation.id != relation.id,
+            ObjectRelation.source_object_id == relation.source_object_id,
+            ObjectRelation.target_object_id == relation.target_object_id,
+            ObjectRelation.relation_type == relation.relation_type,
+            ObjectRelation.role.is_not_distinct_from(role),
+        )
+    )
+    if duplicate is not None:
+        raise ValueError("duplicate relation")
+    relation.role = role.strip() if isinstance(role, str) else role
+    relation.properties_jsonb = copy.deepcopy(properties)
+    db.commit()
+    return get_relation(db, relation.id) or relation
+
+
+def list_relations(db: Session, object_id: uuid.UUID) -> list[ObjectRelation]:
+    return list(
+        db.scalars(
+            select(ObjectRelation)
+            .where(
+                (ObjectRelation.source_object_id == object_id)
+                | (ObjectRelation.target_object_id == object_id)
             )
+            .options(
+                selectinload(ObjectRelation.source_object)
+                .selectinload(ResearchObject.type_version)
+                .selectinload(ObjectTypeVersion.object_type),
+                selectinload(ObjectRelation.target_object)
+                .selectinload(ResearchObject.type_version)
+                .selectinload(ObjectTypeVersion.object_type),
+            )
+            .order_by(ObjectRelation.created_at)
         )
-    db.commit()
-    db.refresh(experiment)
-    return experiment
+    )
 
 
-def update_experiment(db: Session, experiment: Experiment, payload: ExperimentUpdate) -> Experiment:
-    values = payload.model_dump(exclude_unset=True)
-    if "structured_data" in values:
-        validate_template_data(experiment.template.json_schema, values["structured_data"])
-    for key, value in values.items():
-        setattr(experiment, key, value)
-    db.commit()
-    db.refresh(experiment)
-    return experiment
-
-
-def _snapshot(experiment: Experiment) -> dict[str, Any]:
-    measurements = []
-    for measurement in getattr(experiment, "measurements", []):
-        import_record = measurement.import_record
-        measurements.append(
-            {
-                "id": str(measurement.id),
-                "name": measurement.name,
-                "measurement_type": measurement.measurement_type,
-                "schema_key": measurement.schema_key,
-                "schema_version": measurement.schema_version,
-                "x_label": measurement.x_label,
-                "x_unit": measurement.x_unit,
-                "y_label": measurement.y_label,
-                "y_unit": measurement.y_unit,
-                "row_count": measurement.row_count,
-                "summary_json": copy.deepcopy(measurement.summary_json),
-                "points_sha256": measurement.points_sha256,
-                "import_id": str(measurement.import_id),
-                "source_attachment_id": str(import_record.source_attachment_id),
-                "source_sha256": import_record.source_sha256,
-            }
-        )
-    literature_links = []
-    for link in getattr(experiment, "literature_links", []):
-        literature = link.literature
-        literature_links.append(
-            {
-                "id": str(link.id),
-                "literature_id": str(literature.id),
-                "relationship_type": link.relationship_type,
-                "title": literature.title,
-                "authors": copy.deepcopy(literature.authors_json),
-                "publication_year": literature.publication_year,
-                "doi": literature.doi,
-            }
-        )
-    evidence = []
-    for item in getattr(experiment, "evidence_records", []):
-        evidence.append(
-            {
-                "id": str(item.id),
-                "claim_text": item.claim_text,
-                "stance": item.stance,
-                "source_type": item.source_type,
-                "source_snapshot_json": copy.deepcopy(item.source_snapshot_json),
-                "status": item.status,
-            }
-        )
+def _summary(obj: ResearchObject) -> dict[str, Any]:
     return {
-        "snapshot_schema_version": 2,
-        "experiment": {
-            "title": experiment.title,
-            "status": experiment.status,
-            "objective": experiment.objective,
-            "template_id": str(experiment.template_id),
-            "template_version": experiment.template_version,
-            "structured_data": copy.deepcopy(experiment.structured_data),
-            "note_document": copy.deepcopy(experiment.note_document),
-        },
-        "attachments": [
-            {
-                "id": str(attachment.id),
-                "original_filename": attachment.original_filename,
-                "content_type": attachment.content_type,
-                "size_bytes": attachment.size_bytes,
-                "sha256": attachment.sha256,
-            }
-            for attachment in experiment.attachments
-        ],
-        "measurements": measurements,
-        "literature_links": literature_links,
-        "evidence": evidence,
+        "id": str(obj.id),
+        "code": obj.code,
+        "kind": obj.kind,
+        "title": obj.title,
+        "status": obj.status,
+        "project_scope_id": str(obj.project_scope_id) if obj.project_scope_id else None,
+        "type_key": obj.type_version.object_type.key,
+        "type_label_zh": obj.type_version.object_type.label_zh,
+        "type_label_en": obj.type_version.object_type.label_en,
     }
 
 
-def create_revision(
-    db: Session, experiment_id: uuid.UUID, change_note: str | None
-) -> ExperimentRevision:
-    locked = db.scalars(
-        select(Experiment)
-        .where(Experiment.id == experiment_id)
-        .options(
-            selectinload(Experiment.attachments),
-            selectinload(Experiment.measurements).selectinload(Measurement.import_record),
-            selectinload(Experiment.literature_links).selectinload(
-                ExperimentLiteratureLink.literature
-            ),
-            selectinload(Experiment.evidence_records),
-        )
-        .with_for_update()
-    ).first()
-    if locked is None:
-        raise LookupError("experiment not found")
-    current = db.scalar(
-        select(func.max(ExperimentRevision.revision_number)).where(
-            ExperimentRevision.experiment_id == experiment_id
-        )
+def object_out(obj: ResearchObject) -> dict[str, Any]:
+    return {
+        **_summary(obj),
+        "type_version_id": str(obj.type_version_id),
+        "type_version": obj.type_version.version,
+        "properties_jsonb": obj.properties_jsonb or {},
+        "content_document": obj.content_document or [],
+        "created_at": obj.created_at.isoformat() if obj.created_at else None,
+        "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,
+    }
+
+
+def relation_out(relation: ObjectRelation) -> dict[str, Any]:
+    return {
+        "id": relation.id,
+        "source_object_id": relation.source_object_id,
+        "target_object_id": relation.target_object_id,
+        "relation_type": relation.relation_type,
+        "role": relation.role,
+        "properties_jsonb": relation.properties_jsonb or {},
+        "source": _summary(relation.source_object),
+        "target": _summary(relation.target_object),
+        "created_at": relation.created_at.isoformat() if relation.created_at else None,
+        "updated_at": relation.updated_at.isoformat() if relation.updated_at else None,
+    }
+
+
+def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
+    relations = list_relations(db, obj.id)
+    attachments = db.scalars(select(Attachment).where(Attachment.object_id == obj.id)).all()
+    payloads = db.scalars(select(DataPayload).where(DataPayload.data_object_id == obj.id)).all()
+    return {
+        "schema_version": 1,
+        "object": object_out(obj),
+        "direct_relations": [relation_out(item) for item in relations],
+        "attachments": [
+            {
+                "id": str(item.id),
+                "original_filename": item.original_filename,
+                "content_type": item.content_type,
+                "size_bytes": item.size_bytes,
+                "sha256": item.sha256,
+            }
+            for item in attachments
+        ],
+        "data_payloads": [
+            {
+                "id": str(item.id),
+                "payload_kind": item.payload_kind,
+                "name": item.name,
+                "summary": item.summary_jsonb or {},
+                "payload_sha256": item.payload_sha256,
+            }
+            for item in payloads
+        ],
+    }
+
+
+def create_revision(db: Session, object_id: uuid.UUID, change_note: str | None) -> ObjectRevision:
+    obj = db.scalar(select(ResearchObject).where(ResearchObject.id == object_id).with_for_update())
+    if obj is None:
+        raise LookupError("object not found")
+    obj = get_object(db, object_id) or obj
+    latest = db.scalar(
+        select(ObjectRevision.revision_number)
+        .where(ObjectRevision.object_id == object_id)
+        .order_by(desc(ObjectRevision.revision_number))
+        .limit(1)
     )
-    revision = ExperimentRevision(
-        experiment_id=experiment_id,
-        revision_number=(current or 0) + 1,
-        snapshot_json=_snapshot(locked),
-        change_note=change_note,
+    snapshot = _revision_snapshot(db, obj)
+    revision = ObjectRevision(
+        object_id=object_id,
+        revision_number=(latest or 0) + 1,
+        snapshot_jsonb=copy.deepcopy(snapshot),
+        snapshot_sha256=sha256_json(snapshot),
+        change_note=change_note.strip() if change_note else None,
     )
     db.add(revision)
     db.commit()
@@ -333,37 +416,13 @@ def create_revision(
     return revision
 
 
-def clone_experiment(db: Session, source: Experiment, payload: CloneRequest) -> Experiment:
-    validate_template_data(source.template.json_schema, source.structured_data)
-    clone = Experiment(
-        code=_next_code(db, Experiment, "EXP"),
-        project_id=source.project_id,
-        template_id=source.template_id,
-        template_version=source.template_version,
-        parent_experiment_id=source.id,
-        title=payload.new_title,
-        status="draft",
-        objective=source.objective,
-        structured_data=copy.deepcopy(source.structured_data)
-        if payload.copy_structured_data
-        else {},
-        note_document=copy.deepcopy(source.note_document) if payload.copy_note else [],
-    )
-    db.add(clone)
-    db.flush()
-    revision = ExperimentRevision(
-        experiment_id=clone.id,
-        revision_number=1,
-        snapshot_json=_snapshot(clone),
-        change_note="Initial clone from " + source.code,
-    )
-    db.add(revision)
-    db.commit()
-    db.refresh(clone)
-    return clone
-
-
-def attachment_storage_key(
-    experiment_id: uuid.UUID, attachment_id: uuid.UUID, filename: str
-) -> str:
-    return f"{experiment_id}/{attachment_id}/{sanitise_filename(filename)}"
+def serialize_attachment(attachment: Attachment) -> dict[str, Any]:
+    return {
+        "id": attachment.id,
+        "object_id": attachment.object_id,
+        "original_filename": attachment.original_filename,
+        "content_type": attachment.content_type,
+        "size_bytes": attachment.size_bytes,
+        "sha256": attachment.sha256,
+        "created_at": attachment.created_at,
+    }

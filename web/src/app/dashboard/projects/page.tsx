@@ -1,5 +1,5 @@
-import { ProjectList } from '@/features/workspace/components/project-list';
+import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
 
 export default function ProjectsPage() {
-  return <ProjectList />;
+  return <WorkspaceApp view='list' kind='project' />;
 }

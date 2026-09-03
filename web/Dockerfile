@@ -8,15 +8,11 @@ FROM node:${NODE_VERSION} AS dependencies
 
 WORKDIR /app
 
-# Install bun to use bun.lock for dependency resolution
-RUN npm install -g bun
-
 # Copy package-related files to leverage Docker cache
-COPY package.json bun.lock* ./
+COPY package.json package-lock.json ./
 
 # Install dependencies with frozen lockfile for reproducible builds
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --no-save --frozen-lockfile
+RUN npm ci --ignore-scripts
 
 # ============================================
 # Stage 2: Build the Next.js application

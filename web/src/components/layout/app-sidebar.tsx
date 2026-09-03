@@ -1,13 +1,9 @@
 'use client';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu';
+
+import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   Sidebar,
   SidebarContent,
@@ -18,165 +14,118 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
   SidebarRail
 } from '@/components/ui/sidebar';
+import { api } from '@/lib/api-client';
+import type { ResearchObject } from '@/lib/domain';
 import { navGroups } from '@/config/nav-config';
-import { useFilteredNavGroups } from '@/hooks/use-nav';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Icons } from '@/components/icons';
-import { useTranslations } from 'next-intl';
 
-const groupLabels = {
-  Workspace: 'workspace',
-  Research: 'research',
-  Knowledge: 'knowledge',
-  'AI & Evaluation': 'aiEvaluation'
-} as const;
-
-const itemLabels = {
-  Overview: 'overview',
-  Projects: 'projects',
-  Experiments: 'experiments',
-  Compare: 'compare',
-  Literature: 'literature',
-  Analysis: 'analysis',
-  Evaluations: 'evaluations'
-} as const;
+function ProjectSwitcher() {
+  const locale = useLocale();
+  const t = useTranslations('Navigation');
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [projects, setProjects] = useState<ResearchObject[]>([]);
+  const [selected, setSelected] = useState('');
+  useEffect(() => {
+    api
+      .listObjects({ kind: 'project', limit: 100 })
+      .then(setProjects)
+      .catch(() => setProjects([]));
+  }, []);
+  useEffect(() => {
+    const fromUrl =
+      searchParams.get('project') ?? pathname.match(/^\/dashboard\/projects\/([^/]+)/)?.[1];
+    const saved = window.localStorage.getItem('scientific_workspace_project');
+    const next = fromUrl ?? saved ?? projects[0]?.id ?? '';
+    if (next) setSelected(next);
+    if (!fromUrl && !saved && projects[0])
+      window.localStorage.setItem('scientific_workspace_project', projects[0].id);
+  }, [pathname, searchParams, projects]);
+  function changeProject(id: string) {
+    setSelected(id);
+    window.localStorage.setItem('scientific_workspace_project', id);
+    if (pathname.match(/^\/dashboard\/projects\/[^/]+$/)) router.push(`/dashboard/projects/${id}`);
+    else {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('project', id);
+      router.push(`${pathname}?${params.toString()}`);
+    }
+  }
+  return (
+    <div className='px-2 py-2 group-data-[collapsible=icon]:hidden'>
+      <label className='mb-1 block px-2 text-[10px] font-medium uppercase tracking-widest text-sidebar-foreground/50'>
+        {t('projectScope')}
+      </label>
+      <select
+        value={selected}
+        onChange={(event) => changeProject(event.target.value)}
+        className='h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-2 text-xs text-sidebar-accent-foreground outline-none focus:ring-2 focus:ring-ring'
+        aria-label={t('projectScope')}
+      >
+        {projects.length === 0 && <option value=''>{t('noProjects')}</option>}
+        {projects.map((project) => (
+          <option key={project.id} value={project.id}>
+            {project.code} · {project.title}
+          </option>
+        ))}
+      </select>
+      <p className='mt-1 px-2 text-[10px] text-sidebar-foreground/50'>
+        {locale === 'zh-CN' ? '当前视图作用域' : 'Current vault scope'}
+      </p>
+    </div>
+  );
+}
 
 export default function AppSidebar() {
   const t = useTranslations('Navigation');
   const pathname = usePathname();
-  const filteredGroups = useFilteredNavGroups(navGroups);
-
   return (
     <Sidebar collapsible='icon'>
-      <SidebarHeader />
+      <SidebarHeader>
+        <div className='flex items-center gap-2 px-2 py-2'>
+          <div className='flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground'>
+            R
+          </div>
+          <div className='min-w-0 group-data-[collapsible=icon]:hidden'>
+            <p className='truncate text-sm font-semibold'>Research Objects</p>
+            <p className='truncate text-[10px] text-sidebar-foreground/60'>Scientific workspace</p>
+          </div>
+        </div>
+        <ProjectSwitcher />
+      </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
-        {filteredGroups.map((group) => (
-          <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
-            {group.label && (
-              <SidebarGroupLabel>
-                {t(groupLabels[group.label as keyof typeof groupLabels] ?? 'workspace')}
-              </SidebarGroupLabel>
-            )}
+        {navGroups.map((group) => (
+          <SidebarGroup key={group.label} className='py-1'>
+            <SidebarGroupLabel className='group-data-[collapsible=icon]:pointer-events-none'>
+              {t(group.label)}
+            </SidebarGroupLabel>
             <SidebarMenu>
               {group.items.map((item) => {
-                const Icon = item.icon ? Icons[item.icon] : Icons.logo;
-                return item?.items && item?.items?.length > 0 ? (
-                  <Collapsible
-                    key={item.title}
-                    defaultOpen={item.isActive}
-                    render={<SidebarMenuItem />}
-                  >
-                    <CollapsibleTrigger
-                      render={
-                        <SidebarMenuButton
-                          tooltip={t(
-                            itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace'
-                          )}
-                          isActive={pathname === item.url}
-                          className='group/collapsible'
-                        />
-                      }
-                    >
-                      {item.icon && <Icon />}
-                      <span>
-                        {t(itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace')}
-                      </span>
-                      <Icons.chevronRight className='ml-auto transition-transform duration-200 group-data-panel-open/collapsible:rotate-90' />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <SidebarMenuSub>
-                        {item.items?.map((subItem) => (
-                          <SidebarMenuSubItem key={subItem.title}>
-                            <SidebarMenuSubButton
-                              render={
-                                <Link
-                                  href={subItem.url}
-                                  aria-label={t(
-                                    itemLabels[subItem.title as keyof typeof itemLabels] ??
-                                      'workspace'
-                                  )}
-                                />
-                              }
-                              isActive={pathname === subItem.url}
-                            >
-                              <span>
-                                {t(
-                                  itemLabels[subItem.title as keyof typeof itemLabels] ??
-                                    'workspace'
-                                )}
-                              </span>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))}
-                      </SidebarMenuSub>
-                    </CollapsibleContent>
-                  </Collapsible>
-                ) : (
-                  <SidebarMenuItem key={item.title}>
+                const Icon = item.icon;
+                const active = pathname === item.url || pathname.startsWith(`${item.url}/`);
+                return (
+                  <SidebarMenuItem key={item.url}>
                     <SidebarMenuButton
-                      render={
-                        <Link
-                          href={item.url}
-                          aria-label={t(
-                            itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace'
-                          )}
-                        />
-                      }
-                      tooltip={t(itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace')}
-                      isActive={pathname === item.url}
+                      isActive={active}
+                      tooltip={t(item.title)}
+                      render={<Link href={item.url} aria-label={t(item.title)} />}
                     >
                       <Icon />
-                      <span>
-                        {t(itemLabels[item.title as keyof typeof itemLabels] ?? 'workspace')}
-                      </span>
+                      <span>{t(item.title)}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
               })}
             </SidebarMenu>
           </SidebarGroup>
-        ))}
+        ))}{' '}
       </SidebarContent>
       <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton
-                    size='lg'
-                    className='data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground'
-                  />
-                }
-              >
-                <span className='truncate'>{t('account')}</span>
-                <Icons.chevronsDown className='ml-auto size-4' />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className='w-(--anchor-width) min-w-56 rounded-lg'
-                side='bottom'
-                align='end'
-                sideOffset={4}
-              >
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel className='p-0 font-normal'>
-                    <div className='text-muted-foreground px-1 py-1.5 text-sm'>
-                      {t('signInHint')}
-                    </div>
-                  </DropdownMenuLabel>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup></DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <div className='px-3 py-2 text-[10px] text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden'>
+          {t('scopeHint')}
+        </div>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

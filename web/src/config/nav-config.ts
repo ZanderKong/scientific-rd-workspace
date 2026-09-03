@@ -1,73 +1,36 @@
-import { NavGroup } from '@/types';
+import {
+  Box,
+  Database,
+  FlaskConical,
+  FolderKanban,
+  Gauge,
+  Microscope,
+  PackageSearch,
+  Workflow
+} from 'lucide-react';
 
-export const navGroups: NavGroup[] = [
+export const navGroups = [
   {
-    label: 'Workspace',
+    label: 'workspace',
     items: [
-      {
-        title: 'Overview',
-        url: '/dashboard/overview',
-        icon: 'dashboard',
-        isActive: false,
-        items: []
-      },
-      {
-        title: 'Projects',
-        url: '/dashboard/projects',
-        icon: 'workspace',
-        isActive: false,
-        items: []
-      }
+      { title: 'overview', url: '/dashboard/overview', icon: Gauge },
+      { title: 'projects', url: '/dashboard/projects', icon: FolderKanban }
     ]
   },
   {
-    label: 'Research',
+    label: 'research',
     items: [
-      {
-        title: 'Experiments',
-        url: '/dashboard/experiments',
-        icon: 'flask',
-        isActive: false,
-        items: []
-      },
-      {
-        title: 'Compare',
-        url: '/dashboard/compare',
-        icon: 'trendingUp',
-        isActive: false,
-        items: []
-      }
+      { title: 'experiments', url: '/dashboard/experiments', icon: FlaskConical },
+      { title: 'samples', url: '/dashboard/samples', icon: PackageSearch },
+      { title: 'processes', url: '/dashboard/processes', icon: Workflow },
+      { title: 'data', url: '/dashboard/data', icon: Database }
     ]
   },
   {
-    label: 'Knowledge',
+    label: 'library',
     items: [
-      {
-        title: 'Literature',
-        url: '/dashboard/literature',
-        icon: 'post',
-        isActive: false,
-        items: []
-      }
-    ]
-  },
-  {
-    label: 'AI & Evaluation',
-    items: [
-      {
-        title: 'Analysis',
-        url: '/dashboard/analysis',
-        icon: 'sparkles',
-        isActive: false,
-        items: []
-      },
-      {
-        title: 'Evaluations',
-        url: '/dashboard/evaluations',
-        icon: 'trendingUp',
-        isActive: false,
-        items: []
-      }
+      { title: 'materials', url: '/dashboard/materials', icon: Box },
+      { title: 'equipment', url: '/dashboard/equipment', icon: Microscope }
     ]
   }
-];
+] as const;

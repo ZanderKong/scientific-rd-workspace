@@ -1,131 +1,39 @@
-# Demo Scenario
+# Demo Scenario — v0.2 Research Object Graph
 
-## 1. Final Three-Phase Story
+The seed is synthetic/anonymised and repeat-safe. It demonstrates a chlorine color-response material graph without claiming production scientific validity.
 
-最终 v0.1-demo 演示：
+## Two-minute path
 
-```text
-Project
-→ Experiment
-→ Conditions
-→ Record
-→ Data Import
-→ Compare
-→ Literature Evidence
-→ AI Finding
-→ Evidence Gate
-→ Reject
-→ Bad Case
-→ Evaluation
-→ Next Experiment
+1. Open Overview and select `PRJ-001` — 氯气显色材料研发.
+2. Open `EXP-001` and show its contained processes, samples and data.
+3. Open `SMP-001`. Explain the distinction between direct producing process/material/equipment, current test data, upstream inputs and downstream branches.
+4. Open `PRC-003` and use the composer: add a `uses` reference with `@MAT-003`, a `produces` sample, role and quantity, then save with Cmd/Ctrl+Enter.
+5. Open a Data object. Show the XY payload summary, plot and source CSV provenance.
+6. Create a revision with a note and show the immutable snapshot hash.
+
+## Expected seed landmarks
+
+- `PRJ-001`, `EXP-001`/`002`/`003`
+- `MAT-001`…`005`, `EQP-001`…`004`
+- `SMP-001`…`004`, `PRC-001`…`006`, `DAT-001`…`004`
+- a downstream branch from `SMP-001` to `SMP-004`
+- four small XY payloads with attachment/import provenance
+
+## Setup
+
+```bash
+docker compose up -d db
+cd api
+uv run alembic upgrade head
+uv run python -m app.seed
+uv run uvicorn app.main:app --reload --port 8000
+
+cd ../web
+npm run dev
 ```
 
-## 2. Phase 1 Demo Script
+Start at `http://localhost:3000/dashboard/overview`. If PostgreSQL or the API is unavailable, the UI must show an explicit error state; it must not fall back to SQLite or fabricated runtime data.
 
-Phase 1 完成后应能录制一个 2–3 分钟 Demo。
+## Deferred story
 
-### Step 1 — Open Overview
-
-展示：
-
-- Scientific R&D Workspace
-- PRJ-001
-- Recent experiments
-
-说明：
-「这里不是一个 AI chat，而是研发项目工作台。」
-
-### Step 2 — Open Project
-
-进入：
-
-`PRJ-001 — Colorimetric Sensor Formulation Optimisation`
-
-看到：
-
-- EXP-041
-- EXP-044
-- EXP-045
-
-### Step 3 — Open EXP-045
-
-Overview：
-- 结构化 formulation
-- drying condition
-- status
-- parent EXP-044
-
-说明：
-「实验参数是 schema-driven structured data，不是写在正文里的自由文本。」
-
-### Step 4 — Open Record
-
-展示富文本：
-- Objective
-- Procedure
-- Observation
-- Discussion
-
-说明：
-「实验自由记录与结构化参数分开保存。」
-
-### Step 5 — Files
-
-上传一个 demo 文件，例如：
-
-`exp-045-photo.txt` 或一个安全的小样例文件。
-
-展示上传、下载。
-
-### Step 6 — Create Revision
-
-Change note：
-`Before next formulation iteration`
-
-创建 revision。
-
-### Step 7 — Clone
-
-Clone EXP-045。
-
-新 title：
-`EXP-046 — Lower starch loading`
-
-修改：
-
-starch amount：
-`1.0 → 0.5`
-
-保存。
-
-### Step 8 — Revision
-
-确认：
-- EXP-045 历史 revision 没变。
-- EXP-046 显示 parent EXP-045。
-- 刷新后数据仍存在。
-
-## 3. Demo Acceptance
-
-如果演示中任何一步需要：
-- 手工改数据库
-- 打开终端补数据
-- 刷新才能救页面
-- 使用 mock API
-
-则 Phase 1 不算完整。
-
-## 4. Phase 3 browser checkpoint
-
-The Phase 3 browser checkpoint is runnable: select exact revisions and Measurements in Compare,
-launch FixtureProvider analysis with zero curated EvidenceRecords, inspect frozen provenance and the
-separate confidence/Evidence Gate/Direct Structured Support surfaces, append Accept/Reject/Needs
-Evidence, create controlled Bad/Reference Cases, and run the mixed dataset sequentially. Evaluation
-progress, deterministic metrics, optional judge state, and replay links are visible in Workspace.
-After a Finding receives Accept or Needs Evidence, the demo exposes the gated Create Draft Experiment
-action. The existing creation form is prefilled from the validated suggestion; the scientist edits the
-values and explicitly submits a draft. The resulting Experiment detail shows immutable Finding/
-AnalysisRun/review provenance. The deterministic PRJ-001 fixture set is visibly synthetic and contains
-exactly three Reference Cases plus three Bad Cases.
-
-Seed data 可以自动生成，但 Demo 中的编辑和 clone 必须真实持久化。
+Compare, Literature, Evidence, AI finding and Evaluation are intentionally not part of this v0.2 demo. They require a separate Plan 2 after the object graph core is accepted.

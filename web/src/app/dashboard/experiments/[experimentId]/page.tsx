@@ -1,4 +1,4 @@
-import { ExperimentDetail } from '@/features/workspace/components/experiment-detail';
+import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
 
 export default async function ExperimentDetailPage({
   params
@@ -6,5 +6,5 @@ export default async function ExperimentDetailPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  return <ExperimentDetail experimentId={experimentId} />;
+  return <WorkspaceApp view='detail' objectId={experimentId} />;
 }

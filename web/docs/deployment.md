@@ -1,6 +1,6 @@
 # Deployment
 
-The starter deploys to Vercel out of the box, or anywhere Docker runs. `next.config.ts` sets `output: 'standalone'`, so production builds are optimized for self-hosting.
+The v0.2 web app can run on Vercel or anywhere Docker runs. `next.config.ts` uses standalone output when `BUILD_STANDALONE=true`, so production builds are suitable for self-hosting.
 
 ## Vercel (Recommended)
 
@@ -18,18 +18,18 @@ Ensure these are set in your deployment platform:
 
 ## Docker
 
-Two production-ready Dockerfiles are included: `Dockerfile` (Node.js) and `Dockerfile.bun` (Bun). Pass `NEXT_PUBLIC_*` variables as `--build-arg` at build time and runtime secrets via `-e` at run time.
+Two production-ready Dockerfiles are included: `Dockerfile` (Node.js) and `Dockerfile.bun` (Bun runtime image). Both install the canonical `package-lock.json` with `npm ci`. Set `NEXT_PUBLIC_API_URL` at build/runtime as required.
 
 Build the image:
 
 ```bash
 # Node.js
 docker build \
-  -t shadcn-dashboard .
+  -t scientific-rd-workspace-web .
 
 # OR Bun
 docker build -f Dockerfile.bun \
-  -t shadcn-dashboard .
+  -t scientific-rd-workspace-web .
 ```
 
 Run the container:
@@ -37,6 +37,6 @@ Run the container:
 ```bash
 docker run -d -p 3000:3000 \
   --restart unless-stopped \
-  --name shadcn-dashboard \
-  shadcn-dashboard
+  --name scientific-rd-workspace-web \
+  scientific-rd-workspace-web
 ```

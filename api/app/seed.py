@@ -1,157 +1,177 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import uuid
-from io import BytesIO
 from typing import Any
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 
-from app.ai_provider import FixtureProvider
-from app.context_builder import build_scientific_context
 from app.core.config import get_settings
 from app.db import SessionLocal
-from app.evaluation_service import create_evaluation_case
 from app.models import (
     Attachment,
-    EvidenceRecord,
-    Experiment,
-    ExperimentLiteratureLink,
-    ExperimentRevision,
-    ExperimentTemplate,
-    Finding,
-    LiteratureRecord,
-    Measurement,
-    MeasurementImport,
-    MeasurementPoint,
-    Project,
-    ReviewDecision,
-    ScientificAnalysisRun,
+    DataImport,
+    DataPayload,
+    DataPoint,
+    ObjectRelation,
+    ObjectType,
+    ObjectTypeVersion,
+    ResearchObject,
 )
-from app.schemas import AnalysisRunCreate, EvaluationCaseCreate, ReviewDecisionCreate
-from app.scientific_ai_service import create_analysis_run, create_review
-from app.services import _snapshot, attachment_storage_key
-from app.storage import LocalStorageAdapter
+from app.schemas import ObjectCreate, RelationCreate
+from app.services import create_object, create_relation
+from app.storage import LocalStorageAdapter, sanitise_filename
+
+DEMO_TAGS = ["synthetic", "anonymised", "demo"]
 
 
-def block(block_type: str, content: str, *, level: int | None = None) -> dict[str, Any]:
-    props: dict[str, Any] = {
-        "textColor": "default",
-        "backgroundColor": "default",
-        "textAlignment": "left",
+def _schema(kind: str) -> dict[str, Any]:
+    common = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"demo_tags": {"type": "array", "items": {"type": "string"}}},
     }
-    if level is not None:
-        props["level"] = level
-    return {
-        "id": str(uuid.uuid4()),
-        "type": block_type,
-        "props": props,
-        "content": [{"type": "text", "text": content, "styles": {}}],
-        "children": [],
+    properties: dict[str, Any] = {
+        "material": {
+            "cas": {"type": "string"},
+            "supplier": {"type": "string"},
+            "lot": {"type": "string"},
+            "arrival_date": {"type": "string"},
+        },
+        "sample": {"batch": {"type": "string"}, "preparation_note": {"type": "string"}},
+        "equipment": {
+            "asset_number": {"type": "string"},
+            "capabilities": {"type": "array", "items": {"type": "string"}},
+        },
+        "process": {
+            "parameters": {"type": "object", "additionalProperties": True},
+            "detailed_steps": {"type": "string"},
+        },
+        "data": {
+            "measurement_kind": {"type": "string"},
+            "x_label": {"type": "string"},
+            "x_unit": {"type": "string"},
+            "y_label": {"type": "string"},
+            "y_unit": {"type": "string"},
+            "scalar_metrics": {"type": "object", "additionalProperties": True},
+        },
+        "experiment": {"objective": {"type": "string"}, "note": {"type": "string"}},
+        "project": {"description": {"type": "string"}},
     }
+    result = dict(common)
+    result["properties"] = {**common["properties"], **properties[kind]}
+    return result
 
 
-def default_note(title: str) -> list[dict[str, Any]]:
-    return [
-        block("heading", "Objective", level=2),
-        block("paragraph", f"Document the objective for {title}."),
-        block("heading", "Procedure", level=2),
-        block("paragraph", "Record the formulation and processing steps here."),
-        block("heading", "Observation", level=2),
-        block("paragraph", "Capture observable outcomes and anomalies."),
-        block("heading", "Discussion", level=2),
-        block("paragraph", "Add interpretation and the next decision."),
-    ]
-
-
-TEMPLATE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "primary_material": {"type": "string", "title": "Primary material"},
-        "primary_material_concentration": {
-            "type": "object",
-            "title": "Material concentration",
-            "additionalProperties": False,
-            "properties": {
-                "value": {"type": "number"},
-                "unit": {"type": "string", "enum": ["wt%", "g/L", "mol/L"]},
-            },
-            "required": ["value", "unit"],
-        },
-        "solvent": {"type": "string", "title": "Solvent"},
-        "additives": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "name": {"type": "string"},
-                    "amount": {"type": "number"},
-                    "unit": {"type": "string"},
-                },
-                "required": ["name"],
-            },
-        },
-        "drying_temperature": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "value": {"type": "number"},
-                "unit": {"type": "string", "enum": ["°C", "K"]},
-            },
-            "required": ["value", "unit"],
-        },
-        "drying_time": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "value": {"type": "number"},
-                "unit": {"type": "string", "enum": ["min", "h"]},
-            },
-            "required": ["value", "unit"],
-        },
-        "substrate": {"type": "string"},
-    },
-}
-
-
-def ensure_revision(db, experiment: Experiment, note: str) -> None:
-    if db.scalar(
-        select(ExperimentRevision.id).where(ExperimentRevision.experiment_id == experiment.id)
-    ):
-        return
-    db.add(
-        ExperimentRevision(
-            experiment_id=experiment.id,
-            revision_number=1,
-            snapshot_json=_snapshot(experiment),
-            change_note=note,
+def _type(db, key: str, kind: str, zh: str, en: str) -> ObjectTypeVersion:
+    obj_type = db.scalar(select(ObjectType).where(ObjectType.key == key))
+    if obj_type is None:
+        obj_type = ObjectType(key=key, kind=kind, label_zh=zh, label_en=en)
+        db.add(obj_type)
+        db.flush()
+    version = db.scalar(
+        select(ObjectTypeVersion).where(
+            ObjectTypeVersion.object_type_id == obj_type.id, ObjectTypeVersion.version == 1
         )
     )
-
-
-def ensure_measurement(db, experiment: Experiment, name: str, values: list[float]) -> Measurement:
-    existing = db.scalar(
-        select(Measurement).where(
-            Measurement.experiment_id == experiment.id, Measurement.name == name
+    if version is None:
+        version = ObjectTypeVersion(
+            object_type_id=obj_type.id,
+            version=1,
+            json_schema=_schema(kind),
+            ui_schema=None,
+            is_active=True,
         )
-    )
+        db.add(version)
+        db.commit()
+        db.refresh(version)
+    return version
+
+
+def _object(
+    db,
+    code: str,
+    kind: str,
+    title: str,
+    scope: uuid.UUID | None,
+    properties: dict[str, Any],
+    status: str = "active",
+) -> ResearchObject:
+    existing = db.scalar(select(ResearchObject).where(ResearchObject.code == code))
     if existing is not None:
         return existing
+    return create_object(
+        db,
+        ObjectCreate(
+            code=code,
+            kind=kind,
+            title=title,
+            status=status,
+            project_scope_id=scope,
+            properties_jsonb=properties,
+        ),
+    )
+
+
+def _relation(
+    db,
+    source: ResearchObject,
+    target: ResearchObject,
+    relation_type: str,
+    role: str | None = None,
+    properties: dict[str, Any] | None = None,
+) -> None:
+    existing = db.scalar(
+        select(ObjectRelation).where(
+            ObjectRelation.source_object_id == source.id,
+            ObjectRelation.target_object_id == target.id,
+            ObjectRelation.relation_type == relation_type,
+            ObjectRelation.role.is_not_distinct_from(role),
+        )
+    )
+    if existing is None:
+        create_relation(
+            db,
+            RelationCreate(
+                source_object_id=source.id,
+                target_object_id=target.id,
+                relation_type=relation_type,
+                role=role,
+                properties_jsonb=properties or {},
+            ),
+        )
+
+
+def _seed_data(
+    db,
+    data_object: ResearchObject,
+    sample: ResearchObject,
+    equipment: ResearchObject,
+    adapter: LocalStorageAdapter,
+    index: int,
+) -> None:
+    if (
+        db.scalar(select(DataPayload).where(DataPayload.data_object_id == data_object.id))
+        is not None
+    ):
+        return
     rows = [
-        ["wavelength_nm", "response_au"],
-        *[[440 + index * 10, value] for index, value in enumerate(values)],
+        (400.0, 0.16 + index * 0.04),
+        (500.0, 0.24 + index * 0.05),
+        (600.0, 0.31 + index * 0.06),
+        (700.0, 0.22 + index * 0.04),
     ]
-    payload = "\n".join(",".join(str(value) for value in row) for row in rows) + "\n"
-    attachment_id = uuid.uuid5(uuid.NAMESPACE_URL, f"phase2:{experiment.id}:{name}")
-    filename = f"{experiment.code.lower()}-{name.lower().replace(' ', '-')}.csv"
-    key = attachment_storage_key(experiment.id, attachment_id, filename)
-    adapter = LocalStorageAdapter(get_settings().storage_root)
-    size, digest = adapter.put(key, BytesIO(payload.encode()))
+    csv_bytes = (
+        "wavelength_nm,response\n" + "\n".join(f"{x},{y}" for x, y in rows) + "\n"
+    ).encode()
+    attachment_id = uuid.uuid4()
+    filename = sanitise_filename(f"{data_object.code.lower()}-spectrum.csv")
+    key = f"{data_object.id}/{attachment_id}/{filename}"
+    size, digest = adapter.put(key, io.BytesIO(csv_bytes))
     attachment = Attachment(
         id=attachment_id,
-        experiment_id=experiment.id,
+        object_id=data_object.id,
         original_filename=filename,
         storage_key=key,
         content_type="text/csv",
@@ -159,399 +179,416 @@ def ensure_measurement(db, experiment: Experiment, name: str, values: list[float
         sha256=digest,
     )
     db.add(attachment)
-    import_id = uuid.uuid5(uuid.NAMESPACE_URL, f"phase2-import:{experiment.id}:{name}")
-    source_rows = rows[1:]
-    import_record = MeasurementImport(
-        id=import_id,
-        experiment_id=experiment.id,
-        source_attachment_id=attachment.id,
-        status="completed",
-        source_format="csv",
-        parser_key="tabular-xy",
-        parser_version=1,
-        source_sha256=digest,
-        header_json=rows[0],
-        source_metadata_json={
-            "available_sheets": [],
-            "row_count": len(source_rows),
-            "column_count": 2,
-            "preview_rows": source_rows[:20],
-        },
-        mapping_json={
-            "measurement_name": name,
-            "measurement_type": "spectral_response",
-            "default_chart_type": "line",
-            "x": {"column": "wavelength_nm", "label": "Wavelength", "unit": "nm"},
-            "y": {"column": "response_au", "label": "Response", "unit": "AU"},
-            "ignored_columns": [],
-        },
-        warnings_json=[],
-        errors_json=[],
-        row_count=len(source_rows),
-    )
-    db.add(import_record)
-    points = [(index, int(row[0]), float(row[1])) for index, row in enumerate(source_rows)]
-    xs, ys = [item[1] for item in points], [item[2] for item in points]
-    canonical = "\n".join(
-        f"{index},{row},{x:.17g},{y:.17g}" for index, (row, x, y) in enumerate(points)
-    )
-    measurement = Measurement(
-        id=uuid.uuid5(uuid.NAMESPACE_URL, f"phase2-measurement:{experiment.id}:{name}"),
-        experiment_id=experiment.id,
-        import_id=import_record.id,
-        name=name,
-        measurement_type="spectral_response",
+    db.flush()
+    canonical = "\n".join(f"{i},{i + 2},{x:.17g},{y:.17g}" for i, (x, y) in enumerate(rows))
+    payload = DataPayload(
+        data_object_id=data_object.id,
+        payload_kind="xy_series",
+        name="Synthetic spectral response",
         schema_key="xy-series",
         schema_version=1,
-        default_chart_type="line",
-        x_label="Wavelength",
-        x_unit="nm",
-        y_label="Response",
-        y_unit="AU",
-        row_count=len(points),
-        summary_json={
-            "x_min": min(xs),
-            "x_max": max(xs),
-            "y_min": min(ys),
-            "y_max": max(ys),
-            "y_mean": sum(ys) / len(ys),
+        metadata_jsonb={
+            "x_label": "Wavelength",
+            "x_unit": "nm",
+            "y_label": "Response",
+            "y_unit": "a.u.",
+            "source": "synthetic demo",
         },
-        points_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
+        summary_jsonb={
+            "x_min": 400.0,
+            "x_max": 700.0,
+            "y_min": min(y for _, y in rows),
+            "y_max": max(y for _, y in rows),
+            "y_mean": sum(y for _, y in rows) / len(rows),
+        },
+        source_attachment_id=attachment.id,
+        payload_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
     )
-    db.add(measurement)
+    db.add(payload)
     db.flush()
     db.add_all(
         [
-            MeasurementPoint(
-                measurement_id=measurement.id,
-                ordinal=index,
-                source_row_number=row + 2,
-                x_value=x,
-                y_value=y,
+            DataPoint(
+                payload_id=payload.id, ordinal=i, source_row_number=i + 2, x_value=x, y_value=y
             )
-            for index, (row, x, y) in enumerate(points)
+            for i, (x, y) in enumerate(rows)
         ]
     )
-    import_record.completed_at = experiment.created_at
-    return measurement
-
-
-def ensure_phase3_demo_cases(
-    db, project: Project, experiments: dict[str, Experiment], measurements: list[Measurement]
-) -> None:
-    """Create the six deterministic, provenance-backed Phase 3 demo cases once."""
-    if not inspect(db.bind).has_table("scientific_analysis_runs"):
-        return
-    settings = get_settings().model_copy(
-        update={"ai_provider": "fixture", "langfuse_enabled": False}
-    )
-    selections = [
-        {"experiment_id": experiment.id, "revision_number": 1}
-        for experiment in experiments.values()
-    ]
-    base_payload = AnalysisRunCreate(
-        experiment_selections=selections,
-        measurement_ids=[item.id for item in measurements],
-        evidence_ids=[],
-        model_profile_key="analysis-default",
-        prompt_version=1,
-    )
-    for index in range(3):
-        marker = f"phase3-demo-v1-{index + 1}"
-        runs = db.scalars(
-            select(ScientificAnalysisRun).where(ScientificAnalysisRun.project_id == project.id)
-        ).all()
-        run = next(
-            (
-                item
-                for item in runs
-                if (item.model_metadata_json or {}).get("demo_fixture_key") == marker
-            ),
-            None,
+    db.add(
+        DataImport(
+            data_object_id=data_object.id,
+            source_attachment_id=attachment.id,
+            payload_id=payload.id,
+            status="completed",
+            source_format="csv",
+            parser_key="tabular-xy",
+            parser_version=1,
+            source_sha256=digest,
+            header_json=["wavelength_nm", "response"],
+            metadata_jsonb={
+                "available_sheets": [],
+                "preview_rows": [[x, y] for x, y in rows],
+                "column_count": 2,
+            },
+            mapping_json={
+                "payload_name": "Synthetic spectral response",
+                "x": {"column": "wavelength_nm", "label": "Wavelength", "unit": "nm"},
+                "y": {"column": "response", "label": "Response", "unit": "a.u."},
+            },
+            warnings_json=[],
+            errors_json=[],
+            row_count=len(rows),
         )
-        if run is None:
-            context, _context_hash, _context_size = build_scientific_context(
-                db, project.id, base_payload, settings
-            )
-            fixture_response = FixtureProvider._default_response(context)
-            fixture_response["findings"][0]["suggested_next_experiment"] = {
-                "title": f"Isolated temperature follow-up {index + 1}",
-                "objective": (
-                    "Test the proposed temperature change while holding formulation constant."
-                ),
-                "base_experiment_id": str(experiments["EXP-041"].id),
-                "control_strategy": (
-                    "Hold the base formulation constant and compare against EXP-041."
-                ),
-                "change_operations": [
-                    {
-                        "op": "set",
-                        "path": "/drying_temperature/value",
-                        "value": 70 + index * 5,
-                        "rationale": "Test one controlled process factor.",
-                    }
-                ],
-                "addresses_missing_evidence_codes": [],
-            }
-            run = create_analysis_run(
-                db, project.id, base_payload, settings, fixture_response=fixture_response
-            )
-            run.model_metadata_json = {
-                **(run.model_metadata_json or {}),
-                "demo_fixture_key": marker,
-                "fixture_label": "synthetic demo data",
-            }
-            db.commit()
-        findings = db.scalars(
-            select(Finding).where(Finding.analysis_run_id == run.id).order_by(Finding.ordinal.asc())
-        ).all()
-        if len(findings) < 2:
-            continue
-        reference_finding, bad_finding = findings[0], findings[1]
-        for finding, decision, reason, comment, case_type, tags, expected in (
-            (
-                reference_finding,
-                "accept",
-                None,
-                "Accepted deterministic comparison reference.",
-                "reference_case",
-                ["fixture", "synthetic", "demo", "reference"],
-                {
-                    "required_suggestion_change_paths": [],
-                    "must_distinguish_comparison_from_causality": True,
-                },
-            ),
-            (
-                bad_finding,
-                "reject",
-                ("unsupported_causal_claim", "incorrect_citation", "missed_limitation")[index],
-                "Rejected deterministic regression example.",
-                "bad_case",
-                [
-                    "fixture",
-                    "synthetic",
-                    "demo",
-                    "bad",
-                    ("unsupported-causality", "invented-evidence-id", "missed-isolating-control")[
-                        index
-                    ],
-                ],
-                {"required_limitation_codes": ["confounded_variables"]}
-                if index == 2
-                else {
-                    "must_have_valid_citations": True,
-                    "forbidden_evidence_ids": [
-                        str(uuid.uuid5(uuid.NAMESPACE_URL, "phase3-demo-invented-evidence"))
-                    ],
-                }
-                if index == 1
-                else {
-                    "must_avoid_unsupported_causal_conclusion": True,
-                    "must_distinguish_comparison_from_causality": True,
-                },
-            ),
-        ):
-            latest = db.scalar(
-                select(ReviewDecision)
-                .where(ReviewDecision.finding_id == finding.id)
-                .order_by(ReviewDecision.sequence_number.desc())
-            )
-            if latest is None:
-                latest = create_review(
-                    db,
-                    finding.id,
-                    ReviewDecisionCreate(
-                        decision=decision,
-                        reviewer_name="Demo reviewer",
-                        reason_code=reason,
-                        comment=comment,
-                    ),
-                )
-            create_evaluation_case(
-                db,
-                finding.id,
-                EvaluationCaseCreate(expected_behavior=expected, case_tags=tags),
-                case_type,
-                settings,
-            )
+    )
+    db.commit()
+    _relation(db, equipment, data_object, "related_to", "measurement-output")
+    _relation(db, data_object, sample, "related_to", "subject")
 
 
 def seed() -> None:
+    adapter = LocalStorageAdapter(get_settings().storage_root)
     with SessionLocal() as db:
-        project = db.scalar(select(Project).where(Project.code == "PRJ-001"))
-        if project is None:
-            project = Project(
-                code="PRJ-001",
-                title="Colorimetric Sensor Formulation Optimisation",
-                description="Synthetic/anonymised demo project for formulation iteration.",
-                status="active",
-            )
-            db.add(project)
-            db.flush()
-
-        template = db.scalar(
-            select(ExperimentTemplate).where(
-                ExperimentTemplate.key == "materials-formulation-v1",
-                ExperimentTemplate.version == 1,
-            )
+        for key, kind, zh, en in [
+            ("material.generic", "material", "原料 / 试剂", "Material / reagent"),
+            ("sample.generic", "sample", "样品", "Sample"),
+            ("equipment.generic", "equipment", "设备", "Equipment"),
+            ("process.generic", "process", "过程 / 操作", "Process"),
+            ("data.generic", "data", "数据 / 测试结果", "Data / test result"),
+            ("experiment.generic", "experiment", "实验", "Experiment"),
+            ("project.generic", "project", "项目 / Vault", "Project / Vault"),
+        ]:
+            _type(db, key, kind, zh, en)
+        project = _object(
+            db,
+            "PRJ-001",
+            "project",
+            "氯气显色材料研发",
+            None,
+            {"description": "Demo dataset — synthetic / anonymised", "demo_tags": DEMO_TAGS},
         )
-        if template is None:
-            template = ExperimentTemplate(
-                key="materials-formulation-v1",
-                name="Materials formulation",
-                version=1,
-                json_schema=TEMPLATE_SCHEMA,
-                ui_schema=None,
-                is_active=True,
-            )
-            db.add(template)
-            db.flush()
-
-        records = [
-            (
-                "EXP-041",
-                "Baseline formulation",
-                None,
-                {
-                    "primary_material": "Material A",
-                    "primary_material_concentration": {"value": 5, "unit": "wt%"},
-                    "solvent": "ethanol",
-                    "additives": [],
-                    "drying_temperature": {"value": 60, "unit": "°C"},
-                    "drying_time": {"value": 20, "unit": "min"},
-                    "substrate": "polymer film",
-                },
+        material_a = _object(
+            db,
+            "MAT-001",
+            "material",
+            "Material A / 2-POA anonymized",
+            project.id,
+            {"supplier": "Synthetic supplier", "lot": "DEMO-A", "demo_tags": DEMO_TAGS},
+        )
+        ethanol = _object(
+            db,
+            "MAT-002",
+            "material",
+            "Ethanol",
+            project.id,
+            {"supplier": "Synthetic supplier", "lot": "DEMO-ETOH", "demo_tags": DEMO_TAGS},
+        )
+        ki = _object(
+            db,
+            "MAT-003",
+            "material",
+            "Potassium iodide (KI)",
+            project.id,
+            {"supplier": "Synthetic supplier", "lot": "DEMO-KI", "demo_tags": DEMO_TAGS},
+        )
+        starch = _object(
+            db,
+            "MAT-004",
+            "material",
+            "Starch",
+            project.id,
+            {"supplier": "Synthetic supplier", "lot": "DEMO-STARCH", "demo_tags": DEMO_TAGS},
+        )
+        substrate = _object(
+            db,
+            "MAT-005",
+            "material",
+            "Base substrate",
+            project.id,
+            {"supplier": "Synthetic supplier", "lot": "DEMO-BASE", "demo_tags": DEMO_TAGS},
+        )
+        eq_imp = _object(
+            db,
+            "EQP-001",
+            "equipment",
+            "Impregnation setup",
+            project.id,
+            {"asset_number": "DEMO-IMP", "capabilities": ["impregnation"], "demo_tags": DEMO_TAGS},
+        )
+        eq_oven = _object(
+            db,
+            "EQP-002",
+            "equipment",
+            "Drying oven",
+            project.id,
+            {"asset_number": "DEMO-OVEN", "capabilities": ["drying"], "demo_tags": DEMO_TAGS},
+        )
+        eq_spec = _object(
+            db,
+            "EQP-003",
+            "equipment",
+            "Spectrometer",
+            project.id,
+            {
+                "asset_number": "DEMO-SPEC",
+                "capabilities": ["spectral measurement"],
+                "demo_tags": DEMO_TAGS,
+            },
+        )
+        eq_gas = _object(
+            db,
+            "EQP-004",
+            "equipment",
+            "Gas exposure setup",
+            project.id,
+            {"asset_number": "DEMO-GAS", "capabilities": ["gas exposure"], "demo_tags": DEMO_TAGS},
+        )
+        exp1 = _object(
+            db,
+            "EXP-001",
+            "experiment",
+            "基准配方",
+            project.id,
+            {"objective": "建立基准显色响应", "demo_tags": DEMO_TAGS},
+        )
+        exp2 = _object(
+            db,
+            "EXP-002",
+            "experiment",
+            "KI 改性",
+            project.id,
+            {"objective": "观察 KI 改性后的响应", "demo_tags": DEMO_TAGS},
+        )
+        exp3 = _object(
+            db,
+            "EXP-003",
+            "experiment",
+            "KI + starch",
+            project.id,
+            {"objective": "观察 KI + starch 组合的响应", "demo_tags": DEMO_TAGS},
+        )
+        samples = {
+            "SMP-001": _object(
+                db,
+                "SMP-001",
+                "sample",
+                "Baseline sample",
+                project.id,
+                {"batch": "baseline", "demo_tags": DEMO_TAGS},
             ),
-            (
-                "EXP-044",
+            "SMP-002": _object(
+                db,
+                "SMP-002",
+                "sample",
                 "Baseline + KI",
-                "EXP-041",
-                {
-                    "primary_material": "Material A",
-                    "primary_material_concentration": {"value": 5, "unit": "wt%"},
-                    "solvent": "ethanol",
-                    "additives": [{"name": "KI", "amount": 1, "unit": "g"}],
-                    "drying_temperature": {"value": 60, "unit": "°C"},
-                    "drying_time": {"value": 20, "unit": "min"},
-                    "substrate": "polymer film",
-                },
+                project.id,
+                {"batch": "ki", "demo_tags": DEMO_TAGS},
             ),
-            (
-                "EXP-045",
-                "2-POA + KI + starch",
-                "EXP-044",
-                {
-                    "primary_material": "Material A",
-                    "primary_material_concentration": {"value": 5, "unit": "wt%"},
-                    "solvent": "ethanol",
-                    "additives": [
-                        {"name": "KI", "amount": 1, "unit": "g"},
-                        {"name": "starch", "amount": 1, "unit": "wt%"},
-                    ],
-                    "drying_temperature": {"value": 60, "unit": "°C"},
-                    "drying_time": {"value": 20, "unit": "min"},
-                    "substrate": "polymer film",
-                },
+            "SMP-003": _object(
+                db,
+                "SMP-003",
+                "sample",
+                "Baseline + KI + starch",
+                project.id,
+                {"batch": "ki-starch", "demo_tags": DEMO_TAGS},
             ),
-        ]
-        by_code: dict[str, Experiment] = {}
-        seeded_measurements: list[Measurement] = []
-        for code, title, parent_code, structured_data in records:
-            experiment = db.scalar(select(Experiment).where(Experiment.code == code))
-            if experiment is None:
-                experiment = Experiment(
-                    code=code,
-                    project_id=project.id,
-                    template_id=template.id,
-                    template_version=template.version,
-                    title=title,
-                    status="completed",
-                    objective="Compare formulation choices in a synthetic demo workflow.",
-                    structured_data=structured_data,
-                    note_document=default_note(title),
-                )
-                db.add(experiment)
-                db.flush()
-            by_code[code] = experiment
-            if parent_code:
-                experiment.parent_experiment_id = by_code[parent_code].id
-        for index, code in enumerate(("EXP-041", "EXP-044", "EXP-045")):
-            experiment = by_code[code]
-            seeded_measurements.append(
-                ensure_measurement(
-                    db,
-                    experiment,
-                    "Synthetic response",
-                    [1.0 + index * 0.2, 1.4 + index * 0.25, 1.9 + index * 0.3, 2.3 + index * 0.35],
-                )
-            )
-            ensure_revision(db, experiment, "Seeded demo snapshot")
-        literature = db.scalar(
-            select(LiteratureRecord).where(
-                LiteratureRecord.project_id == project.id,
-                LiteratureRecord.title == "Synthetic response methods",
-            )
-        )
-        if literature is None:
-            literature = LiteratureRecord(
-                project_id=project.id,
-                item_type="journal_article",
-                title="Synthetic response methods",
-                authors_json=[{"family": "Example", "given": "Ada"}],
-                publication_year=2025,
-                container_title="Demo Journal",
-                doi="10.0000/demo",
-            )
-            db.add(literature)
-            db.flush()
-        for experiment in by_code.values():
-            if not db.scalar(
-                select(ExperimentLiteratureLink.id).where(
-                    ExperimentLiteratureLink.experiment_id == experiment.id,
-                    ExperimentLiteratureLink.literature_id == literature.id,
-                )
-            ):
-                db.add(
-                    ExperimentLiteratureLink(
-                        experiment_id=experiment.id,
-                        literature_id=literature.id,
-                        relationship_type="supporting",
-                    )
-                )
-        measurement = db.scalar(
-            select(Measurement).where(
-                Measurement.experiment_id == by_code["EXP-045"].id,
-                Measurement.name == "Synthetic response",
-            )
-        )
-        if measurement is not None and not db.scalar(
-            select(EvidenceRecord.id).where(
-                EvidenceRecord.project_id == project.id,
-                EvidenceRecord.measurement_id == measurement.id,
-            )
-        ):
-            db.add(
-                EvidenceRecord(
-                    project_id=project.id,
-                    context_experiment_id=by_code["EXP-045"].id,
-                    claim_text="The synthetic response increases across the compared formulations.",
-                    stance="supports",
-                    source_type="measurement",
-                    measurement_id=measurement.id,
-                    source_snapshot_json={
-                        "id": str(measurement.id),
-                        "name": measurement.name,
-                        "points_sha256": measurement.points_sha256,
-                        "summary_json": measurement.summary_json,
-                        "import_id": str(measurement.import_id),
+            "SMP-004": _object(
+                db,
+                "SMP-004",
+                "sample",
+                "Baseline branch",
+                project.id,
+                {"batch": "branch", "demo_tags": DEMO_TAGS},
+            ),
+        }
+        processes = {
+            "PRC-001": _object(
+                db,
+                "PRC-001",
+                "process",
+                "Solution preparation",
+                project.id,
+                {"parameters": {"duration": {"value": 10, "unit": "min"}}, "demo_tags": DEMO_TAGS},
+            ),
+            "PRC-002": _object(
+                db,
+                "PRC-002",
+                "process",
+                "Baseline impregnation",
+                project.id,
+                {
+                    "parameters": {
+                        "duration": {"value": 30, "unit": "min"},
+                        "temperature": {"value": 25, "unit": "°C"},
                     },
-                    status="active",
-                )
+                    "demo_tags": DEMO_TAGS,
+                },
+            ),
+            "PRC-003": _object(
+                db,
+                "PRC-003",
+                "process",
+                "KI modification",
+                project.id,
+                {
+                    "parameters": {
+                        "duration": {"value": 30, "unit": "min"},
+                        "temperature": {"value": 25, "unit": "°C"},
+                    },
+                    "demo_tags": DEMO_TAGS,
+                },
+            ),
+            "PRC-004": _object(
+                db,
+                "PRC-004",
+                "process",
+                "KI + starch modification",
+                project.id,
+                {
+                    "parameters": {
+                        "duration": {"value": 30, "unit": "min"},
+                        "temperature": {"value": 25, "unit": "°C"},
+                    },
+                    "demo_tags": DEMO_TAGS,
+                },
+            ),
+            "PRC-005": _object(
+                db,
+                "PRC-005",
+                "process",
+                "Branch preparation",
+                project.id,
+                {"parameters": {"duration": {"value": 20, "unit": "min"}}, "demo_tags": DEMO_TAGS},
+            ),
+            "PRC-006": _object(
+                db,
+                "PRC-006",
+                "process",
+                "Drying",
+                project.id,
+                {
+                    "parameters": {
+                        "temperature": {"value": 60, "unit": "°C"},
+                        "duration": {"value": 20, "unit": "min"},
+                    },
+                    "demo_tags": DEMO_TAGS,
+                },
+            ),
+        }
+        data = {
+            code: _object(
+                db,
+                code,
+                "data",
+                title,
+                project.id,
+                {
+                    "measurement_kind": "spectral_response",
+                    "x_label": "Wavelength",
+                    "x_unit": "nm",
+                    "y_label": "Response",
+                    "y_unit": "a.u.",
+                    "demo_tags": DEMO_TAGS,
+                },
             )
-        db.flush()
-        ensure_phase3_demo_cases(db, project, by_code, seeded_measurements)
+            for code, title in [
+                ("DAT-001", "Baseline spectral response"),
+                ("DAT-002", "KI spectral response"),
+                ("DAT-003", "KI + starch spectral response"),
+                ("DAT-004", "Branch spectral response"),
+            ]
+        }
+        for experiment, object_codes in [
+            (exp1, ["PRC-001", "PRC-002", "PRC-006", "SMP-001", "SMP-004", "DAT-001", "DAT-004"]),
+            (exp2, ["PRC-003", "SMP-002", "DAT-002"]),
+            (exp3, ["PRC-004", "SMP-003", "DAT-003"]),
+        ]:
+            for code in object_codes:
+                _relation(db, experiment, (processes | samples | data)[code], "contains")
+        _relation(
+            db,
+            processes["PRC-001"],
+            material_a,
+            "uses",
+            "material",
+            {"quantity": {"value": 5, "unit": "g"}},
+        )
+        _relation(
+            db,
+            processes["PRC-001"],
+            ethanol,
+            "uses",
+            "solvent",
+            {"quantity": {"value": 90, "unit": "g"}},
+        )
+        _relation(
+            db,
+            processes["PRC-002"],
+            material_a,
+            "uses",
+            "material",
+            {"quantity": {"value": 5, "unit": "g"}},
+        )
+        _relation(
+            db,
+            processes["PRC-002"],
+            ethanol,
+            "uses",
+            "solvent",
+            {"quantity": {"value": 90, "unit": "g"}},
+        )
+        _relation(db, processes["PRC-002"], eq_imp, "uses", "equipment")
+        _relation(db, processes["PRC-002"], samples["SMP-001"], "produces")
+        _relation(db, processes["PRC-003"], samples["SMP-001"], "uses", "precursor")
+        _relation(
+            db,
+            processes["PRC-003"],
+            ki,
+            "uses",
+            "additive",
+            {"quantity": {"value": 1, "unit": "g"}},
+        )
+        _relation(db, processes["PRC-003"], eq_imp, "uses", "equipment")
+        _relation(db, processes["PRC-003"], samples["SMP-002"], "produces")
+        _relation(db, processes["PRC-004"], samples["SMP-002"], "uses", "precursor")
+        _relation(
+            db,
+            processes["PRC-004"],
+            ki,
+            "uses",
+            "additive",
+            {"quantity": {"value": 1, "unit": "g"}},
+        )
+        _relation(
+            db,
+            processes["PRC-004"],
+            starch,
+            "uses",
+            "additive",
+            {"quantity": {"value": 1, "unit": "g"}},
+        )
+        _relation(db, processes["PRC-004"], eq_imp, "uses", "equipment")
+        _relation(db, processes["PRC-004"], samples["SMP-003"], "produces")
+        _relation(db, processes["PRC-005"], samples["SMP-001"], "uses", "precursor")
+        _relation(db, processes["PRC-005"], substrate, "uses", "substrate")
+        _relation(db, processes["PRC-005"], samples["SMP-004"], "produces")
+        for process in processes.values():
+            if process.code in {"PRC-002", "PRC-003", "PRC-004", "PRC-005"}:
+                _relation(db, process, eq_oven, "uses", "equipment")
+        for process, sample, datum in [
+            (processes["PRC-002"], samples["SMP-001"], data["DAT-001"]),
+            (processes["PRC-003"], samples["SMP-002"], data["DAT-002"]),
+            (processes["PRC-004"], samples["SMP-003"], data["DAT-003"]),
+            (processes["PRC-005"], samples["SMP-004"], data["DAT-004"]),
+        ]:
+            _relation(db, process, sample, "uses", "subject")
+            _relation(db, process, eq_spec, "uses", "equipment")
+            _relation(db, process, eq_gas, "uses", "environment")
+            _relation(db, process, datum, "produces")
+            _seed_data(db, datum, sample, eq_spec, adapter, int(datum.code[-1]))
+        _relation(db, processes["PRC-002"], processes["PRC-003"], "precedes")
+        _relation(db, processes["PRC-003"], processes["PRC-004"], "precedes")
         db.commit()
-        print("Seeded PRJ-001, materials-formulation-v1, EXP-041, EXP-044, and EXP-045")
+    print("Seeded v0.2 synthetic/anonymised research object graph (repeat-safe).")
 
 
 if __name__ == "__main__":

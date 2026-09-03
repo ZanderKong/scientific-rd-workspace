@@ -1,4 +1,4 @@
-import { ExperimentCreate } from '@/features/workspace/components/experiment-create';
+import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
 
 export default async function NewExperimentPage({
   params
@@ -6,5 +6,5 @@ export default async function NewExperimentPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  return <ExperimentCreate projectId={projectId} />;
+  return <WorkspaceApp view='new' kind='experiment' projectId={projectId} />;
 }

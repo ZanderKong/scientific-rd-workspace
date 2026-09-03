@@ -1,5 +1,5 @@
-import { Overview } from '@/features/workspace/components/overview';
+import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
 
 export default function OverviewPage() {
-  return <Overview />;
+  return <WorkspaceApp view='overview' />;
 }

@@ -1,353 +1,175 @@
 import type {
   Attachment,
-  Experiment,
-  ExperimentPrefill,
-  ExperimentProvenance,
-  ExperimentTemplate,
-  JsonObject,
-  Project,
-  Revision,
+  DataImport,
+  DataPayload,
+  DataPoint,
+  ExperimentContext,
   ImportPreview,
-  Measurement,
-  MeasurementPoint,
-  Literature,
-  LiteratureLink,
-  Evidence,
-  CompareResult,
-  AnalysisRun,
-  Finding,
-  ModelProfile,
-  ReviewDecision,
-  EvaluationCase,
-  EvaluationRun,
-  EvaluationResult
+  JsonObject,
+  ObjectRelation,
+  ObjectRevision,
+  ObjectType,
+  ResearchObject,
+  ResearchObjectKind,
+  SampleContext
 } from './domain';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1').replace(
   /\/$/,
   ''
 );
-export const API_REQUEST_TIMEOUT_MS = 10_000;
 
 export class ApiError extends Error {
   status: number;
-  details: unknown;
+  detail: unknown;
 
-  constructor(message: string, status: number, details?: unknown) {
+  constructor(message: string, status: number, detail?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
-    this.details = details;
+    this.detail = detail;
   }
 }
 
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response;
-  const controller = new AbortController();
-  const callerSignal = init?.signal;
-  const onCallerAbort = () => controller.abort();
-  if (callerSignal) {
-    if (callerSignal.aborted) {
-      controller.abort();
-    } else {
-      callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+function errorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string') {
+    try {
+      const parsed = JSON.parse(detail) as {
+        errors?: Array<{ path?: string; message?: string }>;
+        code?: string;
+      };
+      if (parsed.errors?.length)
+        return parsed.errors.map((item) => `${item.path ?? '$'}: ${item.message ?? ''}`).join('; ');
+      if (parsed.code) return parsed.code;
+    } catch {
+      return detail;
     }
+    return detail;
   }
-  const timeoutId = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  if (detail && typeof detail === 'object' && 'message' in detail) return String(detail.message);
+  return fallback;
+}
+
+export async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 15000
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  if (init.signal) init.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      cache: 'no-store',
-      signal: controller.signal
-    });
+    response = await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      if (callerSignal?.aborted) throw new ApiError('Request cancelled. Try again.', 0);
+    if (error instanceof DOMException && error.name === 'AbortError') {
       throw new ApiError('Request timed out. Try again.', 408);
     }
-    throw new ApiError('Backend unreachable. Start the API and try again.', 0);
+    throw new ApiError('Backend unreachable. Start the API and try again.', 0, error);
   } finally {
-    clearTimeout(timeoutId);
-    if (callerSignal && onCallerAbort) {
-      callerSignal.removeEventListener('abort', onCallerAbort);
-    }
+    globalThis.clearTimeout(timer);
+  }
+  const text = await response.text();
+  let data: unknown;
+  try {
+    data = text ? (JSON.parse(text) as unknown) : undefined;
+  } catch {
+    data = text;
   }
   if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    let details: unknown;
-    try {
-      const body = (await response.json()) as {
-        detail?: string | Array<{ msg?: string }> | { message?: string };
-      };
-      if (typeof body.detail === 'string') message = body.detail;
-      if (Array.isArray(body.detail))
-        message = body.detail
-          .map((item) => item.msg)
-          .filter(Boolean)
-          .join('; ');
-      details = body.detail;
-      if (
-        body.detail &&
-        !Array.isArray(body.detail) &&
-        typeof body.detail !== 'string' &&
-        body.detail.message
-      )
-        message = body.detail.message;
-    } catch {
-      // Keep the status-based message when the response is not JSON.
-    }
-    throw new ApiError(message, response.status, details);
+    const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : data;
+    throw new ApiError(
+      errorMessage(detail, `Request failed (${response.status})`),
+      response.status,
+      detail
+    );
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return data as T;
 }
 
+const json = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body)
+});
+
 export const api = {
-  listProjects: () => request<Project[]>('/projects'),
-  createProject: (payload: Pick<Project, 'title' | 'description' | 'status'>) =>
-    request<Project>('/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  updateProject: (
-    id: string,
-    payload: Partial<Pick<Project, 'title' | 'description' | 'status'>>
-  ) =>
-    request<Project>(`/projects/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  getProject: (id: string) => request<Project>(`/projects/${id}`),
-  listProjectExperiments: (projectId: string) =>
-    request<Experiment[]>(`/projects/${projectId}/experiments`),
-  listExperiments: () => request<Experiment[]>('/experiments'),
-  createExperiment: (
-    projectId: string,
-    payload: {
-      title: string;
-      template_id: string;
+  listTypes: () => request<ObjectType[]>('/object-types'),
+  getType: (id: string) => request<ObjectType>(`/object-types/${id}`),
+  listObjects: (
+    params: {
+      kind?: ResearchObjectKind;
+      project_scope_id?: string;
+      q?: string;
       status?: string;
-      objective?: string;
-      structured_data?: JsonObject;
-      note_document?: Array<JsonObject>;
-      suggestion_origin?: {
-        finding_id: string;
-        analysis_run_id: string;
-        enabling_review_decision_id: string;
-        suggestion_hash: string;
-        template_id: string;
-        template_version: number;
-        parent_experiment_id: string;
-      };
-    }
-  ) =>
-    request<Experiment>(`/projects/${projectId}/experiments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  getExperiment: (id: string) => request<Experiment>(`/experiments/${id}`),
-  getExperimentProvenance: (id: string) =>
-    request<ExperimentProvenance>(`/experiments/${id}/provenance`),
-  updateExperiment: (
+      include_global?: boolean;
+      limit?: number;
+    } = {}
+  ) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) query.set(key, String(value));
+    });
+    return request<ResearchObject[]>(`/objects${query.size ? `?${query.toString()}` : ''}`);
+  },
+  getObject: (id: string) => request<ResearchObject>(`/objects/${id}`),
+  createObject: (payload: {
+    kind: ResearchObjectKind;
+    title: string;
+    project_scope_id?: string | null;
+    status?: string;
+    properties_jsonb?: JsonObject;
+    content_document?: JsonObject[];
+  }) => request<ResearchObject>('/objects', json(payload)),
+  updateObject: (
     id: string,
     payload: Partial<
-      Pick<Experiment, 'title' | 'status' | 'objective' | 'structured_data' | 'note_document'>
+      Pick<
+        ResearchObject,
+        'title' | 'status' | 'project_scope_id' | 'properties_jsonb' | 'content_document'
+      >
     >
-  ) =>
-    request<Experiment>(`/experiments/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  cloneExperiment: (id: string, new_title: string) =>
-    request<Experiment>(`/experiments/${id}/clone`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ new_title, copy_note: true, copy_structured_data: true })
-    }),
-  listTemplates: () => request<ExperimentTemplate[]>('/experiment-templates'),
-  getTemplate: (id: string) => request<ExperimentTemplate>(`/experiment-templates/${id}`),
-  listAttachments: (id: string) => request<Attachment[]>(`/experiments/${id}/attachments`),
+  ) => request<ResearchObject>(`/objects/${id}`, { ...json(payload), method: 'PATCH' }),
+  listRelations: (id: string) => request<ObjectRelation[]>(`/objects/${id}/relations`),
+  createRelation: (payload: {
+    source_object_id: string;
+    target_object_id: string;
+    relation_type: ObjectRelation['relation_type'];
+    role?: string | null;
+    properties_jsonb?: JsonObject;
+  }) => request<ObjectRelation>('/relations', json(payload)),
+  updateRelation: (id: string, payload: { role?: string | null; properties_jsonb?: JsonObject }) =>
+    request<ObjectRelation>(`/relations/${id}`, { ...json(payload), method: 'PATCH' }),
+  deleteRelation: (id: string) => request<void>(`/relations/${id}`, { method: 'DELETE' }),
+  listRevisions: (id: string) => request<ObjectRevision[]>(`/objects/${id}/revisions`),
+  createRevision: (id: string, change_note?: string) =>
+    request<ObjectRevision>(`/objects/${id}/revisions`, json({ change_note: change_note || null })),
+  getRevision: (id: string, number: number) =>
+    request<ObjectRevision>(`/objects/${id}/revisions/${number}`),
+  listAttachments: (id: string) => request<Attachment[]>(`/objects/${id}/attachments`),
   uploadAttachment: (id: string, file: File) => {
     const body = new FormData();
     body.append('file', file);
-    return request<Attachment>(`/experiments/${id}/attachments`, { method: 'POST', body });
+    return request<Attachment>(`/objects/${id}/attachments`, { method: 'POST', body }, 60000);
   },
   deleteAttachment: (id: string) => request<void>(`/attachments/${id}`, { method: 'DELETE' }),
-  listRevisions: (id: string) => request<Revision[]>(`/experiments/${id}/revisions`),
-  createRevision: (id: string, change_note?: string) =>
-    request<Revision>(`/experiments/${id}/revisions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ change_note: change_note || null })
-    }),
   downloadUrl: (id: string) => `${API_BASE}/attachments/${id}/download`,
-  previewMeasurementImport: (
-    experimentId: string,
-    source_attachment_id: string,
-    sheet_name?: string
-  ) =>
-    request<ImportPreview>(`/experiments/${experimentId}/measurement-imports/preview`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_attachment_id, sheet_name: sheet_name || null })
-    }),
-  getMeasurementImport: (id: string) => request<ImportPreview>(`/measurement-imports/${id}`),
-  commitMeasurementImport: (
-    id: string,
-    payload: {
-      measurement_name: string;
-      measurement_type: string;
-      default_chart_type: string;
-      sheet_name?: string | null;
-      x: { column: string; label: string; unit: string };
-      y: { column: string; label: string; unit: string };
-    }
-  ) =>
-    request<Measurement>(`/measurement-imports/${id}/commit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  listMeasurements: (id: string) => request<Measurement[]>(`/experiments/${id}/measurements`),
-  getMeasurement: (id: string) => request<Measurement>(`/measurements/${id}`),
-  listMeasurementPoints: (id: string) => request<MeasurementPoint[]>(`/measurements/${id}/points`),
-  listLiterature: (projectId: string, query?: string) =>
-    request<Literature[]>(
-      `/projects/${projectId}/literature${query ? `?q=${encodeURIComponent(query)}` : ''}`
+  sampleContext: (id: string, depth = 3) =>
+    request<SampleContext>(`/samples/${id}/context?depth=${depth}`),
+  experimentContext: (id: string) => request<ExperimentContext>(`/experiments/${id}/context`),
+  listPayloads: (id: string) => request<DataPayload[]>(`/data/${id}/payloads`),
+  getPayload: (id: string) => request<DataPayload>(`/data-payloads/${id}`),
+  listPoints: (id: string) => request<DataPoint[]>(`/data-payloads/${id}/points`),
+  listImports: (id: string) => request<DataImport[]>(`/data/${id}/imports`),
+  previewImport: (id: string, source_attachment_id: string, sheet_name?: string | null) =>
+    request<ImportPreview>(
+      `/data/${id}/imports/preview`,
+      json({ source_attachment_id, sheet_name: sheet_name || null })
     ),
-  createLiterature: (projectId: string, payload: Record<string, unknown>) =>
-    request<Literature>(`/projects/${projectId}/literature`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  listLiteratureLinks: (experimentId: string) =>
-    request<LiteratureLink[]>(`/experiments/${experimentId}/literature-links`),
-  createLiteratureLink: (
-    experimentId: string,
-    payload: { literature_id: string; relationship_type: string; notes?: string }
-  ) =>
-    request<LiteratureLink>(`/experiments/${experimentId}/literature-links`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  listEvidence: (projectId: string, contextExperimentId?: string) =>
-    request<Evidence[]>(
-      `/projects/${projectId}/evidence${contextExperimentId ? `?context_experiment_id=${contextExperimentId}` : ''}`
-    ),
-  createEvidence: (projectId: string, payload: Record<string, unknown>) =>
-    request<Evidence>(`/projects/${projectId}/evidence`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  withdrawEvidence: (id: string, reason: string) =>
-    request<Evidence>(`/evidence/${id}/withdraw`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason })
-    }),
-  compareExperiments: (payload: {
-    project_id: string;
-    experiment_ids: string[];
-    measurement_ids?: string[];
-  }) =>
-    request<CompareResult>('/comparisons/experiments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  listModelProfiles: () => request<ModelProfile[]>('/ai/model-profiles'),
-  listPromptVersions: () =>
-    request<Array<{ key: string; version: number; sha256: string }>>('/ai/prompt-versions'),
-  createAnalysisRun: (
-    projectId: string,
-    payload: {
-      experiment_selections: Array<{ experiment_id: string; revision_number: number }>;
-      measurement_ids: string[];
-      literature_ids?: string[];
-      evidence_ids?: string[];
-      model_profile_key?: string;
-      prompt_version?: number;
-    }
-  ) =>
-    request<AnalysisRun>(`/projects/${projectId}/analysis-runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  listAnalysisRuns: (projectId: string) =>
-    request<AnalysisRun[]>(`/projects/${projectId}/analysis-runs`),
-  getAnalysisRun: (id: string) => request<AnalysisRun>(`/analysis-runs/${id}`),
-  listFindings: (projectId: string) => request<Finding[]>(`/projects/${projectId}/findings`),
-  getFinding: (id: string) => request<Finding>(`/findings/${id}`),
-  getSuggestedExperimentPrefill: (id: string) =>
-    request<ExperimentPrefill>(`/findings/${id}/suggested-experiment-prefill`),
-  listReviews: (findingId: string) => request<ReviewDecision[]>(`/findings/${findingId}/reviews`),
-  createReview: (
-    findingId: string,
-    payload: {
-      decision: 'accept' | 'reject' | 'needs_evidence';
-      reviewer_name: string;
-      reason_code?: string | null;
-      comment?: string | null;
-      supersedes_review_id?: string | null;
-    }
-  ) =>
-    request<ReviewDecision>(`/findings/${findingId}/reviews`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  createBadCase: (
-    findingId: string,
-    payload?: { expected_behavior?: JsonObject; case_tags?: string[] }
-  ) =>
-    request<EvaluationCase>(`/findings/${findingId}/evaluation-cases`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload ?? {})
-    }),
-  createReferenceCase: (
-    findingId: string,
-    payload?: { expected_behavior?: JsonObject; case_tags?: string[] }
-  ) =>
-    request<EvaluationCase>(`/findings/${findingId}/evaluation-cases/reference`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload ?? {})
-    }),
-  listEvaluationCases: (projectId: string, caseType?: 'bad_case' | 'reference_case') =>
-    request<EvaluationCase[]>(
-      `/projects/${projectId}/evaluation-cases${caseType ? `?case_type=${caseType}` : ''}`
-    ),
-  getEvaluationCase: (id: string) => request<EvaluationCase>(`/evaluation-cases/${id}`),
-  createEvaluationRun: (
-    projectId: string,
-    payload: {
-      evaluation_case_ids: string[];
-      model_profile_key?: string;
-      prompt_version?: number;
-      judge_enabled?: boolean;
-      judge_model_profile_key?: string;
-      baseline_run_id?: string | null;
-    }
-  ) =>
-    request<EvaluationRun>(`/projects/${projectId}/evaluation-runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }),
-  listEvaluationRuns: (projectId: string) =>
-    request<EvaluationRun[]>(`/projects/${projectId}/evaluation-runs`),
-  getEvaluationRun: (id: string) => request<EvaluationRun>(`/evaluation-runs/${id}`),
-  listEvaluationResults: (id: string) =>
-    request<EvaluationResult[]>(`/evaluation-runs/${id}/results`),
-  cancelEvaluationRun: (id: string) =>
-    request<EvaluationRun>(`/evaluation-runs/${id}/cancel`, { method: 'POST' })
+  commitImport: (dataId: string, importId: string, payload: unknown) =>
+    request<DataPayload>(
+      `/data/${dataId}/imports/${importId}/commit`,
+      { ...json(payload), method: 'POST' },
+      60000
+    )
 };
