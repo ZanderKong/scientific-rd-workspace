@@ -54,7 +54,7 @@ assert_snapshot 01-samples 'Samples'
 assert_snapshot 01-samples '新建 Sample'
 
 run_code "await page.locator('[data-sidebar=trigger]').click(); await page.waitForTimeout(200)"
-run_code "await page.getByRole('combobox', {name: 'Project Scope'}).selectOption('${project_id}'); await page.waitForTimeout(500)"
+run_code "const scope = page.getByRole('combobox', {name: 'Project Scope'}); await scope.locator('option[value=${project_id}]').waitFor({state: 'attached'}); await scope.selectOption('${project_id}'); await page.waitForTimeout(500)"
 snapshot 02-scoped-samples
 assert_snapshot 02-scoped-samples '新建 Sample'
 pw screenshot --filename 02-scoped-samples-1440.png --full-page
