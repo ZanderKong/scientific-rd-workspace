@@ -178,7 +178,7 @@ def graph(db):
         db,
         RelationCreate(
             source_object_id=process_branch.id,
-            target_object_id=sample0.id,
+            target_object_id=sample1.id,
             relation_type="uses",
             role="precursor",
         ),

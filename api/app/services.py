@@ -347,9 +347,9 @@ def object_out(obj: ResearchObject) -> dict[str, Any]:
 
 def relation_out(relation: ObjectRelation) -> dict[str, Any]:
     return {
-        "id": relation.id,
-        "source_object_id": relation.source_object_id,
-        "target_object_id": relation.target_object_id,
+        "id": str(relation.id),
+        "source_object_id": str(relation.source_object_id),
+        "target_object_id": str(relation.target_object_id),
         "relation_type": relation.relation_type,
         "role": relation.role,
         "properties_jsonb": relation.properties_jsonb or {},
