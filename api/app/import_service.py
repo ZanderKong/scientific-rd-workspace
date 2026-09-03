@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import math
 import uuid
 import zipfile
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import Attachment, DataImport, DataPayload, DataPoint, ResearchObject
+from app.models import Attachment, DataImport, DataPayload, DataPoint, DataTableRow, ResearchObject
 from app.schemas import ImportCommitMapping, ImportPreviewRequest
 from app.storage import LocalStorageAdapter
 
@@ -315,71 +316,159 @@ def commit_import(
     if mapping.sheet_name and mapping.sheet_name != parsed.sheet_name:
         raise ValueError("selected worksheet changed since preview")
     columns = {header: index for index, header in enumerate(parsed.headers)}
-    if mapping.x.column not in columns or mapping.y.column not in columns:
-        raise ImportValidationError(
-            "invalid_mapping", "Mapped column does not exist.", [_error("Choose existing columns.")]
-        )
-    points: list[tuple[int, float, float]] = []
-    errors: list[dict[str, Any]] = []
-    for source_row, row in enumerate(parsed.rows, start=2):
-        try:
-            x = _finite_number(row[columns[mapping.x.column]])
-            y = _finite_number(row[columns[mapping.y.column]])
-            points.append((source_row, x, y))
-        except ValueError as exc:
-            errors.append(_error(str(exc), row=source_row))
-    if errors:
-        raise ImportValidationError(
-            "non_numeric_value", "Mapped cells are invalid.", errors[:50], parsed.warnings
-        )
-    if not points:
-        raise ImportValidationError(
-            "empty_payload",
-            "No numeric points were imported.",
-            [_error("At least one point is required.")],
-        )
     warnings = list(parsed.warnings)
-    if any(points[index][1] >= points[index + 1][1] for index in range(len(points) - 1)):
-        warnings.append(_error("X values are not strictly increasing; source order was preserved."))
-    canonical = "\n".join(
-        f"{ordinal},{row},{x:.17g},{y:.17g}" for ordinal, (row, x, y) in enumerate(points)
-    )
-    digest = hashlib.sha256(canonical.encode()).hexdigest()
-    xs = [point[1] for point in points]
-    ys = [point[2] for point in points]
-    summary = {
-        "x_min": min(xs),
-        "x_max": max(xs),
-        "y_min": min(ys),
-        "y_max": max(ys),
-        "y_mean": sum(ys) / len(ys),
-    }
-    payload = DataPayload(
-        data_object_id=data_object.id,
-        payload_kind="xy_series",
-        name=mapping.payload_name.strip(),
-        schema_key="xy-series",
-        schema_version=1,
-        metadata_jsonb={
-            "x_label": mapping.x.label.strip(),
-            "x_unit": mapping.x.unit.strip(),
-            "y_label": mapping.y.label.strip(),
-            "y_unit": mapping.y.unit.strip(),
-        },
-        summary_jsonb=summary,
-        source_attachment_id=attachment.id,
-        payload_sha256=digest,
-    )
-    db.add(payload)
-    db.flush()
-    db.add_all(
-        [
-            DataPoint(
-                payload_id=payload.id, ordinal=ordinal, source_row_number=row, x_value=x, y_value=y
+    if mapping.payload_kind == "table":
+        requested = {column.key: column for column in mapping.columns}
+        missing = [column.key for column in mapping.columns if column.key not in columns]
+        if missing:
+            raise ImportValidationError(
+                "invalid_mapping",
+                "Mapped column does not exist.",
+                [_error(f"Missing: {', '.join(missing)}")],
             )
-            for ordinal, (row, x, y) in enumerate(points)
-        ]
-    )
+        table_rows: list[tuple[int, dict[str, Any]]] = []
+        errors: list[dict[str, Any]] = []
+        for source_row, row in enumerate(parsed.rows, start=2):
+            values: dict[str, Any] = {}
+            for key, column in requested.items():
+                raw = row[columns[key]]
+                try:
+                    if raw in (None, ""):
+                        value = None
+                    elif column.value_type == "number":
+                        value = _finite_number(raw)
+                    elif column.value_type == "boolean":
+                        if isinstance(raw, bool):
+                            value = raw
+                        elif str(raw).strip().casefold() in {"true", "yes", "1"}:
+                            value = True
+                        elif str(raw).strip().casefold() in {"false", "no", "0"}:
+                            value = False
+                        else:
+                            raise ValueError("Expected a boolean.")
+                    else:
+                        value = str(raw)
+                    values[key] = value
+                except ValueError as exc:
+                    errors.append(_error(str(exc), row=source_row, column=key))
+            table_rows.append((source_row, values))
+        if errors:
+            raise ImportValidationError(
+                "invalid_table_value", "Table cells are invalid.", errors[:50], warnings
+            )
+        if not table_rows:
+            raise ImportValidationError(
+                "empty_payload",
+                "No table rows were imported.",
+                [_error("At least one row is required.")],
+            )
+        canonical = "\n".join(
+            f"{ordinal},{source_row},"
+            f"{json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(',', ':'))}"
+            for ordinal, (source_row, values) in enumerate(table_rows)
+        )
+        payload = DataPayload(
+            data_object_id=data_object.id,
+            payload_kind="table",
+            name=mapping.payload_name.strip(),
+            schema_key="table",
+            schema_version=1,
+            metadata_jsonb={
+                "columns": [column.model_dump(exclude_none=True) for column in mapping.columns]
+            },
+            summary_jsonb={"rows_count": len(table_rows), "columns_count": len(mapping.columns)},
+            source_attachment_id=attachment.id,
+            payload_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
+        )
+        db.add(payload)
+        db.flush()
+        db.add_all(
+            [
+                DataTableRow(
+                    payload_id=payload.id,
+                    ordinal=ordinal,
+                    source_row_number=source_row,
+                    values_jsonb=values,
+                )
+                for ordinal, (source_row, values) in enumerate(table_rows)
+            ]
+        )
+    else:
+        if (
+            mapping.x is None
+            or mapping.y is None
+            or mapping.x.column not in columns
+            or mapping.y.column not in columns
+        ):
+            raise ImportValidationError(
+                "invalid_mapping",
+                "Mapped column does not exist.",
+                [_error("Choose existing columns.")],
+            )
+        points: list[tuple[int, float, float]] = []
+        errors = []
+        for source_row, row in enumerate(parsed.rows, start=2):
+            try:
+                x = _finite_number(row[columns[mapping.x.column]])
+                y = _finite_number(row[columns[mapping.y.column]])
+                points.append((source_row, x, y))
+            except ValueError as exc:
+                errors.append(_error(str(exc), row=source_row))
+        if errors:
+            raise ImportValidationError(
+                "non_numeric_value", "Mapped cells are invalid.", errors[:50], warnings
+            )
+        if not points:
+            raise ImportValidationError(
+                "empty_payload",
+                "No numeric points were imported.",
+                [_error("At least one point is required.")],
+            )
+        if any(points[index][1] >= points[index + 1][1] for index in range(len(points) - 1)):
+            warnings.append(
+                _error("X values are not strictly increasing; source order was preserved.")
+            )
+        canonical = "\n".join(
+            f"{ordinal},{row},{x:.17g},{y:.17g}" for ordinal, (row, x, y) in enumerate(points)
+        )
+        xs = [point[1] for point in points]
+        ys = [point[2] for point in points]
+        payload = DataPayload(
+            data_object_id=data_object.id,
+            payload_kind="xy_series",
+            name=mapping.payload_name.strip(),
+            schema_key="xy-series",
+            schema_version=1,
+            metadata_jsonb={
+                "x_label": mapping.x.label.strip(),
+                "x_unit": mapping.x.unit.strip(),
+                "y_label": mapping.y.label.strip(),
+                "y_unit": mapping.y.unit.strip(),
+            },
+            summary_jsonb={
+                "x_min": min(xs),
+                "x_max": max(xs),
+                "y_min": min(ys),
+                "y_max": max(ys),
+                "y_mean": sum(ys) / len(ys),
+            },
+            source_attachment_id=attachment.id,
+            payload_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
+        )
+        db.add(payload)
+        db.flush()
+        db.add_all(
+            [
+                DataPoint(
+                    payload_id=payload.id,
+                    ordinal=ordinal,
+                    source_row_number=row,
+                    x_value=x,
+                    y_value=y,
+                )
+                for ordinal, (row, x, y) in enumerate(points)
+            ]
+        )
     record.status = "completed"
     record.payload_id = payload.id
     record.mapping_json = mapping.model_dump(mode="json")

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ObjectKind = Literal["material", "sample", "equipment", "process", "data", "experiment", "project"]
-RelationType = Literal["contains", "uses", "produces", "precedes", "related_to"]
+RelationType = Literal["contains", "includes", "uses", "produces", "precedes", "related_to"]
 UsageValueType = Literal["number", "text", "boolean", "select"]
 
 
@@ -411,11 +411,348 @@ class SampleRecordStepOut(BaseModel):
 
 
 class SampleRecordOut(BaseModel):
+    record_sha256: str
     sample: ResearchObjectOut
     steps: list[SampleRecordStepOut]
     data: list[ResearchObjectOut]
     editable: bool
     edit_blockers: list[str]
+
+
+class ExperimentRecordObjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=240)
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    status: str = Field(default="draft", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    content_document: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("title", "status")
+    @classmethod
+    def strip_experiment_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class ExperimentMemberDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sample_id: uuid.UUID
+    ordinal: int | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ExperimentRecordCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_scope_id: uuid.UUID
+    experiment: ExperimentRecordObjectCreate
+    members: list[ExperimentMemberDraft] = Field(default_factory=list)
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class ExperimentRecordObjectUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    status: str | None = Field(default=None, min_length=1, max_length=32)
+    properties_jsonb: dict[str, Any] | None = None
+    content_document: list[dict[str, Any]] | None = None
+
+
+class ExperimentRecordPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    experiment: ExperimentRecordObjectUpdate = Field(default_factory=ExperimentRecordObjectUpdate)
+    members: list[ExperimentMemberDraft] = Field(default_factory=list)
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class ExperimentMemberOut(BaseModel):
+    membership_id: uuid.UUID
+    ordinal: int
+    note: str | None
+    sample: ResearchObjectOut
+
+
+class LegacyOwnershipContextOut(BaseModel):
+    process_count: int
+    sample_count: int
+    data_count: int
+
+
+class ExperimentRecordOut(BaseModel):
+    record_sha256: str
+    experiment: ResearchObjectOut
+    members: list[ExperimentMemberOut]
+    member_count: int
+    legacy_ownership_context: LegacyOwnershipContextOut
+
+
+class ComparisonValue(BaseModel):
+    value: Any = None
+    unit: str | None = None
+    available: bool = True
+
+
+class ComparisonDimension(BaseModel):
+    key: str
+    label: str
+    group: str
+    values: dict[str, ComparisonValue]
+    state: Literal["same", "different", "missing", "unit_conflict"]
+    unit_conflict: bool = False
+
+
+class XYComparisonSeries(BaseModel):
+    sample_id: uuid.UUID
+    sample_code: str
+    data_id: uuid.UUID
+    data_code: str
+    payload_id: uuid.UUID
+    name: str
+    x_unit: str | None = None
+    y_unit: str | None = None
+    points: list[DataPointOut]
+
+
+class ExperimentComparisonOut(BaseModel):
+    experiment: ResearchObjectOut
+    members: list[ResearchObjectOut]
+    dimensions: list[ComparisonDimension]
+    xy_series: list[XYComparisonSeries]
+    differences_only: bool = False
+
+
+class ProjectRecordObjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=240)
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    status: str = Field(default="active", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    content_document: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProjectRecordCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project: ProjectRecordObjectCreate
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class ProjectRecordPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    status: str | None = Field(default=None, min_length=1, max_length=32)
+    properties_jsonb: dict[str, Any] | None = None
+    content_document: list[dict[str, Any]] | None = None
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class ResourceSummaryOut(BaseModel):
+    count: int
+
+
+class ProjectContextOut(BaseModel):
+    record_sha256: str
+    project: ResearchObjectOut
+    counts: dict[str, int]
+    recent_samples: list[ResearchObjectOut]
+    recent_experiments: list[ResearchObjectOut]
+    recent_data: list[ResearchObjectOut]
+    resource_summary: dict[str, ResourceSummaryOut]
+    capabilities: dict[str, Any]
+
+
+class ProjectRecordOut(BaseModel):
+    record_sha256: str
+    project: ResearchObjectOut
+    context: ProjectContextOut
+
+
+class ProjectSearchOut(BaseModel):
+    items: list[ResearchObjectOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class DataRecordObjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=240)
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    status: str = Field(default="active", min_length=1, max_length=32)
+    type_version_id: uuid.UUID | None = None
+    properties_jsonb: dict[str, Any] = Field(default_factory=dict)
+    content_document: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DataRecordCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_scope_id: uuid.UUID
+    data: DataRecordObjectCreate
+    change_note: str | None = Field(default=None, max_length=500)
+
+
+class DataScalarCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=240)
+    value: float
+    unit: str | None = Field(default=None, max_length=64)
+    schema_key: str = Field(default="scalar", min_length=1, max_length=120)
+    metadata_jsonb: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("value")
+    @classmethod
+    def finite_value(cls, value: float) -> float:
+        import math
+
+        if not math.isfinite(value):
+            raise ValueError("scalar value must be finite")
+        return value
+
+
+class DataTableColumn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=240)
+    value_type: Literal["number", "text", "boolean"]
+    unit: str | None = Field(default=None, max_length=64)
+
+
+class DataTableRowCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    values: dict[str, Any]
+
+
+class DataTableCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=240)
+    schema_key: str = Field(default="table", min_length=1, max_length=120)
+    columns: list[DataTableColumn] = Field(min_length=1)
+    rows: list[DataTableRowCreate] = Field(default_factory=list)
+    metadata_jsonb: dict[str, Any] = Field(default_factory=dict)
+
+
+class DataFileCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=240)
+    source_attachment_id: uuid.UUID
+    schema_key: str = Field(default="file", min_length=1, max_length=120)
+    metadata_jsonb: dict[str, Any] = Field(default_factory=dict)
+
+
+class DataScalarOut(BaseModel):
+    payload_id: uuid.UUID
+    value: float
+    unit: str | None
+
+
+class DataTableRowOut(BaseModel):
+    payload_id: uuid.UUID
+    ordinal: int
+    source_row_number: int | None
+    values: dict[str, Any]
+
+
+class DataRecordOut(BaseModel):
+    record_sha256: str
+    data: ResearchObjectOut
+    payloads: list[DataPayloadOut]
+    imports: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SampleExecutionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    observations: list[dict[str, Any]] | None = None
+    deviation_notes: list[dict[str, Any]] | None = None
+
+
+class SampleExecutionOut(BaseModel):
+    id: uuid.UUID
+    sample_id: uuid.UUID
+    status: Literal["planned", "running", "completed", "cancelled"]
+    plan_snapshot_jsonb: dict[str, Any]
+    plan_snapshot_sha256: str
+    observations: list[dict[str, Any]]
+    deviation_notes: list[dict[str, Any]]
+    started_at: datetime
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExecutionReadOut(BaseModel):
+    record_sha256: str
+    execution: SampleExecutionOut
+    planned: dict[str, Any]
+    as_run: SampleRecordOut
+    diff: list[ComparisonDimension]
+    observations: list[dict[str, Any]]
+    deviation_notes: list[dict[str, Any]]
+
+
+class ChangeSetOut(BaseModel):
+    id: uuid.UUID
+    project_scope_id: uuid.UUID
+    status: Literal["proposed", "approved", "rejected", "applied", "stale", "failed"]
+    operation_kind: str
+    target_kind: ObjectKind
+    target_id: uuid.UUID | None
+    base_record_sha256: str | None
+    request_payload_jsonb: dict[str, Any]
+    preview_jsonb: dict[str, Any]
+    diff_jsonb: list[dict[str, Any]]
+    source_client_name: str
+    source_client_version: str | None
+    source_transport: str
+    idempotency_key: str | None
+    created_at: datetime
+    reviewed_at: datetime | None
+    applied_at: datetime | None
+    failure_jsonb: dict[str, Any] | None
+
+
+class ChangeSetProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_kind: Literal[
+        "create_sample_record",
+        "update_sample_record",
+        "create_experiment_record",
+        "update_experiment_record",
+        "create_data_record",
+        "update_execution",
+    ]
+    project_scope_id: uuid.UUID
+    target_id: uuid.UUID | None = None
+    base_record_sha256: str | None = None
+    request_payload_jsonb: dict[str, Any]
+    source_client_name: str = "external-agent"
+    source_client_version: str | None = None
+    source_transport: str = "mcp"
+
+
+class ChangeSetReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["approve", "reject"]
+    edited_payload_jsonb: dict[str, Any] | None = None
 
 
 class RevisionCreate(BaseModel):
@@ -431,6 +768,10 @@ class ObjectRevisionOut(BaseModel):
     snapshot_jsonb: dict[str, Any]
     snapshot_sha256: str
     change_note: str | None
+    change_set_id: uuid.UUID | None = None
+    source_client_name: str | None = None
+    source_client_version: str | None = None
+    source_transport: str | None = None
     created_at: datetime
 
 
@@ -463,9 +804,19 @@ class ImportCommitMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     payload_name: str = Field(min_length=1, max_length=240)
-    x: AxisMapping
-    y: AxisMapping
+    payload_kind: Literal["xy_series", "table"] = "xy_series"
+    x: AxisMapping | None = None
+    y: AxisMapping | None = None
+    columns: list[DataTableColumn] = Field(default_factory=list)
     sheet_name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_import_mode(self) -> ImportCommitMapping:
+        if self.payload_kind == "xy_series" and (self.x is None or self.y is None):
+            raise ValueError("xy_series imports require x and y mappings")
+        if self.payload_kind == "table" and not self.columns:
+            raise ValueError("table imports require explicit columns")
+        return self
 
 
 class Diagnostic(BaseModel):
@@ -503,7 +854,7 @@ class ImportPreviewOut(DataImportOut):
 class DataPayloadOut(BaseModel):
     id: uuid.UUID
     data_object_id: uuid.UUID
-    payload_kind: str
+    payload_kind: Literal["scalar", "xy_series", "table", "file"]
     name: str
     schema_key: str
     schema_version: int
@@ -512,6 +863,10 @@ class DataPayloadOut(BaseModel):
     source_attachment_id: uuid.UUID | None
     payload_sha256: str
     points_count: int
+    table_rows_count: int = 0
+    table_columns: list[DataTableColumn] = Field(default_factory=list)
+    table_rows: list[DataTableRowOut] = Field(default_factory=list)
+    scalar: DataScalarOut | None = None
     created_at: datetime
 
 
@@ -587,3 +942,8 @@ class WorkspaceSummaryOut(BaseModel):
 
 SampleDirectContext.model_rebuild()
 ProcessCompositionOut.model_rebuild()
+XYComparisonSeries.model_rebuild()
+DataPayloadOut.model_rebuild()
+ExperimentComparisonOut.model_rebuild()
+DataRecordOut.model_rebuild()
+ExecutionReadOut.model_rebuild()

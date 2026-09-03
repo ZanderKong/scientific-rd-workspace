@@ -60,7 +60,10 @@ jobs:
           with SessionLocal() as db:
               assert db.scalar(select(func.count()).select_from(ObjectType)) == 7
               assert db.scalar(select(func.count()).select_from(ResearchObject).where(ResearchObject.code == "PRJ-001")) == 1
-              assert db.scalar(select(func.count()).select_from(DataPayload)) == 4
+              assert db.scalar(select(func.count()).select_from(DataPayload)) == 6
+              assert db.scalar(select(func.count()).select_from(DataPayload).where(DataPayload.payload_kind == "scalar")) == 1
+              assert db.scalar(select(func.count()).select_from(DataPayload).where(DataPayload.payload_kind == "table")) == 1
+              assert db.scalar(select(func.count()).select_from(ObjectRelation).where(ObjectRelation.relation_type == "includes")) == 3
               assert db.scalar(select(func.count()).select_from(ObjectRelation).where(ObjectRelation.relation_type == "related_to")) == 0
               codes = [
                   "SMP-001", "SMP-002", "SMP-003", "SMP-004",
@@ -198,6 +201,10 @@ jobs:
         run: npx --yes --package @playwright/cli playwright-cli install-browser chromium
       - name: Run real browser Sample Record acceptance
         run: bash .github/scripts/plan08-browser-smoke.sh
+      - name: Run real browser Plan 09 domain acceptance
+        env:
+          ARTIFACT_DIR: output/playwright/plan09
+        run: bash .github/scripts/plan09-browser-smoke.sh
       - name: Upload browser acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -205,6 +212,7 @@ jobs:
           name: plan08-browser-acceptance
           path: |
             output/playwright/plan08
+            output/playwright/plan09
             api-browser.log
             web-browser.log
           if-no-files-found: warn

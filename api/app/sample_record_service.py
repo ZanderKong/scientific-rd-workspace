@@ -33,6 +33,7 @@ from app.services import (
     get_object,
     list_relations,
     object_out,
+    sha256_json,
 )
 
 RESOURCE_KINDS = frozenset({"material", "equipment"})
@@ -358,13 +359,14 @@ def get_sample_record(db: Session, sample_id: uuid.UUID) -> dict[str, Any]:
     if chain and any(process.id not in chain_ids for process in chain):
         blockers.append("Sample Record chain could not be represented without loss")
     blockers = _unique_messages(blockers)
-    return {
+    projection = {
         "sample": object_out(sample),
         "steps": steps,
         "data": [object_out(item) for item in data],
         "editable": bool(chain) and not blockers,
         "edit_blockers": blockers,
     }
+    return {"record_sha256": sha256_json(projection), **projection}
 
 
 def _step_object_create(

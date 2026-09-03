@@ -1,6 +1,6 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { DataWorkspace } from '@/features/workspace/domain-workspaces';
 
 export default async function DataDetailPage({ params }: { params: Promise<{ dataId: string }> }) {
   const { dataId } = await params;
-  return <WorkspaceApp view='detail' objectId={dataId} />;
+  return <DataWorkspace dataId={dataId} />;
 }

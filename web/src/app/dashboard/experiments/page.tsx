@@ -1,5 +1,5 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { ExperimentWorkspace } from '@/features/workspace/domain-workspaces';
 
 export default function ExperimentsPage() {
-  return <WorkspaceApp view='list' kind='experiment' />;
+  return <ExperimentWorkspace />;
 }

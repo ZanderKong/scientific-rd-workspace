@@ -1,4 +1,4 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { ProjectWorkspace } from '@/features/workspace/domain-workspaces';
 
 export default async function ProjectDetailPage({
   params
@@ -6,5 +6,5 @@ export default async function ProjectDetailPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  return <WorkspaceApp view='project' projectId={projectId} />;
+  return <ProjectWorkspace projectId={projectId} />;
 }

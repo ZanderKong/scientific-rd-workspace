@@ -7,7 +7,13 @@ export type ResearchObjectKind =
   | 'experiment'
   | 'project';
 
-export type RelationType = 'contains' | 'uses' | 'produces' | 'precedes' | 'related_to';
+export type RelationType =
+  | 'contains'
+  | 'includes'
+  | 'uses'
+  | 'produces'
+  | 'precedes'
+  | 'related_to';
 export type JsonObject = Record<string, unknown>;
 export type UsageValueType = 'number' | 'text' | 'boolean' | 'select';
 
@@ -182,11 +188,86 @@ export interface SampleRecordStep {
 }
 
 export interface SampleRecord {
+  record_sha256: string;
   sample: ResearchObject;
   steps: SampleRecordStep[];
   data: ResearchObject[];
   editable: boolean;
   edit_blockers: string[];
+}
+
+export interface ExperimentMember {
+  membership_id: string;
+  ordinal: number;
+  note: string | null;
+  sample: ResearchObject;
+}
+
+export interface ExperimentRecord {
+  record_sha256: string;
+  experiment: ResearchObject;
+  members: ExperimentMember[];
+  member_count: number;
+  legacy_ownership_context: { process_count: number; sample_count: number; data_count: number };
+}
+
+export interface ComparisonValue {
+  value: unknown;
+  unit: string | null;
+  available: boolean;
+}
+
+export interface ComparisonDimension {
+  key: string;
+  label: string;
+  group: string;
+  values: Record<string, ComparisonValue>;
+  state: 'same' | 'different' | 'missing' | 'unit_conflict';
+  unit_conflict: boolean;
+}
+
+export interface XYComparisonSeries {
+  sample_id: string;
+  sample_code: string;
+  data_id: string;
+  data_code: string;
+  payload_id: string;
+  name: string;
+  x_unit: string | null;
+  y_unit: string | null;
+  points: DataPoint[];
+}
+
+export interface ExperimentComparison {
+  experiment: ResearchObject;
+  members: ResearchObject[];
+  dimensions: ComparisonDimension[];
+  xy_series: XYComparisonSeries[];
+  differences_only: boolean;
+}
+
+export interface ProjectContext {
+  record_sha256: string;
+  project: ResearchObject;
+  counts: Record<string, number>;
+  recent_samples: ResearchObject[];
+  recent_experiments: ResearchObject[];
+  recent_data: ResearchObject[];
+  resource_summary: Record<string, { count: number }>;
+  capabilities: Record<string, unknown>;
+}
+
+export interface ProjectRecord {
+  record_sha256: string;
+  project: ResearchObject;
+  context: ProjectContext;
+}
+
+export interface ProjectSearch {
+  items: ResearchObject[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export type ObjectSummary = Pick<
@@ -225,7 +306,7 @@ export interface Attachment {
 export interface DataPayload {
   id: string;
   data_object_id: string;
-  payload_kind: 'xy_series';
+  payload_kind: 'scalar' | 'xy_series' | 'table' | 'file';
   name: string;
   schema_key: string;
   schema_version: number;
@@ -234,7 +315,28 @@ export interface DataPayload {
   source_attachment_id: string | null;
   payload_sha256: string;
   points_count: number;
+  table_rows_count: number;
+  table_columns: Array<{
+    key: string;
+    label: string;
+    value_type: 'number' | 'text' | 'boolean';
+    unit?: string | null;
+  }>;
+  table_rows: Array<{
+    payload_id: string;
+    ordinal: number;
+    source_row_number: number | null;
+    values: Record<string, unknown>;
+  }>;
+  scalar: { payload_id: string; value: number; unit: string | null } | null;
   created_at: string;
+}
+
+export interface DataRecord {
+  record_sha256: string;
+  data: ResearchObject;
+  payloads: DataPayload[];
+  imports: DataImport[];
 }
 
 export interface DataPoint {
@@ -325,4 +427,47 @@ export interface WorkspaceSummary {
   counts: Record<ResearchObjectKind, number>;
   recent: ResearchObject[];
   projects: ResearchObject[];
+}
+
+export interface ExecutionRead {
+  record_sha256: string;
+  execution: {
+    id: string;
+    sample_id: string;
+    status: 'planned' | 'running' | 'completed' | 'cancelled';
+    plan_snapshot_jsonb: Record<string, unknown>;
+    plan_snapshot_sha256: string;
+    observations: Array<Record<string, unknown>>;
+    deviation_notes: Array<Record<string, unknown>>;
+    started_at: string;
+    completed_at: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+  planned: Record<string, unknown>;
+  as_run: SampleRecord;
+  diff: ComparisonDimension[];
+  observations: Array<Record<string, unknown>>;
+  deviation_notes: Array<Record<string, unknown>>;
+}
+
+export interface ChangeSet {
+  id: string;
+  project_scope_id: string;
+  status: 'proposed' | 'approved' | 'rejected' | 'applied' | 'stale' | 'failed';
+  operation_kind: string;
+  target_kind: ResearchObjectKind;
+  target_id: string | null;
+  base_record_sha256: string | null;
+  request_payload_jsonb: JsonObject;
+  preview_jsonb: JsonObject;
+  diff_jsonb: Array<Record<string, unknown>>;
+  source_client_name: string;
+  source_client_version: string | null;
+  source_transport: string;
+  idempotency_key: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  applied_at: string | null;
+  failure_jsonb: JsonObject | null;
 }

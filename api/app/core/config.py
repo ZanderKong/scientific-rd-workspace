@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     import_preview_rows: int = 20
     max_xlsx_expanded_bytes: int = 50 * 1024 * 1024
     max_xlsx_archive_entries: int = 200
+    mcp_bearer_token: str | None = None
 
 
 @lru_cache(maxsize=1)

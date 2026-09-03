@@ -114,6 +114,7 @@ function record(editable = true): SampleRecord {
   const process = object('process', 'process-1', 'Mixing');
   const material = object('material', 'material-1', 'Potassium iodide');
   return {
+    record_sha256: 'test-record-sha256',
     sample,
     steps: [
       {
