@@ -45,7 +45,6 @@ def upgrade() -> None:
         sa.Column("source_row_number", sa.Integer(), nullable=True),
         sa.Column("values_jsonb", json_type, nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.ForeignKeyConstraint(["payload_id"], ["data_payloads.id"], ondelete="CASCADE"),
-        sa.UniqueConstraint("payload_id", "ordinal", name="uq_data_table_rows_ordinal"),
         sa.CheckConstraint("ordinal >= 0", name="ck_data_table_rows_ordinal"),
     )
     op.create_index("ix_data_table_rows_payload_id", "data_table_rows", ["payload_id"])

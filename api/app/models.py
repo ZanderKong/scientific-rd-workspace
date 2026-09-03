@@ -388,7 +388,6 @@ class DataTableRow(Base):
     __tablename__ = "data_table_rows"
     __table_args__ = (
         CheckConstraint("ordinal >= 0", name="ck_data_table_rows_ordinal"),
-        UniqueConstraint("payload_id", "ordinal", name="uq_data_table_rows_ordinal"),
         Index("ix_data_table_rows_payload_id", "payload_id"),
     )
 
