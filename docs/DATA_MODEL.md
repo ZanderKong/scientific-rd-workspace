@@ -69,4 +69,4 @@ Material and Equipment usage definitions are stored on the concrete resource obj
 
 `api/alembic/versions/0001_v0_2_research_object_graph.py` is a fresh baseline. `0002_v0_2_semantic_stabilization` adds semantic ownership/producer indexes. `0003_sample_recording_workflow` adds `research_objects.usage_schema_jsonb`; 0001 and 0002 are immutable. No previous SQLite or phase-specific migration is part of the active history.
 
-Plan 09 adds `0004_experiment_membership`, `0005_scientific_data_and_execution`, and `0006_api_idempotency_and_change_sets`. PostgreSQL remains the only supported database.
+Plan 09 adds the `0004_experiment_membership`, `0005_data_execution`, and `0006_agent_changes` revisions (with descriptive migration filenames). PostgreSQL remains the only supported database.

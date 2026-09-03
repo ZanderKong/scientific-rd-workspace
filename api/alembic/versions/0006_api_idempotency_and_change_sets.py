@@ -1,7 +1,7 @@
 """Add persistent idempotency and reviewed ChangeSets.
 
-Revision ID: 0006_api_idempotency_and_change_sets
-Revises: 0005_scientific_data_and_execution
+Revision ID: 0006_agent_changes
+Revises: 0005_data_execution
 """
 
 from collections.abc import Sequence
@@ -11,8 +11,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0006_api_idempotency_and_change_sets"
-down_revision: str | Sequence[str] | None = "0005_scientific_data_and_execution"
+revision: str = "0006_agent_changes"
+down_revision: str | Sequence[str] | None = "0005_data_execution"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

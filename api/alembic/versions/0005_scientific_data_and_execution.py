@@ -1,6 +1,6 @@
 """Add scientific payload variants and SampleExecution.
 
-Revision ID: 0005_scientific_data_and_execution
+Revision ID: 0005_data_execution
 Revises: 0004_experiment_membership
 """
 
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0005_scientific_data_and_execution"
+revision: str = "0005_data_execution"
 down_revision: str | Sequence[str] | None = "0004_experiment_membership"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

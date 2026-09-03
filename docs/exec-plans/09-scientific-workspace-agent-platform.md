@@ -15,7 +15,7 @@ This repository execution record follows the attached Plan 09 specification. The
 
 ## Contracts
 
-New migrations are `0004_experiment_membership`, `0005_scientific_data_and_execution`, and `0006_api_idempotency_and_change_sets`. Migrations `0001`–`0003` are unchanged. PostgreSQL remains the only supported database.
+New revisions are `0004_experiment_membership`, `0005_data_execution`, and `0006_agent_changes` (the latter two live in descriptive migration filenames). Migrations `0001`–`0003` are unchanged. PostgreSQL remains the only supported database.
 
 Canonical REST endpoints are documented in `docs/api/DOMAIN_API.md`. The MCP server is started with `uv run python -m app.agent.mcp_server --transport stdio` or `--transport streamable-http`.
 
