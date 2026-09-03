@@ -17,6 +17,7 @@ import type { ResearchObject, SampleRecordResource } from '@/lib/domain';
 import { Button } from '@/components/ui/button';
 import { SampleComposer } from './sample-composer';
 import { objectKindLabel, usageSchema, usageValueText } from './model';
+import { ExecutionPanel } from '../domain-workspaces';
 
 type SampleDetailProps = { sampleId: string; zh: boolean };
 
@@ -255,6 +256,7 @@ export function RecordView({
             </p>
           )}
         </section>
+        <ExecutionPanel sampleId={record.sample.id} zh={zh} />
         <div className='mt-6 flex justify-end'>
           <Link
             href={`/dashboard/samples/new?project=${record.sample.project_scope_id}&from=${record.sample.id}`}

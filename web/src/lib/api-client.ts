@@ -11,6 +11,14 @@ import type {
   ObjectType,
   ProcessComposition,
   ProcessCompositionItem,
+  ChangeSet,
+  DataRecord,
+  ExperimentComparison,
+  ExperimentRecord,
+  ExecutionRead,
+  ProjectContext,
+  ProjectRecord,
+  ProjectSearch,
   ProjectSummary,
   ResearchObject,
   ResearchObjectKind,
@@ -54,6 +62,10 @@ function errorMessage(detail: unknown, fallback: string): string {
     return detail;
   }
   if (detail && typeof detail === 'object' && 'message' in detail) return String(detail.message);
+  if (detail && typeof detail === 'object' && 'error' in detail) {
+    const error = detail.error;
+    if (error && typeof error === 'object' && 'message' in error) return String(error.message);
+  }
   return fallback;
 }
 
@@ -94,13 +106,14 @@ export async function request<T>(
   return data as T;
 }
 
-const json = (body: unknown): RequestInit => ({
+const json = (body: unknown, headers: Record<string, string> = {}): RequestInit => ({
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', ...headers },
   body: JSON.stringify(body)
 });
 
 export const api = {
+  getCapabilities: () => request<Record<string, unknown>>('/capabilities'),
   listTypes: () => request<ObjectType[]>('/object-types'),
   getType: (id: string) => request<ObjectType>(`/object-types/${id}`),
   listObjects: (
@@ -154,6 +167,30 @@ export const api = {
   ) => request<ResearchObject>(`/objects/${id}`, { ...json(payload), method: 'PATCH' }),
   listRelations: (id: string) => request<ObjectRelation[]>(`/objects/${id}/relations`),
   getProjectSummary: (id: string) => request<ProjectSummary>(`/projects/${id}/summary`),
+  createProjectRecord: (payload: unknown, idempotencyKey?: string) =>
+    request<ProjectRecord>(
+      '/project-records',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  getProjectRecord: (id: string) => request<ProjectRecord>(`/projects/${id}/record`),
+  updateProjectRecord: (id: string, payload: unknown, etag?: string) =>
+    request<ProjectRecord>(`/projects/${id}/record`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
+      method: 'PUT'
+    }),
+  getProjectContext: (id: string) => request<ProjectContext>(`/projects/${id}/context`),
+  searchProject: (
+    id: string,
+    params: { q?: string; kinds?: string[]; status?: string; limit?: number; offset?: number } = {}
+  ) => {
+    const query = new URLSearchParams();
+    if (params.q) query.set('q', params.q);
+    params.kinds?.forEach((kind) => query.append('kinds', kind));
+    if (params.status) query.set('status', params.status);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    return request<ProjectSearch>(`/projects/${id}/search${query.size ? `?${query}` : ''}`);
+  },
   getWorkspaceSummary: () => request<WorkspaceSummary>('/workspace/summary'),
   getComposition: (id: string) => request<ProcessComposition>(`/processes/${id}/composition`),
   putComposition: (id: string, items: ProcessCompositionItem[]) =>
@@ -162,10 +199,83 @@ export const api = {
       method: 'PUT'
     }),
   getSampleRecord: (id: string) => request<SampleRecord>(`/samples/${id}/record`),
-  createSampleRecord: (payload: SampleRecordCreatePayload) =>
-    request<SampleRecord>('/sample-records', json(payload)),
-  updateSampleRecord: (id: string, payload: SampleRecordPutPayload) =>
-    request<SampleRecord>(`/samples/${id}/record`, { ...json(payload), method: 'PUT' }),
+  createSampleRecord: (payload: SampleRecordCreatePayload, idempotencyKey?: string) =>
+    request<SampleRecord>(
+      '/sample-records',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  updateSampleRecord: (id: string, payload: SampleRecordPutPayload, etag?: string) =>
+    request<SampleRecord>(`/samples/${id}/record`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
+      method: 'PUT'
+    }),
+  createExperimentRecord: (payload: unknown, idempotencyKey?: string) =>
+    request<ExperimentRecord>(
+      '/experiment-records',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  getExperimentRecord: (id: string) => request<ExperimentRecord>(`/experiments/${id}/record`),
+  updateExperimentRecord: (id: string, payload: unknown, etag?: string) =>
+    request<ExperimentRecord>(`/experiments/${id}/record`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
+      method: 'PUT'
+    }),
+  getExperimentComparison: (id: string, differencesOnly = false) =>
+    request<ExperimentComparison>(
+      `/experiments/${id}/comparison?differences_only=${differencesOnly}`
+    ),
+  createDataRecord: (payload: unknown, idempotencyKey?: string) =>
+    request<DataRecord>(
+      '/data-records',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  getDataRecord: (id: string) => request<DataRecord>(`/data/${id}/record`),
+  createScalarPayload: (id: string, payload: unknown, idempotencyKey?: string) =>
+    request<DataPayload>(
+      `/data/${id}/payloads/scalar`,
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  createTablePayload: (id: string, payload: unknown, idempotencyKey?: string) =>
+    request<DataPayload>(
+      `/data/${id}/payloads/table`,
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  createFilePayload: (id: string, payload: unknown, idempotencyKey?: string) =>
+    request<DataPayload>(
+      `/data/${id}/payloads/file`,
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  startExecution: (id: string, idempotencyKey?: string) =>
+    request<ExecutionRead>(
+      `/samples/${id}/execution/start`,
+      json({}, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  getExecution: (id: string) => request<ExecutionRead>(`/samples/${id}/execution`),
+  updateExecution: (id: string, payload: unknown, etag?: string) =>
+    request<ExecutionRead>(`/samples/${id}/execution`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
+      method: 'PUT'
+    }),
+  completeExecution: (id: string, idempotencyKey?: string) =>
+    request<ExecutionRead>(
+      `/samples/${id}/execution/complete`,
+      json({}, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  cancelExecution: (id: string, idempotencyKey?: string) =>
+    request<ExecutionRead>(
+      `/samples/${id}/execution/cancel`,
+      json({}, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  listChangeSets: (projectId?: string) =>
+    request<ChangeSet[]>(`/change-sets${projectId ? `?project_scope_id=${projectId}` : ''}`),
+  getChangeSet: (id: string) => request<ChangeSet>(`/change-sets/${id}`),
+  proposeChangeSet: (payload: unknown, idempotencyKey?: string) =>
+    request<ChangeSet>(
+      '/change-sets/propose',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  reviewChangeSet: (id: string, payload: unknown) =>
+    request<ChangeSet>(`/change-sets/${id}/review`, json(payload)),
   createRelation: (payload: {
     source_object_id: string;
     target_object_id: string;
