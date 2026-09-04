@@ -1,6 +1,9 @@
 # GitHub 交接报告
 
-## 最新状态（2026-09-02）
+## 最新状态（2026-09-04）
+
+- 当前产品为 **Scientific R&D Workspace**，Plan 09 已完成并合入 `main`。
+- 当前 `main`：`5cf2fed4f8e38c897235990c00709fae4a37678a`；公共表面清理 CI run `33821879165` 已通过全部门禁。
 
 - Phase 1 remains frozen and passing from baseline `9bb494d`.
 - Phase 2 is formally closed as **PASS**; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
@@ -14,10 +17,10 @@
 
 ## 仓库
 
-- Repository: `scientific-rd-workspace-codex-pack-v0.1`
+- Repository: `scientific-rd-workspace`
 - Visibility: private（为避免在未确认前公开科研工作区）
 - Owner: `ZanderKong`
-- Remote URL: https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1
+- Remote URL: https://github.com/ZanderKong/scientific-rd-workspace
 - Initial commit: `80dbf63` (`Implement Phase 1 scientific R&D workspace`)
 
 ## 本次完成内容
