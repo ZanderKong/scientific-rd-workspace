@@ -1,12 +1,18 @@
 {
   "package": "scientific-rd-workspace",
-  "version": "0.1",
-  "active_phase": "scientific-workspace-agent-platform-complete",
-  "execution_plan": "docs/exec-plans/09-scientific-workspace-agent-platform.md",
-  "phase_2": "closed-pass",
-  "phase_3": "pass-v0.1-demo",
-  "ui_i18n_plan_1": "pass",
-  "ui_rebuild_plan_2": "pass",
-  "ui_rebuild_plan_2_handoff": "docs/handoff/UI_REBUILD_PLAN_2_HANDOFF.md",
-  "recommended_entrypoint": "AGENTS.md"
+  "version": "0.2",
+  "status": "canonical-workspace-active",
+  "active_architecture": "research-object-graph-postgresql",
+  "active_agent_surface": "rest-and-mcp-with-changesets",
+  "active_comparison": "experiment-comparison-service",
+  "recommended_entrypoint": "README.md",
+  "agent_entrypoint": "AGENTS.md",
+  "source_of_truth": [
+    "docs/PRODUCT_SPEC.md",
+    "ARCHITECTURE.md",
+    "docs/DATA_MODEL.md",
+    "docs/UI_SPEC.md"
+  ],
+  "historical_records": "docs/exec-plans/",
+  "legacy_runtime_status": "phase-specific AI Analysis, generic Compare, Evidence, Evaluation and Literature runtimes removed"
 }
