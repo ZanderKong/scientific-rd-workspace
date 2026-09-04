@@ -48,10 +48,12 @@ The server remains authoritative for semantic validation and duplicate detection
 
 Sample detail separates direct provenance, role-aware sample inputs, current data, upstream lineage and downstream lineage. Traversal depth is bounded by the API, and the lineage view renders backend edges as a tree rather than a fabricated linear chain. Experiment detail lists contained objects and input samples from other Experiment ownership contexts.
 
-Experiment comparison exposes same/different/missing/unit-conflict states, with an explicit differences-only toggle. Execution detail separates the frozen Planned hash from current As-run observations and changed dimensions. Data detail renders scalar, XY, table and file payload summaries while preserving source/import status.
+Experiment comparison is an active canonical surface. It exposes same/different/missing/unit-conflict states, with an explicit differences-only toggle, and derives its result from `ExperimentComparisonService` rather than the removed legacy generic Compare runtime.
+
+Execution detail separates the frozen Planned hash from current As-run observations and changed dimensions. Data detail renders scalar, XY, table and file payload summaries while preserving source/import status.
 
 Data detail separates immutable payload summary/plot from source provenance. CSV/XLSX upload shows a preview, requires explicit X/Y mapping, preserves source row order and exposes checksum/parser/import status. XY chart coordinates use the real X values with O(n) bounds calculation. BlockNote JSON is persisted as JSON and never flattened to plain text. No fake data is shown when the API is unavailable.
 
 ## Deferred surfaces
 
-Compare, Literature, AI Analysis, Evidence and Evaluation are intentionally absent from the active navigation and route tree until a separate Plan 2 reintroduces them with a compatible object-graph contract.
+Literature retrieval, embedded AI Analysis, Evidence workflows and Evaluation are outside the current active product boundary. The old phase-specific implementations are historical and must not be presented as current UI. Experiment Comparison is already active and is not deferred.
