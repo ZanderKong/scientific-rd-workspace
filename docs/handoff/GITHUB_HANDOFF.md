@@ -1,79 +1,69 @@
-# GitHub 交接报告
+# GitHub Handoff
 
-## 最新状态（2026-09-04）
+## Current status — 2026-09-04
 
-- 当前产品为 **Scientific R&D Workspace**，Plan 09 已完成并合入 `main`。
-- 当前 `main`：`5e42d29`；公共表面清理合并提交 `5cf2fed4f8e38c897235990c00709fae4a37678a` 对应 CI run `33821879165` 已通过全部门禁。
+Scientific R&D Workspace is on the v0.2 canonical Research Object Graph architecture.
 
-- Phase 1 remains frozen and passing from baseline `9bb494d`.
-- Phase 2 is formally closed as **PASS**; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
-- Accepted source commit: `939bf82`; implementation commit: `b916292`.
-- PostgreSQL 17 acceptance passed in GitHub Actions workflow run `33522448986`; Phase 1 regression workflow run `33522448939` also passed on the same source commit.
-- Phase 3 M1–M10 are implemented from the approved plan and the required external live LiteLLM
-  Workspace smoke passed. Current verdict: **PHASE 3 PASS**; release tag `v0.1-demo` is created
-  on the final closeout commit. PostgreSQL 17 evidence is GitHub Actions run `33600400812` on
-  `c863495`; Phase 1 regression is `33600400781`. See
-  [Phase 3 交接报告](PHASE_3_HANDOFF.md).
+Current runtime facts:
 
-## 仓库
+- PostgreSQL 17 is the only supported database.
+- `ResearchObject` and typed `ObjectRelation` are the canonical scientific domain model.
+- Sample Record, Experiment Record, Experiment Comparison, Scientific Data, Planned/As-run Execution and ChangeSet are active domain services.
+- REST API and MCP reuse the same backend domain services and semantic validation.
+- External agents do not embed a second scientific runtime; existing-record mutations default to proposal-first ChangeSets.
+- The active comparison implementation is `ExperimentComparisonService` with `/experiments/{id}/comparison`.
+- The old phase-specific AI Analysis, generic Compare, Literature, Evidence and Evaluation runtimes are removed from the active product.
 
-- Repository: `scientific-rd-workspace`
-- Visibility: private（为避免在未确认前公开科研工作区）
-- Owner: `ZanderKong`
-- Remote URL: https://github.com/ZanderKong/scientific-rd-workspace
-- Initial commit: `80dbf63` (`Implement Phase 1 scientific R&D workspace`)
+## Source of truth
 
-## 本次完成内容
+Read these files for current behaviour:
 
-- 建立 Next.js 16 / React 19 web 工作区，并清理 starter 的产品、用户和 mock API 路由。
-- 建立 FastAPI / SQLAlchemy / Alembic API，覆盖 projects、experiment templates、experiments、attachments、clones、immutable revisions。
-- 使用 JSON Forms 渲染 schema-driven structured properties；使用 BlockNote 保存独立的 rich note 文档。
-- 实现本地附件存储、路径安全、文件大小限制、SHA-256 元数据和下载接口。
-- 实现实验 clone lineage 和 revision snapshot 追溯。
-- 添加 PostgreSQL 17 Docker Compose、seed data、API tests、storage tests、frontend Vitest tests。
-- 添加 Docker-free 本地部署脚本 `scripts/start-local.sh`：使用同一套 Alembic schema 和 seed，在 `data/local/scientific_rd.db` 中运行 SQLite 开发环境，并同时启动 API/Web。
-- 保留第三方许可证和 attribution 文件。
+1. `README.md`
+2. `docs/PRODUCT_SPEC.md`
+3. `ARCHITECTURE.md`
+4. `docs/DATA_MODEL.md`
+5. `docs/UI_SPEC.md`
+6. `docs/api/DOMAIN_API.md`
+7. `docs/agent/AGENT_INTERFACE.md`
 
-## 验证结果
+`docs/exec-plans/` records how the repository evolved. It is historical engineering material and must not override the current source-of-truth documents.
 
-- `cd api && uv run pytest`：5 passed。
-- `cd api && uv run python -m compileall -q app`：通过。
-- `cd web && npm run test`：2 passed。
-- `cd web && npm run lint`：通过（仅 starter UI 遗留 warnings）。
-- `cd web && npm run typecheck`：通过。
-- `cd web && npm run build`：通过。
-- `cd web && npm run format:check`：通过。
-- 本地浏览器 smoke：overview、projects、experiments 路由加载，无 error overlay 或 console error。
-- Docker-free 本地部署：API `GET /api/v1/health` 返回 `{"status":"healthy"}`，`GET /api/v1/projects` 返回 PRJ-001 和 3 个演示实验；Web `/dashboard/overview` 返回 HTTP 200。
-
-## 运行方式
+## Current local setup
 
 ```bash
-cp api/.env.example api/.env
 docker compose up -d postgres
-cd api && uv sync && uv run alembic upgrade head && uv run python -m app.seed
-uv run fastapi dev app/main.py
-cd ../web && npm install && npm run dev
+
+cd api
+uv sync --frozen
+uv run alembic upgrade head
+uv run python -m app.seed
+uv run uvicorn app.main:app --reload --port 8000
+
+cd ../web
+npm ci
+npm run dev
 ```
 
-打开 `http://localhost:3000/dashboard/overview`。
+The workspace must fail explicitly when PostgreSQL is unavailable. There is no SQLite fallback.
 
-若本机没有 Docker/PostgreSQL：
+## Current verification surface
 
 ```bash
-./scripts/start-local.sh
+cd api
+uv run ruff check app tests alembic/versions
+uv run ruff format --check app tests alembic/versions
+uv run pytest -q
+
+cd ../web
+npm run lint
+npm run format:check
+npm run typecheck
+npm test -- --run
+npm run build
 ```
 
-该 SQLite 路径仅用于本地开发，生产默认配置仍为 PostgreSQL。
+CI also validates PostgreSQL migrations, migration/model parity, repeat-safe seed, browser workflows and MCP protocol behaviour.
 
-## 历史说明和非阻塞项
+## Historical boundary
 
-- 本机没有 Docker，因此早期只执行了 SQLite 本地验证；该限制已由 GitHub Actions 的 PostgreSQL 17 成功验收取代，不再是阶段阻塞项。
-- npm audit 报告 starter 依赖树中存在 3 条 advisory，未执行破坏性强制升级。
-- 本节是仓库级交接记录；Phase 2 的 Measurement、Compare、CSV/XLSX import、Literature 和 Evidence 当前实现状态见 `PHASE_2_HANDOFF.md`。Phase 3 M1–M9 的 AIProvider、冻结上下文、Finding、Evidence Gate、人工评审、Evaluation runner、gated draft Experiment provenance 和确定性 demo fixtures 见 `PHASE_3_HANDOFF.md`；RAG、LangGraph、MCP、pgvector 仍未引入。
-
-## 交接建议
-
-Phase 1 与 Phase 2 均已正式关闭并通过 PostgreSQL 17 CI。Phase 3 M8–M10 已完成 gated draft
-Experiment provenance、确定性六案例演示、PostgreSQL/前端门禁和外部 live LiteLLM smoke；发布
-标签为 `v0.1-demo`。单进程/单 worker、immutable template/revision/provenance 保证继续有效。
+Earlier Phase 1–3 handoffs, SQLite-era functional audits and screenshots of removed AI/Literature/Evidence/Evaluation/generic Compare surfaces are not current product documentation. Git history remains the source for those historical artefacts.
