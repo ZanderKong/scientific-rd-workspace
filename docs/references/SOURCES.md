@@ -2,15 +2,12 @@
 
 本文件记录规划时核对的主要外部来源。开发 Agent 应在真正集成时再次确认当前版本。
 
-## OpenAI / Codex
+## Agent-oriented engineering
 
 Harness engineering:
 https://openai.com/index/harness-engineering/
 
-How OpenAI uses Codex:
-https://openai.com/business/guides-and-resources/how-openai-uses-codex/
-
-Relevant planning takeaways:
+Relevant planning takeaways from the engineering reference:
 - Keep AGENTS.md as a map rather than a giant manual.
 - Put durable repository knowledge in structured docs.
 - Break large goals into smaller building blocks.

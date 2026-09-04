@@ -1,6 +1,6 @@
-# Product Spec — v0.2 Research Object Graph
+# Product Specification
 
-Scientific R&D Workspace is a project-scoped research workbench for recording experimental work as a traceable object graph. The product goal of this cutover is a small, reliable core: researchers can create objects, connect them with meaningful relations, inspect provenance, revise records, and attach/import scientific data.
+Scientific R&D Workspace 是一个 project-scoped 的实验研发工作台，围绕 Sample Record、Experiment Comparison、Scientific Data、Planned/As-run Execution 与可追溯 provenance 组织科研信息，并通过稳定的 domain services 向 Web UI、REST 和 MCP 提供一致能力。
 
 ## Canonical language
 
@@ -17,13 +17,14 @@ The backend is the semantic authority. A relation is rejected when its source/ta
 ## Primary journey
 
 ```text
-Project / Vault
-  → Sample Record
-  → Process Blocks
-  → Material + Equipment + Sample
-  → current Data
-  → direct provenance and bounded lineage
-  → revision snapshot
+Project
+→ Sample Record
+→ Process / Material / Equipment / precursor Sample
+→ Planned / As-run Execution
+→ Scientific Data
+→ Experiment Comparison
+→ Provenance / Revision
+→ External Agent ChangeSet Review
 ```
 
 The demo uses a synthetic/anonymised chlorine color-response material graph. It is illustrative only and must be labelled as synthetic in the UI and seed data.
@@ -46,7 +47,7 @@ The demo uses a synthetic/anonymised chlorine color-response material graph. It 
 
 ## Explicitly deferred
 
-AI generation, Evidence, Evaluation, Literature, free-form graphs and Equipment Type inheritance remain separate follow-up work. External agents are not embedded in the workspace; mutations are validated by the domain services and proposal-first ChangeSets must not be simulated with `related_to` or exclusive `contains` ownership.
+Embedded model runtimes, OCR/handwriting ingestion, literature retrieval, instrument control, inventory/ERP, automatic unit conversion, free-form graph editing and full multi-user RBAC remain outside the current product boundary.
 
 ## Quality bar
 

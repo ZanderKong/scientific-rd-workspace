@@ -1,4 +1,4 @@
-name: v0.2 Research Object Graph CI
+name: Scientific Workspace CI
 
 on:
   push:
@@ -146,7 +146,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
       API_URL: http://127.0.0.1:8000/api/v1
       WEB_URL: http://127.0.0.1:3000
-      ARTIFACT_DIR: output/playwright/plan08
+      ARTIFACT_DIR: output/playwright/sample-record
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -200,19 +200,19 @@ jobs:
         working-directory: web
         run: npx --yes --package @playwright/cli playwright-cli install-browser chromium
       - name: Run real browser Sample Record acceptance
-        run: bash .github/scripts/plan08-browser-smoke.sh
-      - name: Run real browser Plan 09 domain acceptance
+        run: bash .github/scripts/sample-record-browser-smoke.sh
+      - name: Run real browser workspace domain acceptance
         env:
-          ARTIFACT_DIR: output/playwright/plan09
-        run: bash .github/scripts/plan09-browser-smoke.sh
+          ARTIFACT_DIR: output/playwright/workspace
+        run: bash .github/scripts/workspace-browser-smoke.sh
       - name: Upload browser acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: plan08-browser-acceptance
+          name: scientific-workspace-browser-acceptance
           path: |
-            output/playwright/plan08
-            output/playwright/plan09
+            output/playwright/sample-record
+            output/playwright/workspace
             api-browser.log
             web-browser.log
           if-no-files-found: warn

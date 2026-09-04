@@ -1,23 +1,25 @@
-# Agent Guide — v0.2 Research Object Graph
+# Repository Guide for Agents
 
-这是 Scientific R&D Workspace 的当前仓库导航。当前 active product 是 v0.2 Research Object Graph；旧 v0.1 文档只作为历史记录，不代表运行时契约。
+This repository implements the canonical Scientific R&D Workspace domain. Web UI, REST and MCP must reuse the same domain services and semantic validation.
+
+External clients should prefer domain-level operations over low-level graph mutation. Changes to existing scientific records default to proposal-first ChangeSets with optimistic concurrency and human/trusted review.
 
 ## Source of truth
 
 按优先级阅读：
 
-1. `docs/exec-plans/09-scientific-workspace-agent-platform.md`
-2. `docs/exec-plans/08-sample-first-recording-editor.md`
-3. `docs/exec-plans/07.1-v0.2-core-semantic-stabilization.md`
-4. `docs/exec-plans/07-v0.2-research-object-graph-core-cutover.md`
-5. `docs/PRODUCT_SPEC.md`
-6. `ARCHITECTURE.md`
-7. `docs/DATA_MODEL.md`
-8. `docs/UI_SPEC.md`
-9. `docs/DEMO_SCENARIO.md`
-10. `docs/handoff/V0_2_CORE_SEMANTIC_STABILIZATION_HANDOFF.md`
+1. `docs/PRODUCT_SPEC.md`
+2. `ARCHITECTURE.md`
+3. `docs/DATA_MODEL.md`
+4. `docs/UI_SPEC.md`
+5. `docs/api/DOMAIN_API.md`
+6. `docs/api/ERRORS_AND_CONCURRENCY.md`
+7. `docs/agent/AGENT_INTERFACE.md`
+8. `docs/agent/MCP_TOOLS.md`
+9. `docs/agent/MCP_RESOURCES.md`
+10. `docs/agent/CHANGE_SET_WORKFLOW.md`
 
-如代码与计划冲突，先修正代码或更新 source-of-truth，并记录原因；不要恢复旧 Project/Experiment/Measurement 专用运行时。
+Execution plans and handoff files are historical engineering records. Current product behaviour is defined by the source-of-truth documents and validated implementation.
 
 ## 当前产品边界
 

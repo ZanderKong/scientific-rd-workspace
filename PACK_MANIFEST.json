@@ -1,8 +1,8 @@
 {
-  "package": "scientific-rd-workspace-codex-pack",
+  "package": "scientific-rd-workspace",
   "version": "0.1",
-  "active_phase": "03-scientific-ai-complete",
-  "execution_plan": "docs/exec-plans/03-scientific-ai.md",
+  "active_phase": "scientific-workspace-agent-platform-complete",
+  "execution_plan": "docs/exec-plans/09-scientific-workspace-agent-platform.md",
   "phase_2": "closed-pass",
   "phase_3": "pass-v0.1-demo",
   "ui_i18n_plan_1": "pass",

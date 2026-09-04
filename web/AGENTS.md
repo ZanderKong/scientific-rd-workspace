@@ -1,13 +1,13 @@
 # Web Agent Guide
 
-这是 v0.2 Research Object Graph 的 Next.js App Router 前端。当前页面只围绕七种 Research Object 和 Project/Vault scope 展开。
+这是 Scientific R&D Workspace 的 Next.js App Router 前端。当前页面只围绕七种 Research Object 和 Project/Vault scope 展开。
 
 ## 结构
 
 - `src/features/workspace/components/workspace-app.tsx`：共享 object list/detail/editor/composer/context surface。
 - `src/lib/domain.ts`：前端 domain 类型。
 - `src/lib/api-client.ts`：唯一 REST client；API 不可达时显示明确错误。
-- `src/config/nav-config.ts`：active v0.2 导航。
+- `src/config/nav-config.ts`：active workspace 导航。
 - `src/app/dashboard/`：按 object kind 的薄路由页面。
 
 ## 约束

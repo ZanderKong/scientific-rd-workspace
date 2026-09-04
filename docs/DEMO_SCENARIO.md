@@ -1,4 +1,4 @@
-# Demo Scenario — v0.2 Research Object Graph
+# Demo Scenario — Scientific R&D Workspace
 
 The seed is synthetic/anonymised and repeat-safe. It demonstrates a chlorine color-response material graph without claiming production scientific validity.
 
@@ -37,4 +37,4 @@ Start at `http://localhost:3000/dashboard/overview`. If PostgreSQL or the API is
 
 ## Deferred story
 
-Compare, Literature, Evidence, AI finding and Evaluation are intentionally not part of this v0.2 demo. They require a separate Plan 2 after the object graph core is accepted.
+Literature, AI finding and Evaluation remain outside this demo's current product boundary. They require separate product work after the canonical workspace is accepted.

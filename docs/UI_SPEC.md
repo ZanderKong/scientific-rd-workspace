@@ -1,4 +1,4 @@
-# UI Spec — v0.2 Research Object Graph
+# UI Specification
 
 ## Shell
 
@@ -14,7 +14,7 @@ The generic Process, Data, Material, Equipment, Project and Overview routes rema
 
 The Project/Vault switcher persists the selected project locally and adds `?project=<uuid>` to scoped list routes. Breadcrumbs, locale switcher, theme toggle, skip link and visible loading/error/empty states are part of the shell contract.
 
-Plan 09 adds dedicated typed surfaces for Project Context/Search, Experiment Record/membership/comparison, Data Record/payload tables and Sample Execution. These surfaces show domain summaries, tables and status badges in normal flows; raw JSON is not required to inspect a record.
+The workspace provides dedicated typed surfaces for Project Context/Search, Experiment Record/membership/comparison, Data Record/payload tables and Sample Execution. These surfaces show domain summaries, tables and status badges in normal flows; raw JSON is not required to inspect a record.
 
 ## Object pages
 

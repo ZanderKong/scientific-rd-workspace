@@ -53,7 +53,7 @@ The local host has no Docker/PostgreSQL service, so database execution was not s
 
 ### GitHub CI
 
-- Workflow: [v0.2 Research Object Graph CI](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33766298541)
+- Workflow: [Scientific Workspace CI](https://github.com/ZanderKong/scientific-rd-workspace-codex-pack-v0.1/actions/runs/33766298541)
 - Run `33766298541` on implementation commit `0c5c082` — **success**.
 - Backend/PostgreSQL 17: migration, model parity, repeat-safe seed, lint/format, benchmark smoke, and API tests all pass.
 - Frontend: lint, format, typecheck, Vitest, and production build all pass.

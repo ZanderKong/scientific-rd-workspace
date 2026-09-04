@@ -1,4 +1,15 @@
-# Architecture — v0.2 Research Object Graph
+# Architecture
+
+Scientific R&D Workspace 将 canonical scientific domain services 与交付适配层分离。Web UI、REST API 与 MCP 操作同一套经过校验的领域模型和 PostgreSQL 事务边界；外部客户端不会维护第二套科研业务逻辑。
+
+```text
+Next.js UI ───────────┐
+Domain REST API ──────┼──> FastAPI Domain Services ───> PostgreSQL 17
+MCP clients ──────────┘              │
+                                     ├── provenance / revisions
+                                     ├── typed data / attachments
+                                     └── ChangeSet / concurrency / idempotency
+```
 
 ## System shape
 
@@ -14,7 +25,7 @@ FastAPI object-graph router
 External agents use the same domain services through REST or the official MCP SDK adapter. MCP is an adapter layer, not a second mutation implementation; it has no embedded LLM.
 ```
 
-PostgreSQL is mandatory. `api/app/db.py` rejects non-PostgreSQL URLs, the Alembic history is a fresh v0.2 baseline, and tests require `TEST_DATABASE_URL` or the configured PostgreSQL URL.
+PostgreSQL is mandatory. `api/app/db.py` rejects non-PostgreSQL URLs, the Alembic history starts from a clean baseline, and tests require `TEST_DATABASE_URL` or the configured PostgreSQL URL.
 
 ## Canonical backend
 
@@ -47,7 +58,7 @@ The active router is `api/app/routers/objects.py` under `/api/v1`:
 - `/samples/{id}/execution/*`, `/change-sets/*`, and `/capabilities`
 - `/data/{id}/imports`, `/data/{id}/payloads` and `/data-payloads/{id}`
 
-The old project/experiment/measurement/AI/literature/evaluation routers are not active runtime.
+Legacy project/experiment/measurement/AI/literature/evaluation routers are not active runtime.
 
 ## Frontend shape
 
@@ -57,4 +68,4 @@ The structured process composer is keyboard-first: `@` reference search, arrow s
 
 ## Non-goals
 
-No React Flow, SQLite fallback, new queue, second database, full form engine, multiplayer/RBAC, instrument integration, inventory ERP, or restored Plan 2 AI/Compare/Evidence/Evaluation/Literature runtime.
+No React Flow, SQLite fallback, new queue, second database, full form engine, multiplayer/RBAC, instrument integration, inventory ERP, or deferred AI/Compare/Evidence/Evaluation/Literature runtime.
