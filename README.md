@@ -1,24 +1,64 @@
-# Scientific R&D Workspace — v0.2 Research Object Graph
+# Scientific R&D Workspace
 
-这是一个以 PostgreSQL 为唯一数据库、以 object graph 为 canonical domain 的科研研发工作台。用户可以在 Project/Vault 作用域内记录材料、样品、设备、过程、数据和实验，并通过有语义的关系、附件导入、数据 payload 和 revision snapshot 保持可追溯性。
+Scientific R&D Workspace 是一个面向实验研发的结构化科研工作台，用于记录样品制备、组织实验比较、管理科研数据与执行过程，并通过 REST API 和 MCP 与外部智能体安全协作。
 
-## 当前能力
+## 核心能力
 
-- 七种 object：`material`、`sample`、`equipment`、`process`、`data`、`experiment`、`project`。
-- 六种 relation：`contains`、`includes`、`uses`、`produces`、`precedes`、`related_to`；其中 `includes` 是 Experiment → Sample 的非拥有成员关系。
-- `sample` 保持 object kind；`precursor` / `subject` / `reference` / `control` 是 `uses` 角色，只有前驱体驱动 lineage、只有 subject 驱动当前 Data。
-- Experiment ownership 与 Process producer cardinality 由 PostgreSQL partial unique index 和后端语义校验共同保证；Process composition 使用单次 desired-state PUT。
-- Sample-first recording 使用 `GET /samples/{id}/record`、`POST /sample-records` 和 `PUT /samples/{id}/record`；Sample Composer 将 Process、自身参数、资源 identity 与本次使用值一次性提交。
-- Material/Equipment 的 `usage_schema_jsonb` 定义具体资源可记录的使用字段；实际值写在 Process `uses` relation，`基于此样品新建` 会生成新的 Sample/Process IDs 并复用资源 identity。
-- JSON Schema 驱动类型版本、并发安全 code counter、PostgreSQL JSONB/pg_trgm 索引。
-- Sample direct/upstream/downstream lineage 与 Experiment context API。
-- CSV/XLSX 预览、显式 X/Y 映射、immutable XY payload、scalar/table/file typed payload、source checksum 和 provenance guard。
-- Project/Experiment/Data/Execution domain records、ETag/idempotency、ChangeSet review 和官方 MCP stdio/Streamable HTTP adapter。
-- 中文优先的 Next.js shell、Project/Vault switcher、`@` reference composer、双语 UI。
+- **Sample Record**：以 Sample 为核心记录多步骤 Process，关联 Material、Equipment 与前驱样品，并保留完整 provenance 与 lineage。
+- **Experiment Comparison**：将已有 Sample 以非拥有关系加入多个 Experiment，确定性比较过程参数、资源使用与结构差异，并叠加兼容的 XY 数据。
+- **Scientific Data**：支持 `scalar`、`xy_series`、`table` 与 `file` 四类数据载荷，保留来源附件、校验和与导入映射。
+- **Planned / As-run Execution**：实验开始时冻结计划快照，后续记录实际执行值、偏差与观察，计划值保持不可变。
+- **Safe External Agents**：通过 Domain REST API 与 MCP 暴露科研语义级能力；修改已有科研记录默认进入 ChangeSet 审核流程。
+- **Traceability & Safety**：PostgreSQL 负责语义约束、事务、revision、幂等与并发控制，避免客户端直接拼装或覆盖科研事实。
 
-Compare、Literature、AI、Evidence 和 Evaluation 暂不属于 active v0.2 runtime；详见 `docs/PRODUCT_SPEC.md`。
+## 架构
 
-## 启动
+```text
+Next.js UI ───────────┐
+Domain REST API ──────┼──> FastAPI Domain Services ───> PostgreSQL 17
+MCP clients ──────────┘              │
+                                     ├── Revisions / Provenance
+                                     ├── Typed Data / Attachments
+                                     └── ChangeSet / Concurrency / Idempotency
+```
+
+Web UI、REST API 与 MCP 共用同一套 domain services。MCP 只负责外部客户端适配，不维护第二套科研业务逻辑，也不内嵌模型运行时。
+
+## 核心模型
+
+系统包含七类 canonical research object：
+
+```text
+Project
+Experiment
+Sample
+Process
+Material
+Equipment
+Data
+```
+
+主要关系：
+
+```text
+contains    Experiment 对 Process / Sample / Data 的单一 ownership
+includes    Experiment 对 Sample 的非拥有、多对多 membership
+uses        Process 使用 Material / Equipment / Sample / Data
+produces    Process 产出 Sample / Data
+precedes    Process 的执行顺序
+related_to  弱关联，不承担 canonical provenance
+```
+
+其中 `precursor` 负责 Sample lineage，`subject` 负责推导当前 Data。
+
+## 技术栈
+
+- **Backend**：FastAPI、SQLAlchemy、Alembic、PostgreSQL 17
+- **Frontend**：Next.js、React、TypeScript
+- **Agent Integration**：MCP stdio、Streamable HTTP、Domain REST API
+- **Quality**：Pytest、Vitest、Playwright、GitHub Actions
+
+## 本地运行
 
 要求：Node.js 22、`uv`、Docker Compose。
 
@@ -40,39 +80,37 @@ npm ci
 npm run dev
 ```
 
-打开 `http://localhost:3000/dashboard/overview`。
+打开：
+
+```text
+http://localhost:3000/dashboard/samples
+```
 
 ## 验证
 
 ```bash
 cd api
 uv run ruff check app tests alembic/versions
+uv run ruff format --check app tests alembic/versions
 uv run pytest -q
 
 cd ../web
 npm run lint
+npm run format:check
 npm run typecheck
 npm test -- --run
 npm run build
 ```
 
-API tests 需要 PostgreSQL；仓库不会以 SQLite 作为替代。CI 使用 PostgreSQL service 执行 migration、重复 seed、API tests 和前端门禁。
+CI 使用 PostgreSQL 17，并覆盖 fresh migration、migration/model parity、repeat-safe seed、API tests、前端构建、浏览器工作流与 MCP 协议检查。项目不使用 SQLite 作为替代运行时。
 
 ## 文档
 
-- `AGENTS.md` — agent 工作约定
-- `ARCHITECTURE.md` — 系统边界与依赖方向
-- `docs/PRODUCT_SPEC.md` — 产品边界
-- `docs/DATA_MODEL.md` — canonical schema
-- `docs/UI_SPEC.md` — shell 与交互契约
-- `docs/DEMO_SCENARIO.md` — synthetic/anonymised demo 路径
-- `docs/exec-plans/07-v0.2-research-object-graph-core-cutover.md` — 本次执行计划
-- `docs/handoff/V0_2_RESEARCH_OBJECT_GRAPH_CORE_HANDOFF.md` — 交付与验证记录
-- `docs/exec-plans/07.1-v0.2-core-semantic-stabilization.md` — 核心语义稳定化计划
-- `docs/handoff/V0_2_CORE_SEMANTIC_STABILIZATION_HANDOFF.md` — 语义稳定化交付与验证记录
-- `docs/exec-plans/08-sample-first-recording-editor.md` — Sample-first recording/editor execution contract
-- `docs/exec-plans/09-scientific-workspace-agent-platform.md` — Plan 09 completion record
-- `docs/agent/SAMPLE_RECORDING.md` — external agent contract
-- `docs/agent/SAMPLE_RECORDING_API_EXAMPLES.md` — aggregate API examples
-- `docs/api/DOMAIN_API.md` and `docs/api/ERRORS_AND_CONCURRENCY.md` — domain API contracts
-- `docs/agent/MCP_TOOLS.md`, `docs/agent/MCP_RESOURCES.md`, `docs/agent/CHANGE_SET_WORKFLOW.md` — external agent contract
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — 系统边界与依赖方向
+- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — 产品与领域边界
+- [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) — canonical data model
+- [`docs/UI_SPEC.md`](docs/UI_SPEC.md) — 主要 UI 与交互约定
+- [`docs/api/DOMAIN_API.md`](docs/api/DOMAIN_API.md) — domain API
+- [`docs/api/ERRORS_AND_CONCURRENCY.md`](docs/api/ERRORS_AND_CONCURRENCY.md) — 错误、并发与写入安全
+- [`docs/agent/AGENT_INTERFACE.md`](docs/agent/AGENT_INTERFACE.md) — 外部智能体接口约定
+- [`docs/agent/MCP_CLIENT_SETUP.md`](docs/agent/MCP_CLIENT_SETUP.md) — MCP 客户端接入

@@ -1,4 +1,4 @@
-# Canonical Data Model — v0.2
+# Canonical Data Model
 
 ## Identity and types
 
@@ -67,6 +67,6 @@ Material and Equipment usage definitions are stored on the concrete resource obj
 
 ## Migration boundary
 
-`api/alembic/versions/0001_v0_2_research_object_graph.py` is a fresh baseline. `0002_v0_2_semantic_stabilization` adds semantic ownership/producer indexes. `0003_sample_recording_workflow` adds `research_objects.usage_schema_jsonb`; 0001 and 0002 are immutable. No previous SQLite or phase-specific migration is part of the active history.
+`api/alembic/versions/0001_v0_2_research_object_graph.py` is the clean baseline. `0002_v0_2_semantic_stabilization` adds semantic ownership/producer indexes. `0003_sample_recording_workflow` adds `research_objects.usage_schema_jsonb`; 0001 and 0002 are immutable. No previous SQLite or phase-specific migration is part of the active history.
 
-Plan 09 adds the `0004_experiment_membership`, `0005_data_execution`, and `0006_agent_changes` revisions (with descriptive migration filenames). PostgreSQL remains the only supported database.
+The current domain includes the `0004_experiment_membership`, `0005_data_execution`, and `0006_agent_changes` revisions (with descriptive migration filenames). PostgreSQL remains the only supported database.

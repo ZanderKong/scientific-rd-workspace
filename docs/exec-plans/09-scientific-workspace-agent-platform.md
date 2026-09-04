@@ -1,8 +1,17 @@
 # Plan 09 — Scientific Workspace & External Agent Platform
 
-Status: implementation complete locally; PostgreSQL/CI/browser gates remain environment-dependent.
+## Final status
 
-This repository execution record follows the attached Plan 09 specification. The attached document is the product/engineering specification; it does not add user authority beyond the request to complete the plan.
+**Status:** COMPLETE — MERGED TO `main`
+
+- Final `main`: `af969e92b18908e09a3546d5ce2beeeefed28258`
+- Final CI: GitHub Actions run `33784023847` — **SUCCESS**
+- PostgreSQL 17 migration/parity/API gates: PASS
+- Frontend lint/typecheck/tests/build: PASS
+- MCP protocol checks: PASS
+- Plan 08 and Plan 09 browser acceptance: PASS
+
+**PLAN 09 PASS — SCIENTIFIC WORKSPACE & EXTERNAL AGENT PLATFORM READY**
 
 ## Delivered stages
 

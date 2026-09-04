@@ -1,6 +1,6 @@
 # Deployment
 
-The v0.2 web app can run on Vercel or anywhere Docker runs. `next.config.ts` uses standalone output when `BUILD_STANDALONE=true`, so production builds are suitable for self-hosting.
+The Scientific R&D Workspace web app can run on Vercel or anywhere Docker runs. `next.config.ts` uses standalone output when `BUILD_STANDALONE=true`, so production builds are suitable for self-hosting.
 
 ## Vercel (Recommended)
 

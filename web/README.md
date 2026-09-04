@@ -1,6 +1,6 @@
 # Scientific R&D Workspace Web
 
-Next.js 16 frontend for the v0.2 Research Object Graph core. It provides the Chinese-first Project/Vault shell, typed object lists and details, keyboard-first process composer, bounded provenance context views, and data import/payload surfaces.
+Next.js 16 frontend for Scientific R&D Workspace. It provides the Chinese-first Project/Vault shell, typed object lists and details, keyboard-first process composer, bounded provenance context views, and data import/payload surfaces.
 
 ```bash
 npm ci

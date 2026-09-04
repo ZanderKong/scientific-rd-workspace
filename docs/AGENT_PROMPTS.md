@@ -1,6 +1,6 @@
-# Codex Prompts
+# Agent Prompts
 
-这些 prompt 是操作模板。用户可按自己 Codex 客户端中可用的模型选择 planner/reviewer 和 executor。
+这些 prompt 是操作模板。用户可按自己 MCP-compatible client 中可用的模型选择 planner/reviewer 和 executor。
 
 如果客户端中有你习惯称为「Sol Max」和「Luna Max」的配置，可以：
 - 高推理 planner/reviewer：用于 Preflight、阶段审计、下一阶段详细规划。

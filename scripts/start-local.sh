@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker Desktop is required for the PostgreSQL-only v0.2 runtime." >&2
+  echo "Docker Desktop is required for the PostgreSQL-only workspace runtime." >&2
   exit 1
 fi
 if ! command -v uv >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
@@ -24,5 +24,5 @@ cleanup() {
   kill "$web_pid" "$api_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
-echo "Scientific R&D Workspace v0.2: http://127.0.0.1:3000/dashboard/overview"
+echo "Scientific R&D Workspace: http://127.0.0.1:3000/dashboard/overview"
 wait -n "$api_pid" "$web_pid"

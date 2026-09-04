@@ -3,8 +3,8 @@ set -euo pipefail
 
 api_url="${API_URL:-http://127.0.0.1:8000/api/v1}"
 web_url="${WEB_URL:-http://127.0.0.1:3000}"
-artifact_dir="${ARTIFACT_DIR:-output/playwright/plan09}"
-session="${PLAYWRIGHT_CLI_SESSION:-plan09-browser-smoke}"
+artifact_dir="${ARTIFACT_DIR:-output/playwright/workspace}"
+session="${PLAYWRIGHT_CLI_SESSION:-workspace-browser-smoke}"
 
 repo_root="$(pwd)"
 if [[ "$artifact_dir" != /* ]]; then
@@ -104,6 +104,6 @@ assert_snapshot 06-change-review '变更审核'
 assert_snapshot 06-change-review 'Change review'
 pw screenshot --filename 06-change-review-1024.png --full-page
 
-printf '%s\n' "Plan 09 browser acceptance passed" > browser-acceptance.txt
+printf '%s\n' "Scientific Workspace browser acceptance passed" > browser-acceptance.txt
 printf '%s\n' "project=${project_id}" "experiment=${experiment_id}" "data=${data_id}" "sample=${sample_id}" >> browser-acceptance.txt
 pw close

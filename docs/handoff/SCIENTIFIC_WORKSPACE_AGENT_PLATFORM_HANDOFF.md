@@ -1,9 +1,13 @@
 # Scientific Workspace Agent Platform Handoff
 
-The Plan 09 implementation is on branch `plan-09-scientific-workspace-agent-platform`.
+## Status
 
-Implemented boundary: canonical Experiment/Project/Data/Execution services, typed REST records, PostgreSQL migrations 0004–0006, record hashes/ETags, persistent idempotency, machine-readable errors, official MCP stdio/Streamable HTTP adapter, bounded resources/tools, and proposal-first ChangeSets.
+**COMPLETE — MERGED TO `main`**
 
-Validation completed locally: Ruff and mapper checks, Alembic offline SQL generation, OpenAPI generation, frontend lint/format/typecheck, and 19 frontend tests. Live PostgreSQL migration/API tests and browser acceptance require a PostgreSQL 17-capable CI runner or equivalent environment; this host has no Docker/PostgreSQL executable.
+- Final merge commit: `af969e92b18908e09a3546d5ce2beeeefed28258`
+- Final CI: `33784023847` — **SUCCESS**
+- Final verdict: `PLAN 09 PASS — SCIENTIFIC WORKSPACE & EXTERNAL AGENT PLATFORM READY`
 
-Before merge: run the full PostgreSQL CI matrix, exercise MCP with the official client over stdio and Streamable HTTP, run the browser smoke flow for Project → Experiment → Sample → Data → Execution, inspect the generated artifact, then merge only after the feature branch is green.
+The delivered system includes canonical Project/Experiment/Sample/Data/Execution domain services, typed REST records, PostgreSQL migrations through the current head, record hashes/ETags, persistent idempotency, machine-readable errors, MCP stdio/Streamable HTTP integration, bounded resources/tools, and proposal-first ChangeSets.
+
+Validation completed locally: Ruff and mapper checks, Alembic offline SQL generation, OpenAPI generation, frontend lint/format/typecheck, and 19 frontend tests. The final PostgreSQL migration/API, frontend, MCP protocol, and browser acceptance gates passed in CI run `33784023847`.

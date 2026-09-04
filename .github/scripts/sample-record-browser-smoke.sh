@@ -3,12 +3,12 @@ set -euo pipefail
 
 api_url="${API_URL:-http://127.0.0.1:8000/api/v1}"
 web_url="${WEB_URL:-http://127.0.0.1:3000}"
-artifact_dir="${ARTIFACT_DIR:-output/playwright/plan08}"
-session="${PLAYWRIGHT_CLI_SESSION:-plan08-browser-smoke}"
+artifact_dir="${ARTIFACT_DIR:-output/playwright/sample-record}"
+session="${PLAYWRIGHT_CLI_SESSION:-sample-record-browser-smoke}"
 project_code="${PROJECT_CODE:-PRJ-001}"
 run_label="${GITHUB_RUN_ID:-local}"
-sample_title="Plan 08 browser ${run_label}"
-clone_title="Plan 08 browser clone ${run_label}"
+sample_title="Sample Record browser ${run_label}"
+clone_title="Sample Record browser clone ${run_label}"
 
 repo_root="$(pwd)"
 if [[ "$artifact_dir" != /* ]]; then
@@ -151,6 +151,6 @@ while read -r source_process_id; do
   [[ -z "$source_process_id" ]] || ! grep -Fqx "$source_process_id" <<<"$clone_process_ids"
 done <<<"$source_process_ids"
 
-printf '%s\n' "Plan 08 browser acceptance passed" > browser-acceptance.txt
+printf '%s\n' "Sample Record browser acceptance passed" > browser-acceptance.txt
 printf '%s\n' "source_sample=${sample_id}" "clone_sample=${clone_id}" "material=${source_material_id}" "equipment=${source_equipment_id}" >> browser-acceptance.txt
 pw close

@@ -95,7 +95,7 @@ Content-Type: application/json
   "target_id": "<sample-id>",
   "base_record_sha256": "<record_sha256>",
   "request_payload_jsonb": {"sample": {"title":"Reviewed title"}, "steps": []},
-  "source_client_name": "codex",
+  "source_client_name": "external-agent",
   "source_transport": "rest"
 }
 ```

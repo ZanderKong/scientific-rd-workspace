@@ -28,7 +28,7 @@ Not available locally on this host:
 
 - live PostgreSQL migration/seed/API tests, because no local PostgreSQL service or Docker runtime is installed.
 
-The PostgreSQL-only fixture intentionally fails rather than falling back to SQLite. `.github/workflows/v0.2-core-ci.yml` is green for the pushed implementation; the final Plan 07 verdict is accepted.
+The PostgreSQL-only fixture intentionally fails rather than falling back to SQLite. `.github/workflows/scientific-workspace-ci.yml` is green for the pushed implementation; the final Plan 07 verdict is accepted.
 
 ## Runbook
 
