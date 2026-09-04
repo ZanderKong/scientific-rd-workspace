@@ -3,7 +3,7 @@
 ## 最新状态（2026-09-04）
 
 - 当前产品为 **Scientific R&D Workspace**，Plan 09 已完成并合入 `main`。
-- 当前 `main`：`5cf2fed4f8e38c897235990c00709fae4a37678a`；公共表面清理 CI run `33821879165` 已通过全部门禁。
+- 当前 `main`：`5e42d29`；公共表面清理合并提交 `5cf2fed4f8e38c897235990c00709fae4a37678a` 对应 CI run `33821879165` 已通过全部门禁。
 
 - Phase 1 remains frozen and passing from baseline `9bb494d`.
 - Phase 2 is formally closed as **PASS**; see [Phase 2 交接报告](PHASE_2_HANDOFF.md).
