@@ -58,7 +58,7 @@ The active router is `api/app/routers/objects.py` under `/api/v1`:
 - `/samples/{id}/execution/*`, `/change-sets/*`, and `/capabilities`
 - `/data/{id}/imports`, `/data/{id}/payloads` and `/data-payloads/{id}`
 
-Legacy project/experiment/measurement/AI/literature/evaluation routers are not active runtime.
+Legacy phase-specific project/experiment/measurement routers and the old AI analysis, generic Compare, Literature, Evidence and Evaluation runtimes are not active. The current `ExperimentComparisonService` and `/experiments/{id}/comparison` endpoint are canonical v0.2 functionality and are not part of that legacy Compare runtime.
 
 ## Frontend shape
 
@@ -68,4 +68,4 @@ The structured process composer is keyboard-first: `@` reference search, arrow s
 
 ## Non-goals
 
-No React Flow, SQLite fallback, new queue, second database, full form engine, multiplayer/RBAC, instrument integration, inventory ERP, or deferred AI/Compare/Evidence/Evaluation/Literature runtime.
+No React Flow, SQLite fallback, new queue, second database, full form engine, multiplayer/RBAC, instrument integration, inventory ERP, or restoration of the legacy phase-specific AI analysis, generic Compare, Evidence, Evaluation and Literature runtimes. Current Experiment Comparison remains an active core workflow.
