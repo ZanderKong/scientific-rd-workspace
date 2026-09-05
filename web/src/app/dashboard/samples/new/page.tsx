@@ -45,10 +45,5 @@ export default function NewSamplePage() {
         {error}
       </div>
     );
-  return (
-    <SampleComposer
-      projectId={projectId ?? ''}
-      initialRecord={source}
-    />
-  );
+  return <SampleComposer projectId={projectId ?? ''} initialRecord={source} />;
 }

@@ -37,7 +37,7 @@ Generic relation writes reject `subject` and `derived_from`; those are synchroni
 
 An execution may produce multiple Research Objects and Data records. Binding field snapshots preserve historical values after a definition or object schema changes.
 
-The Sample Record API is a projection: a Sample is a tagged Research Object, and its steps are Process Executions. It never persists a legacy Process object or one-to-one SampleExecution.
+The Sample Record API is a projection: a Sample is a tagged Research Object, and its steps are Process Executions. It never persists a legacy Process object or one-to-one SampleExecution. Aggregate create and update are transactional: retained `execution_id` values keep their identity, new steps inherit the Sample's project scope, and the returned projection is reloaded after binding replacement so it reflects the committed values.
 
 ## Experiment
 
@@ -61,4 +61,4 @@ Representations are immutable and content-addressed. A Data record may set one `
 
 ## Governance and migration
 
-ChangeSets, idempotency records, ETag/If-Match and revisions remain active. Alembic `0001`–`0006` are immutable v0.2 history; `0007` adds canonical tables/transition columns, `0008` copies old records, `0009` removes legacy storage, `0010` finalizes strict checks/indexes, `0011` persists ProcessExecution View revision pins, and `0012` aligns explicit migration metadata with runtime indexes/constraints. PostgreSQL is the only supported database.
+ChangeSets, idempotency records, ETag/If-Match and revisions remain active. Alembic `0001`–`0006` are immutable v0.2 history; `0007` adds canonical tables/transition columns, `0008` copies old records, `0009` removes legacy storage, `0010` finalizes strict checks/indexes, `0011` persists ProcessExecution View revision pins, and `0012` aligns explicit migration metadata with runtime indexes/constraints. PostgreSQL is the only supported database. The named synthetic `GoldenCl2WorkflowFactory` is repeat-safe and verifies a complete Cl₂ sensor workflow without introducing a second runtime model.

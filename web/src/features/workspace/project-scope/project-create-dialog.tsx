@@ -85,6 +85,7 @@ export function ProjectCreateDialog({
             <Input
               autoFocus
               required
+              data-testid='project-title'
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder={t('projectNamePlaceholder')}
@@ -104,6 +105,7 @@ export function ProjectCreateDialog({
             {t('projectCode')}{' '}
             <span className='text-xs font-normal text-muted-foreground'>({t('optional')})</span>
             <Input
+              data-testid='project-code'
               value={code}
               onChange={(event) => setCode(event.target.value)}
               placeholder={t('projectCodePlaceholder')}
@@ -118,7 +120,7 @@ export function ProjectCreateDialog({
             <Button type='button' variant='outline' onClick={close}>
               {t('cancel')}
             </Button>
-            <Button type='submit' disabled={saving || !title.trim()}>
+            <Button type='submit' data-testid='submit-project' disabled={saving || !title.trim()}>
               {saving ? t('saving') : t('create')}
             </Button>
           </DialogFooter>

@@ -313,7 +313,12 @@ def update_sample_record(
             else:
                 execution = _create_process_execution_in_session(
                     db,
-                    _step_payload(step, sample.id, index == len(payload.steps) - 1),
+                    _step_payload(
+                        step,
+                        sample.id,
+                        sample.project_scope_id,
+                        index == len(payload.steps) - 1,
+                    ),
                     create_revision=False,
                 )
             desired_ids.append(execution.id)
@@ -329,6 +334,10 @@ def update_sample_record(
             _revision(db, execution, payload.change_note or "update sample record")
         _create_revision_in_session(db, sample.id, payload.change_note)
         db.commit()
+        # Bulk deletes used to replace bindings intentionally bypass ORM collection
+        # synchronization. Reload before serializing so the PUT response is the
+        # same canonical record that was committed.
+        db.expire_all()
         return get_sample_record(db, sample.id)
     except Exception:
         db.rollback()

@@ -1,6 +1,6 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { ViewWorkspace } from '@/features/workspace/domain-workspaces';
 
 export default async function ViewDetailPage({ params }: { params: Promise<{ viewId: string }> }) {
   const { viewId } = await params;
-  return <WorkspaceApp view='detail' kind='view' objectId={viewId} />;
+  return <ViewWorkspace viewId={viewId} />;
 }

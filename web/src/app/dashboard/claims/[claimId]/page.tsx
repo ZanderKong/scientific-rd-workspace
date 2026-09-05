@@ -1,6 +1,10 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { ClaimWorkspace } from '@/features/workspace/domain-workspaces';
 
-export default async function ClaimDetailPage({ params }: { params: Promise<{ claimId: string }> }) {
+export default async function ClaimDetailPage({
+  params
+}: {
+  params: Promise<{ claimId: string }>;
+}) {
   const { claimId } = await params;
-  return <WorkspaceApp view='detail' kind='claim' objectId={claimId} />;
+  return <ClaimWorkspace claimId={claimId} />;
 }

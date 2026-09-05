@@ -382,6 +382,20 @@ def patch_object(
         raise _error(exc) from exc
 
 
+@router.delete("/objects/{object_id}", status_code=204)
+def delete_object_route(object_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
+    """Delete one object and its owned records; shared reference targets remain intact."""
+    item = get_object(db, object_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="research object not found")
+    try:
+        db.delete(item)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
 @router.get("/objects/{object_id}/relations", response_model=list[ObjectRelationOut])
 def get_object_relations(
     object_id: uuid.UUID, db: Session = Depends(get_db)

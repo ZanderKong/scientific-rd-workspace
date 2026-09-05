@@ -4,8 +4,8 @@ Plan: 10.1 — v0.3 Domain Correctness & Test Foundation
 Repository: `ZanderKong/scientific-rd-workspace`  
 Branch: `feat/plan10-workspace-shell-resource-settings`  
 Baseline: `f99499c feat: complete v0.3 domain model cutover`  
-Implementation commit: `94e7cc2 fix: enforce v0.3 domain correctness invariants`  
-Plan 10.2: deferred
+Implementation commit: `03b17eb825caf9f142291f0f946be2ced49f3000 fix: enforce v0.3 domain correctness invariants`
+Plan 10.2: completed in the successor verification and release-gate handoff.
 
 ## What changed
 
@@ -24,7 +24,7 @@ Plan 10.2: deferred
 - `0007_v0_3_canonical_tables` now uses explicit Alembic DDL rather than `Base.metadata.create_all`.
 - `0011_v0_3_provenance_pins` adds `source_view_id` and `source_view_revision_id` to Process Execution.
 - `0012_v0_3_schema_alignment` aligns metadata indexes/constraints with explicit migrations.
-- A real PostgreSQL 0006-to-head fixture was exercised with legacy process, material, data, sample, relations and SampleExecution rows. Legacy process values and binding values were preserved, and legacy tables were removed at 0009.
+- The successor Plan 10.2 supplies the concrete PostgreSQL 0006 fixture and cutover verifier; use its handoff for current migration-release evidence.
 - PostgreSQL remains mandatory for runtime and tests. SQLite fallback was not added.
 
 ## Verification
@@ -50,10 +50,10 @@ npm test
 npm run build
 ```
 
-`npm run format:check` still reports formatting differences in unrelated pre-existing workspace files; all Plan 10.1 touched frontend files were formatted and checked.
+This was the Plan 10.1 baseline record. Repository-wide formatting and the final format gate are covered by Plan 10.2.
 
 ## Follow-up / known limits
 
-- Browser-level REST/MCP/CI acceptance remains Plan 10.2 scope.
-- Alembic autogenerate emits an existing SQLAlchemy warning about mutually dependent Claim/View revision tables; `alembic check` still reports no drift.
+- Browser-level REST/MCP/CI acceptance is delivered by Plan 10.2.
+- The former Alembic Claim/View dependency warning is resolved by Plan 10.2.
 - Physical asset cleanup is best-effort after the database row is deleted; failures are logged for operational reconciliation.

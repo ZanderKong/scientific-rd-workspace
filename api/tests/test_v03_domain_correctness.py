@@ -266,6 +266,35 @@ def test_changeset_create_records_target_identity(client):
     assert unsupported.status_code == 422
 
 
+def test_deleting_one_experiment_keeps_shared_reference_targets(client):
+    project_id = _project(client)
+    shared = _object(client, project_id, "ROO-SHARED", "Shared sample")
+    first = client.post(
+        "/api/v1/experiment-records",
+        json={
+            "project_scope_id": project_id,
+            "experiment": {"code": "EXP-DELETE-A", "title": "Experiment A"},
+            "references": [{"target_id": shared["id"], "role": "sample"}],
+        },
+    )
+    second = client.post(
+        "/api/v1/experiment-records",
+        json={
+            "project_scope_id": project_id,
+            "experiment": {"code": "EXP-DELETE-B", "title": "Experiment B"},
+            "references": [{"target_id": shared["id"], "role": "sample"}],
+        },
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    deleted = client.delete(f"/api/v1/objects/{first.json()['experiment']['id']}")
+    assert deleted.status_code == 204, deleted.text
+    assert client.get(f"/api/v1/objects/{shared['id']}").status_code == 200
+    remaining = client.get(f"/api/v1/experiments/{second.json()['experiment']['id']}/record")
+    assert remaining.status_code == 200, remaining.text
+    assert remaining.json()["references"]["research_object"][0]["object"]["id"] == shared["id"]
+
+
 def test_asset_upload_uses_opaque_key_and_blocks_referenced_delete(client, monkeypatch, tmp_path):
     import app.routers.objects as objects_router
 

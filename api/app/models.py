@@ -752,7 +752,7 @@ class ViewState(Base):
         JsonColumn, default=dict, server_default=text("'{}'::jsonb")
     )
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("view_revisions.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("view_revisions.id", ondelete="SET NULL", use_alter=True), nullable=True
     )
     view: Mapped[ResearchObject] = relationship(back_populates="view_state", foreign_keys=[view_id])
     data_refs: Mapped[list[ViewDataRef]] = relationship(
@@ -814,7 +814,7 @@ class ClaimRecord(Base):
         JsonColumn, default=dict, server_default=text("'{}'::jsonb")
     )
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("claim_revisions.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("claim_revisions.id", ondelete="SET NULL", use_alter=True), nullable=True
     )
     claim: Mapped[ResearchObject] = relationship(
         back_populates="claim_record", foreign_keys=[claim_id]

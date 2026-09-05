@@ -5,7 +5,7 @@ Base URL: `/api/v1`. The server is authoritative for scope, relation semantics, 
 ## Research Objects
 
 ```text
-GET/PATCH /objects/{id}
+GET/PATCH/DELETE /objects/{id}
 GET       /objects/{id}/relations
 POST      /objects
 GET       /objects
@@ -14,6 +14,8 @@ GET/POST  /objects/{id}/revisions
 ```
 
 `POST /objects` accepts only the v0.3 kinds. A physical resource uses `kind=research_object` and `tags`. Generic relation writes accept only `references` and `related_to`; `subject` and `derived_from` are system-managed.
+
+Deleting an Experiment removes only that Experiment and its owned `references` rows. Referenced Research Objects, Data and Process Definitions remain independent canonical records and may still be used by other Experiments.
 
 ## Process
 

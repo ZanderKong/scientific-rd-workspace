@@ -27,7 +27,7 @@ export function recordToDraft(record: SampleRecord): SampleRecordDraft {
       values: execution.values,
       note: execution.note,
       object_bindings: execution.object_bindings
-        .filter((binding) => binding.role !== 'sample_record')
+        .filter((binding) => binding.role !== 'sample_record' && binding.role !== 'product')
         .map((binding) => ({
           research_object_id: binding.research_object_id,
           direction: binding.direction,

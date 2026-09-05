@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildNewDraft, draftToCreatePayload, draftToPutPayload } from './model';
+import type { SampleRecord } from '@/lib/domain';
+import { buildNewDraft, draftToCreatePayload, draftToPutPayload, recordToDraft } from './model';
 
 describe('v0.3 sample record model', () => {
   it('starts with a tag-based Research Object draft', () => {
@@ -40,5 +41,57 @@ describe('v0.3 sample record model', () => {
       execution_id: 'execution-1',
       process_definition_version_id: 'version-1'
     });
+  });
+
+  it('does not send system-managed sample membership bindings back on edit', () => {
+    const record = {
+      sample: { title: 'Sample A', code: 'ROO-1', status: 'active', tags: ['样品'] },
+      steps: [
+        {
+          execution: {
+            id: 'execution-1',
+            process_definition_id: 'definition-1',
+            process_definition_version_id: 'version-1',
+            project_scope_id: 'project-1',
+            title_snapshot: 'Preparation',
+            status: 'completed',
+            values: {},
+            object_bindings: [
+              {
+                research_object_id: 'material-1',
+                role: 'reagent',
+                direction: 'input',
+                values: {},
+                order_index: 0
+              },
+              {
+                research_object_id: 'sample-1',
+                role: 'sample_record',
+                direction: 'context',
+                values: {},
+                order_index: 1
+              },
+              {
+                research_object_id: 'sample-1',
+                role: 'product',
+                direction: 'output',
+                values: {},
+                order_index: 2
+              }
+            ],
+            data_bindings: []
+          }
+        }
+      ]
+    } as unknown as SampleRecord;
+    expect(recordToDraft(record).steps[0].object_bindings).toEqual([
+      {
+        research_object_id: 'material-1',
+        role: 'reagent',
+        direction: 'input',
+        values: {},
+        order_index: 0
+      }
+    ]);
   });
 });

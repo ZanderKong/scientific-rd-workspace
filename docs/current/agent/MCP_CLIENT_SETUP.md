@@ -29,7 +29,13 @@ The server must keep protocol output on stdout clean; operational logs belong on
 
 ## Streamable HTTP
 
-Start the server with the repository-supported Streamable HTTP transport and deployment configuration.
+Start the server with the repository-supported Streamable HTTP transport:
+
+```bash
+uv run python -m app.agent.mcp_server --transport streamable-http --host 127.0.0.1 --port 8001
+```
+
+The endpoint is `http://127.0.0.1:8001/mcp`. The release gate verifies both stdio and Streamable HTTP with the official MCP Python `ClientSession`, rather than treating process startup logs as protocol evidence.
 
 Non-loopback deployments must use the documented authentication/proxy protection. Do not expose an unauthenticated write-capable MCP endpoint.
 
