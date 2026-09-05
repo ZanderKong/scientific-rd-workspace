@@ -1,20 +1,19 @@
-# CLAUDE.md
+# Scientific R&D Workspace Web Agent Guide
 
-This is a Next.js 16 + shadcn/ui admin dashboard starter kit.
+This is the Next.js App Router frontend for Scientific R&D Workspace. Read the repository [AGENTS.md](../AGENTS.md) and [`docs/handoff/CURRENT_STATE.md`](../docs/handoff/CURRENT_STATE.md) before changing the UI.
 
-## Key References
+Current pages use the shared Project/Vault shell and seven canonical Research Object kinds. The API client in `src/lib/api-client.ts` is the only frontend data boundary; use the typed domain contracts in `src/lib/domain.ts`. Do not add mock APIs, faker data, Clerk, billing, account routes, or a second query/service abstraction.
 
-- **[AGENTS.md](./AGENTS.md)** — Full project overview, tech stack, structure, conventions, data fetching patterns, deployment
-- **[docs/forms.md](./docs/forms.md)** — Form system: TanStack Form + Zod, composable fields, validation, multi-step, sheet/dialog forms
-- **[docs/themes.md](./docs/themes.md)** — Theme system: OKLCH colors, adding themes, font config
-- **[docs/deployment.md](./docs/deployment.md)** — Deployment: Vercel, production environment variables, Docker
+Use `src/features/workspace/` for shared workspace behavior, `src/features/equipment/` for resource management, `src/features/settings/` for browser preferences, and `src/app/dashboard/` for thin route entrypoints. Keep the Sample Record aggregate workflow separate from generic object editing.
 
-## Critical Conventions
+All new user-visible copy belongs in both `messages/zh-CN.json` and `messages/en.json`. Keep loading, error, empty, keyboard, locale and project-scope behavior visible. The current Experiment Comparison surface is a supported domain capability; legacy generic Compare, Literature, Analysis and Evaluation routes are not active.
 
-- **React Query** for all data fetching — `void prefetchQuery()` on server + `useSuspenseQuery` on client (standard TanStack pattern), `useMutation` for forms, `HydrationBoundary` + `dehydrate` for hydration, `<Suspense fallback>` for streaming
-- **API layer** per feature — `api/types.ts` → `api/service.ts` → `api/queries.ts`; queries use key factories (`entityKeys.all/list/detail`); components import from service and queries, never from mock APIs directly
-- **nuqs** for URL search params — `searchParamsCache` on server, `useQueryStates` on client, use `getSortingStateParser` for sort (same parser as `useDataTable`)
-- **Icons** — only import from `@/components/icons`, never from `@tabler/icons-react` directly
-- **Forms** — `useAppForm` from `@/lib/form` (TanStack `createFormHook`) + `form.AppField` rendering the field components in `@/components/forms/fields` (`field.TextField`, `field.SelectField`, …); each component is the shadcn TanStack Form doc anatomy; raw `form.Field` for one-off custom fields; form-level Zod `onSubmit` validators
-- **Page headers** — use `PageContainer` props (`pageTitle`, `pageDescription`, `pageHeaderAction`), never import `<Heading>` manually
-- **Formatting** — single quotes, JSX single quotes, no trailing comma, 2-space indent
+Before handoff run:
+
+```bash
+npm run lint
+npm run format:check
+npm run typecheck
+npm test -- --run
+npm run build
+```

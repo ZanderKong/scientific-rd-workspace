@@ -6,5 +6,5 @@ export default async function ProcessDetailPage({
   params: Promise<{ processId: string }>;
 }) {
   const { processId } = await params;
-  return <WorkspaceApp view='detail' objectId={processId} />;
+  return <WorkspaceApp view='detail' kind='process_definition' objectId={processId} />;
 }

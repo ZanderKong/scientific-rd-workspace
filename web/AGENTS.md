@@ -12,7 +12,7 @@
 
 ## 约束
 
-- 不恢复旧 Analysis、Compare、Literature、Evaluation 入口。
+- 旧 generic Compare、Analysis、Literature、Evaluation 入口不在当前导航；当前 `Experiment Comparison` 是正式支持的 Experiment domain surface，不得与旧 Compare 混称。
 - 不把 Project/Experiment/Measurement 做成第二套 domain model。
 - 结构化字段与 BlockNote-compatible content 分开；不要把关系推导结果写回对象属性。
 - `@` reference、箭头键、Enter、Tab、Escape 和 Cmd/Ctrl+Enter 是 Process composer 的核心交互。

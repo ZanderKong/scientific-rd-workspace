@@ -34,9 +34,16 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
       siteName: title,
       type: 'website',
-      images: [{ url: '/shadcn-dashboard.png', width: 3200, height: 1600, alt: t('imageAlt') }]
+      images: [
+        { url: '/scientific-rd-workspace.png', width: 1440, height: 900, alt: t('imageAlt') }
+      ]
     },
-    twitter: { card: 'summary_large_image', title, description, images: ['/shadcn-dashboard.png'] }
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: ['/scientific-rd-workspace.png']
+    }
   };
 }
 

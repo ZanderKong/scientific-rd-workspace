@@ -2,11 +2,12 @@
 
 This project includes or depends on the following open-source software:
 
-- Kiranism `next-shadcn-dashboard-starter` — MIT. Attribution and the original license are preserved in `web/LICENSE` and `third_party_licenses/`.
-- JSON Forms (`@jsonforms/*`) — MIT.
-- BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/shadcn`) — MPL-2.0. Phase 1 does not include any `@blocknote/xl-*` package.
-- `next-intl` — MIT. Used only for the frontend message catalogs and locale presentation layer.
-- LiteLLM Python SDK `1.99.0` — MIT (the exact version locked in `api/uv.lock`). Phase 3 embeds the SDK only; the LiteLLM Gateway/Proxy is not used.
-- Langfuse Python SDK `4.15.1` — MIT (the exact version locked in `api/uv.lock`). Phase 3 uses it only as an optional, disabled-by-default trace projection.
+- Historical Kiranism `next-shadcn-dashboard-starter` source — MIT. The original license and attribution are preserved in `web/LICENSE` and `third_party_licenses/`; it is not the product author.
+- BlockNote (`@blocknote/core`, `@blocknote/react`, `@blocknote/shadcn`) — MPL-2.0.
+- Historical JSON Forms source attribution from the Starter — MIT; JSON Forms is not a current frontend dependency.
+- `next-intl` — MIT. Used for the frontend message catalogs and locale presentation layer.
+- `lucide-react` — ISC.
 
-This notice is informational and is not legal advice. Transitive dependency licenses remain recorded by the package manager lockfiles.
+The backend currently has no LiteLLM or Langfuse dependency. Historical references to those packages are retained only under `docs/archive/`.
+
+This notice is informational and is not legal advice. Exact versions and transitive dependency licenses remain recorded by the package manager lockfiles and package metadata.

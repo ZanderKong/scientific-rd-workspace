@@ -6,46 +6,44 @@ External clients should prefer domain-level operations over low-level graph muta
 
 ## Source of truth
 
-按优先级阅读：
+按优先级阅读当前资料：
 
-1. `docs/PRODUCT_SPEC.md`
-2. `ARCHITECTURE.md`
-3. `docs/DATA_MODEL.md`
-4. `docs/UI_SPEC.md`
-5. `docs/api/DOMAIN_API.md`
-6. `docs/api/ERRORS_AND_CONCURRENCY.md`
-7. `docs/agent/AGENT_INTERFACE.md`
-8. `docs/agent/MCP_TOOLS.md`
-9. `docs/agent/MCP_RESOURCES.md`
-10. `docs/agent/CHANGE_SET_WORKFLOW.md`
+1. `docs/handoff/CURRENT_STATE.md`
+2. `docs/current/PRODUCT_SPEC.md`
+3. `ARCHITECTURE.md`
+4. `docs/current/DATA_MODEL.md`
+5. `docs/current/UI_SPEC.md`
+6. `docs/current/api/DOMAIN_API.md`
+7. `docs/current/api/ERRORS_AND_CONCURRENCY.md`
+8. `docs/current/agent/AGENT_INTERFACE.md`
+9. `docs/current/agent/MCP_TOOLS.md`
+10. `docs/current/agent/MCP_RESOURCES.md`
+11. `docs/current/agent/CHANGE_SET_WORKFLOW.md`
 
-Execution plans and handoff files are historical engineering records. Current product behaviour is defined by the source-of-truth documents and validated implementation.
+`docs/current/` contains current contracts. `docs/history/` contains completed work on the current architecture. `docs/archive/` contains legacy runtime and planning material and must not be used as current product evidence. `docs/handoff/CURRENT_STATE.md` is the only current handoff.
 
 ## 当前产品边界
 
-- 七种 canonical object：`material`、`sample`、`equipment`、`process`、`data`、`experiment`、`project`。
-- 关系有 `contains`、`includes`、`uses`、`produces`、`precedes`、`related_to`，由后端按 object kind 约束；`includes` 只表示 Experiment 对 Sample 的非拥有成员关系。
-- `sample` 是 object kind；`precursor`、`subject`、`reference`、`control` 只是 `uses` 关系角色。
-- 只有 `precursor` 参与 lineage，只有 `subject` 推导当前 Data；Experiment 对 Process/Sample/Data 单一拥有，Process 对 Sample/Data 单一产出。
-- 跨 Experiment 复用通过 Process `uses` 和 context `input_samples` 表达，不复制上游 ownership。
-- `Experiment contains Process/Sample/Data` remains exclusive ownership, not membership; `includes` is the canonical multi-Experiment Sample membership relation.
-- Experiment Record、Project Context、Data Record、Sample Execution 和 ChangeSet 是 canonical domain service/API，不由 MCP 复制实现。
+- 七种 canonical kind：`research_object`、`process_definition`、`data`、`experiment`、`project`、`view`、`claim`。
+- Material、Equipment、Sample 是统一 `research_object` 的 tags，不得在 API/UI 新建旧 kind。
+- 关系只有 `references`、`subject`、`derived_from`、`related_to`；`subject` 与 `derived_from` 由系统维护。
+- Process Definition 是模板 identity；Process Execution 独立保存 pinned version、多个 object/data bindings、field snapshot 与 revisions。
+- Experiment 只做 research context/reference，不拥有 Process、Sample 或 Data，也不提供 canonical comparison runtime。
+- Data 通过多个 Representations、Origin、Asset 和 system lineage 组织；View 只引用 Data，Claim 保存 statement/evidence/revisions。
+- Experiment Record、Project Context、Data Record、Sample projection、View、Claim 和 ChangeSet 是 canonical services/API，不由 MCP 复制实现。
 - 唯一数据库是 PostgreSQL；本地开发、测试和 CI 都不得回退 SQLite。
 - 附件二进制存文件系统，PostgreSQL 只保存 object-centric 元数据、校验和及引用。
-- Data payload 与 DataImport 是独立于附件的可追溯数据层；原始值不插值、不隐式换算单位。
-- 旧 AI、Compare、Evidence、Evaluation、Literature active runtime 已移除；如需恢复，另立 Plan 2。
+- DataRepresentation 与 DataImport 是独立于 Asset 的可追溯数据层；原始值不插值、不隐式换算单位。
+- legacy comparison、AI、Evidence、Evaluation、Literature runtime 不在当前产品中；Experiment 只提供 references。
 
 ## 工作约定
 
-- 开始前检查 Git 状态并阅读 active plan。
-- 数据库改动只通过 `api/alembic/versions/0001_v0_2_research_object_graph.py` 及后续 Alembic migration。
-- `0001` 是已发布基线，不重写；语义稳定化只新增 `0002_v0_2_semantic_stabilization`。
-- Plan 08 schema changes begin with `api/alembic/versions/0003_sample_recording_workflow.py`; do not modify `0001` or `0002`.
-- Plan 09 schema changes begin with `api/alembic/versions/0004_experiment_membership.py`; migrations `0001`–`0003` remain immutable.
+- 开始前检查 Git 状态并阅读 `docs/handoff/CURRENT_STATE.md`。
+- 数据库改动只通过 Alembic；`0001`–`0006` 是不可修改的 v0.2 历史，v0.3 使用 `0007`–`0012` 正式迁移。
 - 前端 API 类型与后端 Pydantic schema 必须显式对齐；错误、加载、空状态必须可见。
 - 不引入第二套数据库、队列、状态管理或表单引擎；不使用 React Flow。
 - 外部 agent 默认通过 ChangeSet proposal 写入；MCP 只调用 canonical service，不内嵌 LLM。
-- 变更后按风险执行 formatter、lint、typecheck、unit/API tests、build 和 browser smoke。
+- 变更后按风险执行 formatter、lint、typecheck、unit/API tests、build 和 browser smoke。后端测试必须使用显式隔离的 PostgreSQL 测试库。
 
 ## 常用命令
 

@@ -6,5 +6,5 @@ export default async function EquipmentDetailPage({
   params: Promise<{ equipmentId: string }>;
 }) {
   const { equipmentId } = await params;
-  return <WorkspaceApp view='detail' objectId={equipmentId} />;
+  return <WorkspaceApp view='detail' kind='research_object' objectId={equipmentId} />;
 }

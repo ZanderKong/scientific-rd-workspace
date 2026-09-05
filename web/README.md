@@ -7,7 +7,7 @@ npm ci
 npm run dev
 ```
 
-The API defaults to `http://localhost:8000/api/v1`; override it with `NEXT_PUBLIC_API_URL`. See the repository root README and `docs/UI_SPEC.md` for the active product contract.
+The API defaults to `http://localhost:8000/api/v1`; override it with `NEXT_PUBLIC_API_URL`. See the repository root README and `docs/current/UI_SPEC.md` for the active product contract.
 
 Validation:
 

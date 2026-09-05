@@ -1,6 +1,6 @@
 [project]
 name = "scientific-rd-workspace-api"
-version = "0.1.0"
+version = "0.3.0"
 description = "FastAPI backend for the Scientific R&D Workspace"
 requires-python = ">=3.11,<3.14"
 dependencies = [
@@ -37,3 +37,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 ignore = ["B008"] # FastAPI dependency injection intentionally uses Depends/File defaults.
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
+"app/agent/mcp_server.py" = ["E501"]

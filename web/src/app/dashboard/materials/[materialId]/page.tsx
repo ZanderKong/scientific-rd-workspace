@@ -6,5 +6,5 @@ export default async function MaterialDetailPage({
   params: Promise<{ materialId: string }>;
 }) {
   const { materialId } = await params;
-  return <WorkspaceApp view='detail' objectId={materialId} />;
+  return <WorkspaceApp view='detail' kind='research_object' objectId={materialId} />;
 }

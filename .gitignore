@@ -3,6 +3,8 @@ web/node_modules/
 web/.next/
 web/out/
 web/.vercel/
+web/output/
+web/test-results/
 web/.env*
 !web/.env.example
 web/npm-debug.log*

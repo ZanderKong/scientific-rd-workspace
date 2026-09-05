@@ -4,6 +4,8 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
+import { ProjectScopeProvider } from '@/features/workspace/project-scope/project-scope-provider';
+import { SettingsTrigger } from '@/features/settings/settings-trigger';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations('Metadata');
@@ -30,11 +32,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
       >
         {t('skipToContent')}
       </a>
-      <AppSidebar />
-      <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16'>
-        <Header />
-        {children}
-      </SidebarInset>
+      <ProjectScopeProvider>
+        <AppSidebar />
+        <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16 pb-16'>
+          <Header />
+          {children}
+        </SidebarInset>
+        <SettingsTrigger />
+      </ProjectScopeProvider>
     </SidebarProvider>
   );
 }

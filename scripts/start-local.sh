@@ -24,5 +24,9 @@ cleanup() {
   kill "$web_pid" "$api_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
-echo "Scientific R&D Workspace: http://127.0.0.1:3000/dashboard/overview"
-wait -n "$api_pid" "$web_pid"
+echo "Scientific R&D Workspace: http://127.0.0.1:3000/dashboard/samples"
+# Bash 3 on macOS does not support `wait -n`; keep the launcher portable.
+while kill -0 "$api_pid" 2>/dev/null && kill -0 "$web_pid" 2>/dev/null; do
+  sleep 1
+done
+wait "$api_pid" "$web_pid" 2>/dev/null || true

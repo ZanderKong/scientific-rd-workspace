@@ -1,380 +1,681 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, Check, FlaskConical, Plus, Save } from 'lucide-react';
 import { api, ApiError } from '@/lib/api-client';
-import type { ObjectType, SampleRecord } from '@/lib/domain';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ProcessBlock } from './process-block';
+import type {
+  JsonObject,
+  ProcessDefinition,
+  ProcessExecutionObjectBindingDraft,
+  ResearchObject,
+  SampleRecord,
+  UsageFieldDefinition
+} from '@/lib/domain';
 import {
   buildNewDraft,
-  clientId,
   draftToCreatePayload,
   draftToPutPayload,
   recordToDraft,
-  type DraftStep,
   type SampleRecordDraft
 } from './model';
 
-type SampleComposerProps = {
-  projectId: string | null;
-  initialRecord?: SampleRecord | null;
-  mode?: 'create' | 'edit';
-  zh: boolean;
-  onCancel?: () => void;
-  onSaved?: (record: SampleRecord) => void;
-};
+type ResolverState = { step: number; query: string } | null;
 
-function readableError(error: unknown) {
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error) return error.message;
-  return 'Request failed';
+const bindingRoles = ['subject', 'reagent', 'equipment', 'substrate', 'solution', 'product'];
+
+function definitionLabel(definition: ProcessDefinition) {
+  return `${definition.process_definition.title} · v${definition.current_version.version}`;
 }
 
-function reorder<T>(items: T[], index: number, direction: -1 | 1) {
-  const target = index + direction;
-  if (target < 0 || target >= items.length) return items;
-  const next = [...items];
-  [next[index], next[target]] = [next[target], next[index]];
-  return next;
+function fieldDefinitions(definitions: JsonObject): UsageFieldDefinition[] {
+  const fields = definitions.fields;
+  if (Array.isArray(fields)) {
+    return fields.filter(
+      (field): field is UsageFieldDefinition =>
+        typeof field === 'object' && field !== null && typeof field.key === 'string'
+    );
+  }
+  return Object.entries(definitions)
+    .filter(([, definition]) => typeof definition === 'object' && definition !== null)
+    .map(([key, definition]) => ({
+      key,
+      ...(definition as Omit<UsageFieldDefinition, 'key'>)
+    }));
+}
+
+function defaultBinding(object: ResearchObject): ProcessExecutionObjectBindingDraft {
+  const tags = new Set(object.tags.map((tag) => tag.toLowerCase()));
+  const includes = (...terms: string[]) =>
+    terms.some((term) => [...tags].some((tag) => tag.includes(term)));
+  if (includes('设备', 'equipment', '仪器')) {
+    return { research_object_id: object.id, direction: 'context', role: 'equipment', values: {} };
+  }
+  if (includes('基材', 'substrate', 'base')) {
+    return { research_object_id: object.id, direction: 'input', role: 'substrate', values: {} };
+  }
+  if (includes('原料', '试剂', 'material', 'reagent')) {
+    return { research_object_id: object.id, direction: 'input', role: 'reagent', values: {} };
+  }
+  return { research_object_id: object.id, direction: 'input', role: 'subject', values: {} };
+}
+
+function updateStep(
+  draft: SampleRecordDraft,
+  index: number,
+  patch: Partial<SampleRecordDraft['steps'][number]>
+) {
+  return {
+    ...draft,
+    steps: draft.steps.map((step, stepIndex) =>
+      stepIndex === index ? { ...step, ...patch } : step
+    )
+  };
 }
 
 export function SampleComposer({
   projectId,
   initialRecord,
-  mode = 'create',
-  zh,
-  onCancel,
   onSaved
-}: SampleComposerProps) {
-  const initialKey = `${mode}:${initialRecord?.sample.id ?? 'new'}`;
+}: {
+  projectId: string;
+  initialRecord?: SampleRecord | null;
+  onSaved?: (record: SampleRecord) => void;
+}) {
+  const [definitions, setDefinitions] = useState<ProcessDefinition[]>([]);
+  const [objects, setObjects] = useState<ResearchObject[]>([]);
   const [draft, setDraft] = useState<SampleRecordDraft>(() =>
-    initialRecord ? recordToDraft(initialRecord) : buildNewDraft(projectId ?? '')
+    initialRecord ? recordToDraft(initialRecord) : buildNewDraft()
   );
-  const [types, setTypes] = useState<ObjectType[]>([]);
-  const [typeError, setTypeError] = useState<string | null>(null);
+  const [resolver, setResolver] = useState<ResolverState>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savedRecord, setSavedRecord] = useState<SampleRecord | null>(null);
 
   useEffect(() => {
-    setDraft(initialRecord ? recordToDraft(initialRecord) : buildNewDraft(projectId ?? ''));
-    setSavedRecord(null);
-    setError(null);
-  }, [initialKey, initialRecord, projectId]);
+    setDraft(initialRecord ? recordToDraft(initialRecord) : buildNewDraft());
+  }, [initialRecord]);
 
   useEffect(() => {
+    if (!projectId) {
+      setDefinitions([]);
+      setObjects([]);
+      return;
+    }
     api
-      .listTypes()
-      .then(setTypes)
-      .catch((cause) => setTypeError(readableError(cause)));
-  }, []);
+      .listProcessDefinitions({ project_scope_id: projectId })
+      .then(setDefinitions)
+      .catch(() => setDefinitions([]));
+    api
+      .listObjects({
+        kind: 'research_object',
+        project_scope_id: projectId,
+        include_global: true,
+        limit: 100
+      })
+      .then(setObjects)
+      .catch(() => setObjects([]));
+  }, [projectId]);
 
-  const heading =
-    mode === 'edit'
-      ? zh
-        ? '编辑 Sample Record'
-        : 'Edit Sample Record'
-      : zh
-        ? '记录一个新 Sample'
-        : 'Record a new Sample';
-  const stepCount = draft.steps.length;
+  const resolverResults = useMemo(() => {
+    if (!resolver) return [];
+    const query = resolver.query.replace(/^[/@]/, '').trim().toLowerCase();
+    if (resolver.query.startsWith('/')) {
+      return definitions.filter((item) => {
+        const haystack =
+          `${item.process_definition.title} ${item.process_definition.code}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+    }
+    return objects.filter((item) => {
+      const haystack = `${item.title} ${item.code} ${item.tags.join(' ')}`.toLowerCase();
+      return !query || haystack.includes(query);
+    });
+  }, [definitions, objects, resolver]);
 
-  const payloadHint = useMemo(() => {
-    if (mode === 'edit')
-      return zh
-        ? '一次提交会重建当前线性链的 desired state。'
-        : 'One request reconciles the desired state of this linear chain.';
-    return zh
-      ? '一次提交会创建 Sample、Process、资源关系与 revision。'
-      : 'One request creates the Sample, Processes, resource relations, and revisions.';
-  }, [mode, zh]);
+  function chooseDefinition(index: number, definition: ProcessDefinition) {
+    const step = draft.steps[index];
+    setDraft(
+      updateStep(draft, index, {
+        process_definition_id: definition.process_definition.id,
+        process_definition_version_id: definition.current_version.id,
+        project_scope_id: projectId,
+        title_snapshot: definition.process_definition.title,
+        values: step.values ?? {}
+      })
+    );
+    setResolver(null);
+  }
 
-  function updateStep(index: number, next: DraftStep) {
-    setDraft((current) => ({
-      ...current,
-      steps: current.steps.map((step, stepIndex) => (stepIndex === index ? next : step))
-    }));
+  function chooseObject(index: number, object: ResearchObject) {
+    const step = draft.steps[index];
+    const current = step.object_bindings ?? [];
+    if (!current.some((binding) => binding.research_object_id === object.id)) {
+      setDraft(updateStep(draft, index, { object_bindings: [...current, defaultBinding(object)] }));
+    }
+    setResolver(null);
+  }
+
+  function selectFirstResolverResult(index: number) {
+    if (!resolver || resolverResults.length === 0) return;
+    if (resolver.query.startsWith('/')) {
+      chooseDefinition(index, resolverResults[0] as ProcessDefinition);
+      return;
+    }
+    chooseObject(index, resolverResults[0] as ResearchObject);
   }
 
   function addStep() {
-    setDraft((current) => ({
-      ...current,
+    const definition = definitions[0];
+    if (!definition) return;
+    setDraft({
+      ...draft,
       steps: [
-        ...current.steps,
+        ...draft.steps,
         {
-          clientId: clientId('step'),
-          title: '',
-          status: 'active',
-          properties_jsonb: {},
-          content_document: [],
-          resources: []
+          process_definition_id: definition.process_definition.id,
+          process_definition_version_id: definition.current_version.id,
+          project_scope_id: projectId,
+          title_snapshot: definition.process_definition.title,
+          status: 'draft',
+          values: {},
+          object_bindings: [],
+          data_bindings: []
         }
       ]
-    }));
-  }
-
-  function removeStep(index: number) {
-    setDraft((current) => ({
-      ...current,
-      steps: current.steps.filter((_, stepIndex) => stepIndex !== index)
-    }));
+    });
   }
 
   function moveStep(index: number, direction: -1 | 1) {
-    setDraft((current) => ({ ...current, steps: reorder(current.steps, index, direction) }));
+    const target = index + direction;
+    if (target < 0 || target >= draft.steps.length) return;
+    const steps = [...draft.steps];
+    [steps[index], steps[target]] = [steps[target], steps[index]];
+    setDraft({ ...draft, steps });
   }
 
-  async function save() {
-    if (!projectId) {
-      setError(zh ? '请先选择 Project Scope。' : 'Choose a Project Scope first.');
-      return;
-    }
-    if (!draft.sample.title.trim()) {
-      setError(zh ? '请填写 Sample 标题。' : 'Add a Sample title.');
-      return;
-    }
-    if (draft.steps.some((step) => !step.title.trim())) {
-      setError(
-        zh
-          ? '每个 Process Block 都需要标题，或用 / 选择定义。'
-          : 'Every Process Block needs a title, or choose a definition with /.'
-      );
+  function updateBinding(
+    stepIndex: number,
+    bindingIndex: number,
+    patch: Partial<ProcessExecutionObjectBindingDraft>
+  ) {
+    const bindings = draft.steps[stepIndex].object_bindings ?? [];
+    setDraft(
+      updateStep(draft, stepIndex, {
+        object_bindings: bindings.map((binding, index) =>
+          index === bindingIndex ? { ...binding, ...patch } : binding
+        )
+      })
+    );
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (
+      !draft.sample.title.trim() ||
+      draft.steps.length === 0 ||
+      draft.steps.some((step) => !step.process_definition_id)
+    ) {
+      setError('Add a title and choose a Process Definition for every step.');
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const saved =
-        mode === 'edit' && initialRecord
-          ? await api.updateSampleRecord(initialRecord.sample.id, draftToPutPayload(draft))
-          : await api.createSampleRecord(draftToCreatePayload(projectId, draft));
-      setSavedRecord(saved);
+      const saved = initialRecord
+        ? await api.updateSampleRecord(initialRecord.sample.id, draftToPutPayload(draft))
+        : await api.createSampleRecord(draftToCreatePayload(projectId, draft));
       onSaved?.(saved);
     } catch (cause) {
-      setError(readableError(cause));
+      setError(
+        cause instanceof ApiError || cause instanceof Error ? cause.message : 'Request failed'
+      );
     } finally {
       setSaving(false);
     }
   }
 
-  if (savedRecord) {
-    return (
-      <div className='mx-auto w-full max-w-4xl px-4 py-8 md:px-8' data-testid='sample-success'>
-        <div className='overflow-hidden rounded-[1.75rem] border border-emerald-500/25 bg-emerald-500/[0.06] shadow-sm'>
-          <div className='flex items-start gap-4 border-b border-emerald-500/15 p-6 md:p-8'>
-            <div className='flex size-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white'>
-              <Check />
-            </div>
-            <div>
-              <p className='font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300'>
-                Commit complete
-              </p>
-              <h1 className='mt-1 text-2xl font-semibold tracking-tight'>
-                {zh ? 'Sample Record 已保存' : 'Sample Record saved'}
-              </h1>
-              <p className='mt-2 text-sm text-muted-foreground'>
-                {savedRecord.sample.code} · {savedRecord.sample.title} · {savedRecord.steps.length}{' '}
-                {zh ? '个 Process' : 'Processes'}
-              </p>
-            </div>
-          </div>
-          <div className='grid gap-2 p-6 sm:grid-cols-3 md:p-8'>
-            <Link
-              href={`/dashboard/samples/${savedRecord.sample.id}`}
-              className='rounded-xl bg-primary px-3 py-3 text-center text-sm font-medium text-primary-foreground hover:opacity-90'
-            >
-              {zh ? '查看样品' : 'View Sample'}
-            </Link>
-            <Link
-              href={`/dashboard/samples/new?project=${projectId}&from=${savedRecord.sample.id}`}
-              className='rounded-xl border bg-background px-3 py-3 text-center text-sm font-medium hover:bg-muted'
-            >
-              {zh ? '基于此样品新建' : 'Create from this Sample'}
-            </Link>
-            <Link
-              href={`/dashboard/samples/new?project=${projectId}`}
-              className='rounded-xl border bg-background px-3 py-3 text-center text-sm font-medium hover:bg-muted'
-            >
-              {zh ? '录入全新样品' : 'Record a new Sample'}
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const canAddStep = Boolean(projectId && definitions.length);
 
   return (
-    <form
-      aria-label={heading}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void save();
-      }}
-      className='min-h-full bg-[radial-gradient(circle_at_85%_0%,color-mix(in_oklch,var(--primary)_10%,transparent),transparent_28rem)]'
-      data-testid='sample-composer'
-    >
-      <div className='mx-auto w-full max-w-[1320px] px-4 py-6 md:px-8 md:py-9'>
-        <div className='mb-8 flex flex-wrap items-end justify-between gap-4'>
-          <div>
-            <Link
-              href='/dashboard/samples'
-              className='mb-4 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'
-            >
-              <ArrowLeft className='size-3' /> {zh ? '返回 Samples' : 'Back to Samples'}
-            </Link>
-            <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-              Sample-first / record
-            </p>
-            <h1 className='mt-2 flex items-center gap-3 text-3xl font-semibold tracking-tight'>
-              <FlaskConical className='size-7 text-primary' />
-              {heading}
-            </h1>
-            <p className='mt-2 max-w-2xl text-sm leading-6 text-muted-foreground'>
-              {payloadHint}{' '}
-              {typeError && (
-                <span className='text-amber-700 dark:text-amber-300'>
-                  ·{' '}
-                  {zh
-                    ? 'Process 定义暂不可用，可继续使用自定义过程。'
-                    : 'Definitions unavailable; custom Processes remain available.'}
-                </span>
-              )}
-            </p>
-          </div>
-          <div className='flex items-center gap-2'>
-            {onCancel && (
-              <Button type='button' variant='ghost' onClick={onCancel}>
-                {zh ? '取消' : 'Cancel'}
-              </Button>
-            )}
-            <Button type='submit' size='lg' disabled={saving} data-testid='save-sample-record'>
-              <Save />{' '}
-              {saving
-                ? zh
-                  ? '保存中…'
-                  : 'Saving…'
-                : zh
-                  ? '保存 Sample Record'
-                  : 'Save Sample Record'}
-            </Button>
-          </div>
-        </div>
-
-        <div className='mb-6 grid gap-4 rounded-[1.35rem] border bg-card/70 p-4 md:grid-cols-[minmax(0,1fr)_10rem_10rem] md:p-5'>
-          <label className='grid gap-1.5 text-xs font-medium'>
-            {zh ? 'Sample 标题' : 'Sample title'}
-            <Input
+    <form onSubmit={submit} className='space-y-5' data-testid='sample-composer'>
+      <section className='rounded-2xl border bg-card/80 p-5'>
+        <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
+          Sample Composer
+        </p>
+        <h1 className='mt-2 text-xl font-semibold'>
+          {initialRecord ? 'Edit sample record' : 'New sample record'}
+        </h1>
+        <p className='mt-1 text-sm text-muted-foreground'>
+          Build an ordered aggregate. Each step keeps its execution identity and pinned definition
+          version.
+        </p>
+        <div className='mt-5 grid gap-4 md:grid-cols-2'>
+          <label className='grid gap-1 text-sm'>
+            Title
+            <input
+              required
+              data-testid='sample-title'
+              className='h-9 rounded-md border bg-background px-3'
               value={draft.sample.title}
               onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  sample: { ...current.sample, title: event.target.value }
-                }))
+                setDraft({ ...draft, sample: { ...draft.sample, title: event.target.value } })
               }
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder={
-                zh ? '例如：KI 氯气纸带 · 2026-09-03' : 'e.g. KI chlorine strip · 2026-09-03'
-              }
-              className='h-10 bg-background/70'
-              autoFocus
             />
           </label>
-          <label className='grid gap-1.5 text-xs font-medium'>
-            {zh ? 'Sample ID（可选）' : 'Sample ID (optional)'}
-            <Input
-              value={draft.sample.code ?? ''}
+          <label className='grid gap-1 text-sm'>
+            Tags
+            <input
+              data-testid='sample-tags'
+              className='h-9 rounded-md border bg-background px-3'
+              value={draft.sample.tags}
               onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  sample: { ...current.sample, code: event.target.value }
-                }))
+                setDraft({ ...draft, sample: { ...draft.sample, tags: event.target.value } })
               }
-              placeholder='SMP-…'
-              className='h-10 bg-background/70 font-mono text-xs'
             />
-          </label>
-          <label className='grid gap-1.5 text-xs font-medium'>
-            {zh ? '状态' : 'Status'}
-            <select
-              value={draft.sample.status}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  sample: { ...current.sample, status: event.target.value }
-                }))
-              }
-              className='h-10 rounded-lg border bg-background/70 px-2 text-sm'
-            >
-              <option value='draft'>{zh ? '草稿' : 'Draft'}</option>
-              <option value='active'>{zh ? '活跃' : 'Active'}</option>
-              <option value='completed'>{zh ? '已完成' : 'Completed'}</option>
-            </select>
           </label>
         </div>
+      </section>
 
-        <div className='mb-3 flex items-end justify-between gap-3'>
+      <section className='space-y-3'>
+        <div className='flex items-center justify-between gap-3'>
           <div>
-            <p className='font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>
-              Workflow chain
+            <h2 className='font-semibold'>Process steps</h2>
+            <p className='text-sm text-muted-foreground'>
+              Use “/” for definitions and “@” for scoped objects or tags.
             </p>
-            <h2 className='mt-1 text-xl font-semibold'>
-              {zh ? 'Process Blocks' : 'Process Blocks'}{' '}
-              <span className='ml-1 font-mono text-sm font-normal text-muted-foreground'>
-                {stepCount}
-              </span>
-            </h2>
           </div>
-          <Button type='button' variant='outline' onClick={addStep}>
-            <Plus /> {zh ? '添加 Process' : 'Add Process'}
-          </Button>
-        </div>
-        <div className='space-y-4'>
-          {draft.steps.map((step, index) => (
-            <ProcessBlock
-              key={step.clientId}
-              index={index}
-              total={draft.steps.length}
-              draft={step}
-              projectId={projectId ?? ''}
-              types={types}
-              zh={zh}
-              onChange={(next) => updateStep(index, next)}
-              onRemove={() => removeStep(index)}
-              onMove={(direction) => moveStep(index, direction)}
-            />
-          ))}
-        </div>
-        <div className='mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
-          <span>
-            {zh
-              ? '快捷键：/ 选 Process · @ 找资源 · ↑↓ 移动 · Alt+↑↓ 重排 · Tab 浏览 · Cmd/Ctrl+Enter 保存'
-              : 'Shortcuts: / Process · @ resources · ↑↓ move · Alt+↑↓ reorder · Tab navigate · Cmd/Ctrl+Enter save'}
-          </span>
           <button
             type='button'
+            data-testid='add-sample-step'
+            disabled={!canAddStep}
             onClick={addStep}
-            className='font-medium text-primary hover:underline'
+            className='rounded-md border px-3 py-2 text-sm hover:border-primary disabled:cursor-not-allowed disabled:opacity-50'
           >
-            + {zh ? '继续添加步骤' : 'Add another step'}
+            Add step
           </button>
         </div>
-        {error && (
-          <div
-            role='alert'
-            className='mt-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive'
-          >
-            {error}
+
+        {!projectId && (
+          <div className='rounded-2xl border border-dashed p-6 text-sm text-muted-foreground'>
+            Select a project before creating a Sample Record.
           </div>
         )}
-      </div>
+        {projectId && definitions.length === 0 && (
+          <div
+            className='rounded-2xl border border-dashed p-6 text-sm text-muted-foreground'
+            data-testid='sample-definition-prerequisite'
+          >
+            No Process Definitions are available in this project. Create a definition before adding
+            a Sample step.
+          </div>
+        )}
+        {draft.steps.length === 0 && canAddStep && (
+          <div className='rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground'>
+            Add the first Process Execution step.
+          </div>
+        )}
+
+        {draft.steps.map((step, index) => {
+          const definition = definitions.find(
+            (item) => item.process_definition.id === step.process_definition_id
+          );
+          const executionFields = fieldDefinitions(
+            definition?.current_version.execution_field_definitions ?? {}
+          );
+          const bindings = step.object_bindings ?? [];
+          return (
+            <article
+              key={step.execution_id ?? `new-${index}`}
+              data-testid={`sample-step-${index}`}
+              className='rounded-2xl border bg-card/80 p-5'
+            >
+              <div className='flex items-start justify-between gap-3'>
+                <div>
+                  <p className='font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>
+                    Step {index + 1}
+                  </p>
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    {step.execution_id
+                      ? `Execution ${step.execution_id.slice(0, 8)}`
+                      : 'New execution'}
+                  </p>
+                </div>
+                <div className='flex gap-1'>
+                  <button
+                    type='button'
+                    aria-label='Move step up'
+                    data-testid={`move-step-up-${index}`}
+                    onClick={() => moveStep(index, -1)}
+                    className='rounded border px-2 py-1 text-xs'
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type='button'
+                    aria-label='Move step down'
+                    data-testid={`move-step-down-${index}`}
+                    onClick={() => moveStep(index, 1)}
+                    className='rounded border px-2 py-1 text-xs'
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type='button'
+                    aria-label='Remove step'
+                    data-testid={`remove-step-${index}`}
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        steps: draft.steps.filter((_, stepIndex) => stepIndex !== index)
+                      })
+                    }
+                    className='rounded border px-2 py-1 text-xs text-destructive'
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+
+              <div className='mt-4 grid gap-4 md:grid-cols-2'>
+                <label className='grid gap-1 text-sm md:col-span-2'>
+                  Process Definition
+                  <input
+                    data-testid={`definition-resolver-${index}`}
+                    className='h-9 rounded-md border bg-background px-3'
+                    value={
+                      resolver?.step === index && resolver.query.startsWith('/')
+                        ? resolver.query
+                        : definition
+                          ? definitionLabel(definition)
+                          : step.process_definition_id
+                    }
+                    placeholder='/ search definitions'
+                    onChange={(event) =>
+                      setResolver({
+                        step: index,
+                        query: `/${event.target.value.replace(/^\/+/, '')}`
+                      })
+                    }
+                    onFocus={() => setResolver({ step: index, query: '/' })}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        selectFirstResolverResult(index);
+                      }
+                      if (event.key === 'Escape') setResolver(null);
+                    }}
+                  />
+                  {resolver?.step === index && resolver.query.startsWith('/') && (
+                    <div className='max-h-44 overflow-auto rounded-lg border bg-background p-1 shadow-sm'>
+                      {resolverResults.map((candidate) => {
+                        const item = candidate as ProcessDefinition;
+                        return (
+                          <button
+                            type='button'
+                            key={item.process_definition.id}
+                            data-testid={`definition-option-${item.process_definition.id}`}
+                            onClick={() => chooseDefinition(index, item)}
+                            className='block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted'
+                          >
+                            {definitionLabel(item)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </label>
+
+                <label className='grid gap-1 text-sm'>
+                  Status
+                  <select
+                    data-testid={`step-status-${index}`}
+                    className='h-9 rounded-md border bg-background px-3'
+                    value={step.status ?? 'draft'}
+                    onChange={(event) =>
+                      setDraft(
+                        updateStep(draft, index, {
+                          status: event.target.value as SampleRecordDraft['steps'][number]['status']
+                        })
+                      )
+                    }
+                  >
+                    <option value='draft'>Draft</option>
+                    <option value='running'>Running</option>
+                    <option value='completed'>Completed</option>
+                    <option value='cancelled'>Cancelled</option>
+                  </select>
+                </label>
+                <label className='grid gap-1 text-sm'>
+                  Note
+                  <input
+                    data-testid={`step-note-${index}`}
+                    className='h-9 rounded-md border bg-background px-3'
+                    value={step.note ?? ''}
+                    onChange={(event) =>
+                      setDraft(updateStep(draft, index, { note: event.target.value }))
+                    }
+                  />
+                </label>
+
+                {executionFields.map((field) => (
+                  <label key={field.key} className='grid gap-1 text-sm'>
+                    {field.label || field.key}
+                    <input
+                      data-testid={`execution-field-${index}-${field.key}`}
+                      className='h-9 rounded-md border bg-background px-3'
+                      value={String(step.values?.[field.key] ?? field.default_value ?? '')}
+                      type={field.value_type === 'number' ? 'number' : 'text'}
+                      onChange={(event) =>
+                        setDraft(
+                          updateStep(draft, index, {
+                            values: {
+                              ...step.values,
+                              [field.key]: event.target.value
+                            } as JsonObject
+                          })
+                        )
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className='mt-4 rounded-xl border border-dashed p-3'>
+                <div className='flex items-center justify-between gap-3'>
+                  <div>
+                    <p className='text-sm font-medium'>Objects and tags</p>
+                    <p className='text-xs text-muted-foreground'>
+                      Resolve with @. Defaults follow tags; direction and role remain editable.
+                    </p>
+                  </div>
+                  <input
+                    data-testid={`object-resolver-${index}`}
+                    className='h-8 w-48 rounded-md border bg-background px-2 text-sm'
+                    placeholder='@ object or tag'
+                    value={
+                      resolver?.step === index && resolver.query.startsWith('@')
+                        ? resolver.query
+                        : ''
+                    }
+                    onChange={(event) =>
+                      setResolver({
+                        step: index,
+                        query: `@${event.target.value.replace(/^@+/, '')}`
+                      })
+                    }
+                    onFocus={() => setResolver({ step: index, query: '@' })}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        selectFirstResolverResult(index);
+                      }
+                      if (event.key === 'Escape') setResolver(null);
+                    }}
+                  />
+                </div>
+                {resolver?.step === index && resolver.query.startsWith('@') && (
+                  <div className='mt-2 max-h-36 overflow-auto rounded-lg border bg-background p-1'>
+                    {resolverResults.map((candidate) => {
+                      const item = candidate as ResearchObject;
+                      return (
+                        <button
+                          type='button'
+                          key={item.id}
+                          data-testid={`object-option-${item.id}`}
+                          onClick={() => chooseObject(index, item)}
+                          className='block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted'
+                        >
+                          <span className='font-medium'>{item.title}</span>
+                          <span className='ml-2 text-xs text-muted-foreground'>
+                            {item.tags.join(' · ') || item.kind}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className='mt-3 grid gap-3'>
+                  {bindings.map((binding, bindingIndex) => {
+                    const object = objects.find((item) => item.id === binding.research_object_id);
+                    const fields = fieldDefinitions(object?.process_field_definitions ?? {});
+                    return (
+                      <div
+                        key={binding.research_object_id}
+                        data-testid={`object-binding-${index}-${binding.research_object_id}`}
+                        className='rounded-lg border bg-background p-3'
+                      >
+                        <div className='flex flex-wrap items-center justify-between gap-2'>
+                          <p className='text-sm font-medium'>
+                            {object?.title ?? binding.research_object_id}
+                          </p>
+                          <button
+                            type='button'
+                            data-testid={`remove-binding-${index}-${binding.research_object_id}`}
+                            onClick={() =>
+                              setDraft(
+                                updateStep(draft, index, {
+                                  object_bindings: bindings.filter(
+                                    (_, candidateIndex) => candidateIndex !== bindingIndex
+                                  )
+                                })
+                              )
+                            }
+                            className='text-xs text-destructive'
+                          >
+                            Remove binding
+                          </button>
+                        </div>
+                        <div className='mt-3 grid gap-3 sm:grid-cols-2'>
+                          <label className='grid gap-1 text-xs'>
+                            Direction
+                            <select
+                              data-testid={`binding-direction-${index}-${binding.research_object_id}`}
+                              className='h-8 rounded-md border bg-card px-2 text-sm'
+                              value={binding.direction}
+                              onChange={(event) =>
+                                updateBinding(index, bindingIndex, {
+                                  direction: event.target
+                                    .value as ProcessExecutionObjectBindingDraft['direction']
+                                })
+                              }
+                            >
+                              <option value='input'>Input</option>
+                              <option value='context'>Context</option>
+                              <option value='output'>Output</option>
+                            </select>
+                          </label>
+                          <label className='grid gap-1 text-xs'>
+                            Role
+                            <input
+                              list={`binding-roles-${index}-${bindingIndex}`}
+                              data-testid={`binding-role-${index}-${binding.research_object_id}`}
+                              className='h-8 rounded-md border bg-card px-2 text-sm'
+                              value={binding.role ?? ''}
+                              onChange={(event) =>
+                                updateBinding(index, bindingIndex, { role: event.target.value })
+                              }
+                            />
+                            <datalist id={`binding-roles-${index}-${bindingIndex}`}>
+                              {bindingRoles.map((role) => (
+                                <option key={role} value={role}>
+                                  {role}
+                                </option>
+                              ))}
+                            </datalist>
+                          </label>
+                          {fields.map((field) => {
+                            const value = binding.values?.[field.key];
+                            return (
+                              <label key={field.key} className='grid gap-1 text-xs'>
+                                {field.label || field.key}
+                                <div className='flex gap-2'>
+                                  <input
+                                    data-testid={`binding-field-${index}-${binding.research_object_id}-${field.key}`}
+                                    className='h-8 min-w-0 flex-1 rounded-md border bg-card px-2 text-sm'
+                                    type={field.value_type === 'number' ? 'number' : 'text'}
+                                    value={String(value?.value ?? field.default_value ?? '')}
+                                    onChange={(event) =>
+                                      updateBinding(index, bindingIndex, {
+                                        values: {
+                                          ...binding.values,
+                                          [field.key]: {
+                                            ...value,
+                                            value: event.target.value,
+                                            ...(value?.unit || field.default_unit
+                                              ? { unit: value?.unit ?? field.default_unit }
+                                              : {})
+                                          }
+                                        }
+                                      })
+                                    }
+                                  />
+                                  {(value?.unit || field.default_unit) && (
+                                    <input
+                                      aria-label={`${field.label || field.key} unit`}
+                                      className='h-8 w-16 rounded-md border bg-card px-2 text-sm'
+                                      value={value?.unit ?? field.default_unit ?? ''}
+                                      onChange={(event) =>
+                                        updateBinding(index, bindingIndex, {
+                                          values: {
+                                            ...binding.values,
+                                            [field.key]: {
+                                              value: value?.value ?? field.default_value ?? '',
+                                              unit: event.target.value
+                                            }
+                                          }
+                                        })
+                                      }
+                                    />
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      {error && (
+        <p
+          role='alert'
+          className='rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive'
+        >
+          {error}
+        </p>
+      )}
+      <button
+        type='submit'
+        data-testid='save-sample-record'
+        disabled={saving || !draft.sample.title.trim() || draft.steps.length === 0}
+        className='rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50'
+      >
+        {saving ? 'Saving…' : 'Save aggregate record'}
+      </button>
     </form>
   );
 }

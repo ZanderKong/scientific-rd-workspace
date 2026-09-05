@@ -1,31 +1,30 @@
 import type {
-  Attachment,
+  Asset,
+  ChangeSet,
+  ClaimRecord,
   DataImport,
-  DataPayload,
-  DataPoint,
-  ExperimentContext,
-  ImportPreview,
+  DataRecord,
+  DataRepresentation,
+  ExperimentRecord,
+  ExperimentReferenceDraft,
   JsonObject,
   ObjectRelation,
   ObjectRevision,
   ObjectType,
-  ProcessComposition,
-  ProcessCompositionItem,
-  ChangeSet,
-  DataRecord,
-  ExperimentComparison,
-  ExperimentRecord,
-  ExecutionRead,
+  ProcessDefinition,
+  ProcessExecution,
+  ProcessExecutionDraft,
   ProjectContext,
   ProjectRecord,
   ProjectSearch,
   ProjectSummary,
+  RelationType,
   ResearchObject,
   ResearchObjectKind,
-  SampleContext,
   SampleRecord,
   SampleRecordCreatePayload,
   SampleRecordPutPayload,
+  ViewRecord,
   WorkspaceSummary
 } from './domain';
 
@@ -37,7 +36,6 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/
 export class ApiError extends Error {
   status: number;
   detail: unknown;
-
   constructor(message: string, status: number, detail?: unknown) {
     super(message);
     this.name = 'ApiError';
@@ -47,20 +45,7 @@ export class ApiError extends Error {
 }
 
 function errorMessage(detail: unknown, fallback: string): string {
-  if (typeof detail === 'string') {
-    try {
-      const parsed = JSON.parse(detail) as {
-        errors?: Array<{ path?: string; message?: string }>;
-        code?: string;
-      };
-      if (parsed.errors?.length)
-        return parsed.errors.map((item) => `${item.path ?? '$'}: ${item.message ?? ''}`).join('; ');
-      if (parsed.code) return parsed.code;
-    } catch {
-      return detail;
-    }
-    return detail;
-  }
+  if (typeof detail === 'string') return detail;
   if (detail && typeof detail === 'object' && 'message' in detail) return String(detail.message);
   if (detail && typeof detail === 'object' && 'error' in detail) {
     const error = detail.error;
@@ -81,20 +66,14 @@ export async function request<T>(
   try {
     response = await fetch(`${API_BASE}${path}`, { ...init, signal: controller.signal });
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (error instanceof DOMException && error.name === 'AbortError')
       throw new ApiError('Request timed out. Try again.', 408);
-    }
     throw new ApiError('Backend unreachable. Start the API and try again.', 0, error);
   } finally {
     globalThis.clearTimeout(timer);
   }
   const text = await response.text();
-  let data: unknown;
-  try {
-    data = text ? (JSON.parse(text) as unknown) : undefined;
-  } catch {
-    data = text;
-  }
+  const data: unknown = text ? JSON.parse(text) : undefined;
   if (!response.ok) {
     const detail = data && typeof data === 'object' && 'detail' in data ? data.detail : data;
     throw new ApiError(
@@ -112,6 +91,16 @@ const json = (body: unknown, headers: Record<string, string> = {}): RequestInit 
   body: JSON.stringify(body)
 });
 
+function queryString(params: Record<string, string | number | boolean | string[] | undefined>) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) value.forEach((item) => query.append(key, item));
+    else query.set(key, String(value));
+  }
+  return query.size ? `?${query}` : '';
+}
+
 export const api = {
   getCapabilities: () => request<Record<string, unknown>>('/capabilities'),
   listTypes: () => request<ObjectType[]>('/object-types'),
@@ -120,35 +109,26 @@ export const api = {
     params: {
       kind?: ResearchObjectKind;
       kinds?: ResearchObjectKind[];
+      tag?: string;
       project_scope_id?: string;
-      type_key?: string;
-      type_id?: string;
       q?: string;
       status?: string;
       include_global?: boolean;
       limit?: number;
       offset?: number;
     } = {}
-  ) => {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value === undefined) return;
-      if (key === 'kinds' && Array.isArray(value)) {
-        value.forEach((kind) => query.append(key, String(kind)));
-      } else {
-        query.set(key, String(value));
-      }
-    });
-    return request<ResearchObject[]>(`/objects${query.size ? `?${query.toString()}` : ''}`);
-  },
+  ) => request<ResearchObject[]>(`/objects${queryString(params)}`),
   getObject: (id: string) => request<ResearchObject>(`/objects/${id}`),
+  deleteObject: (id: string) => request<void>(`/objects/${id}`, { method: 'DELETE' }),
   createObject: (payload: {
     kind: ResearchObjectKind;
     title: string;
+    code?: string | null;
     project_scope_id?: string | null;
     status?: string;
+    tags?: string[];
     properties_jsonb?: JsonObject;
-    usage_schema_jsonb?: JsonObject;
+    process_field_definitions?: JsonObject;
     content_document?: JsonObject[];
   }) => request<ResearchObject>('/objects', json(payload)),
   updateObject: (
@@ -159,13 +139,27 @@ export const api = {
         | 'title'
         | 'status'
         | 'project_scope_id'
+        | 'tags'
         | 'properties_jsonb'
-        | 'usage_schema_jsonb'
+        | 'process_field_definitions'
         | 'content_document'
       >
     >
   ) => request<ResearchObject>(`/objects/${id}`, { ...json(payload), method: 'PATCH' }),
   listRelations: (id: string) => request<ObjectRelation[]>(`/objects/${id}/relations`),
+  createRelation: (payload: {
+    source_object_id: string;
+    target_object_id: string;
+    relation_type: RelationType;
+    role?: string | null;
+    properties_jsonb?: JsonObject;
+  }) => request<ObjectRelation>('/relations', json(payload)),
+  updateRelation: (id: string, payload: { role?: string | null; properties_jsonb?: JsonObject }) =>
+    request<ObjectRelation>(`/relations/${id}`, { ...json(payload), method: 'PATCH' }),
+  deleteRelation: (id: string) => request<void>(`/relations/${id}`, { method: 'DELETE' }),
+  listRevisions: (id: string) => request<ObjectRevision[]>(`/objects/${id}/revisions`),
+  createRevision: (id: string, change_note?: string) =>
+    request<ObjectRevision>(`/objects/${id}/revisions`, json({ change_note: change_note || null })),
   getProjectSummary: (id: string) => request<ProjectSummary>(`/projects/${id}/summary`),
   createProjectRecord: (payload: unknown, idempotencyKey?: string) =>
     request<ProjectRecord>(
@@ -181,23 +175,41 @@ export const api = {
   getProjectContext: (id: string) => request<ProjectContext>(`/projects/${id}/context`),
   searchProject: (
     id: string,
-    params: { q?: string; kinds?: string[]; status?: string; limit?: number; offset?: number } = {}
-  ) => {
-    const query = new URLSearchParams();
-    if (params.q) query.set('q', params.q);
-    params.kinds?.forEach((kind) => query.append('kinds', kind));
-    if (params.status) query.set('status', params.status);
-    if (params.limit !== undefined) query.set('limit', String(params.limit));
-    if (params.offset !== undefined) query.set('offset', String(params.offset));
-    return request<ProjectSearch>(`/projects/${id}/search${query.size ? `?${query}` : ''}`);
-  },
+    params: {
+      q?: string;
+      kinds?: ResearchObjectKind[];
+      status?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ) => request<ProjectSearch>(`/projects/${id}/search${queryString(params)}`),
   getWorkspaceSummary: () => request<WorkspaceSummary>('/workspace/summary'),
-  getComposition: (id: string) => request<ProcessComposition>(`/processes/${id}/composition`),
-  putComposition: (id: string, items: ProcessCompositionItem[]) =>
-    request<ProcessComposition>(`/processes/${id}/composition`, {
-      ...json({ items }),
+
+  listProcessDefinitions: (params: { project_scope_id?: string; q?: string } = {}) =>
+    request<ProcessDefinition[]>(`/process-definitions${queryString(params)}`),
+  getProcessDefinition: (id: string) => request<ProcessDefinition>(`/process-definitions/${id}`),
+  createProcessDefinition: (payload: unknown) =>
+    request<ProcessDefinition>('/process-definitions', json(payload)),
+  createProcessDefinitionVersion: (id: string, payload: unknown) =>
+    request<unknown>(`/process-definitions/${id}/versions`, json(payload)),
+  createProcessExecution: (payload: ProcessExecutionDraft, idempotencyKey?: string) =>
+    request<ProcessExecution>(
+      '/process-executions',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  getProcessExecution: (id: string) => request<ProcessExecution>(`/process-executions/${id}`),
+  updateProcessExecution: (
+    id: string,
+    payload: Partial<ProcessExecutionDraft> & { change_note?: string },
+    etag?: string
+  ) =>
+    request<ProcessExecution>(`/process-executions/${id}`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
       method: 'PUT'
     }),
+  listObjectExecutions: (id: string) =>
+    request<ProcessExecution[]>(`/objects/${id}/process-executions`),
+
   getSampleRecord: (id: string) => request<SampleRecord>(`/samples/${id}/record`),
   createSampleRecord: (payload: SampleRecordCreatePayload, idempotencyKey?: string) =>
     request<SampleRecord>(
@@ -209,6 +221,7 @@ export const api = {
       ...json(payload, etag ? { 'If-Match': etag } : {}),
       method: 'PUT'
     }),
+
   createExperimentRecord: (payload: unknown, idempotencyKey?: string) =>
     request<ExperimentRecord>(
       '/experiment-records',
@@ -220,52 +233,70 @@ export const api = {
       ...json(payload, etag ? { 'If-Match': etag } : {}),
       method: 'PUT'
     }),
-  getExperimentComparison: (id: string, differencesOnly = false) =>
-    request<ExperimentComparison>(
-      `/experiments/${id}/comparison?differences_only=${differencesOnly}`
-    ),
+  experimentReferencePayload: (
+    target_id: string,
+    role?: string,
+    note?: string
+  ): ExperimentReferenceDraft => ({ target_id, role, note }),
+
   createDataRecord: (payload: unknown, idempotencyKey?: string) =>
     request<DataRecord>(
       '/data-records',
       json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
     ),
   getDataRecord: (id: string) => request<DataRecord>(`/data/${id}/record`),
-  createScalarPayload: (id: string, payload: unknown, idempotencyKey?: string) =>
-    request<DataPayload>(
-      `/data/${id}/payloads/scalar`,
-      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
-    ),
-  createTablePayload: (id: string, payload: unknown, idempotencyKey?: string) =>
-    request<DataPayload>(
-      `/data/${id}/payloads/table`,
-      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
-    ),
-  createFilePayload: (id: string, payload: unknown, idempotencyKey?: string) =>
-    request<DataPayload>(
-      `/data/${id}/payloads/file`,
-      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
-    ),
-  startExecution: (id: string, idempotencyKey?: string) =>
-    request<ExecutionRead>(
-      `/samples/${id}/execution/start`,
-      json({}, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
-    ),
-  getExecution: (id: string) => request<ExecutionRead>(`/samples/${id}/execution`),
-  updateExecution: (id: string, payload: unknown, etag?: string) =>
-    request<ExecutionRead>(`/samples/${id}/execution`, {
+  updateDataRecord: (id: string, payload: unknown, etag?: string) =>
+    request<DataRecord>(`/data/${id}/record`, {
       ...json(payload, etag ? { 'If-Match': etag } : {}),
       method: 'PUT'
     }),
-  completeExecution: (id: string, idempotencyKey?: string) =>
-    request<ExecutionRead>(
-      `/samples/${id}/execution/complete`,
-      json({}, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+  createRepresentation: (id: string, payload: unknown) =>
+    request<DataRepresentation>(`/data/${id}/representations`, json(payload)),
+  listRepresentations: (id: string) => request<DataRepresentation[]>(`/data/${id}/representations`),
+  getRepresentation: (dataId: string, representationId: string) =>
+    request<DataRepresentation>(`/data/${dataId}/representations/${representationId}`),
+  setDataRelations: (id: string, subjects: string[], derived_from: string[]) =>
+    request<void>(`/data/${id}/relations${queryString({ subjects, derived_from })}`, {
+      method: 'PUT'
+    }),
+  listImports: (id: string) => request<DataImport[]>(`/data/${id}/imports`),
+  previewImport: (id: string, source_asset_id: string, sheet_name?: string | null) =>
+    request<DataImport>(
+      `/data/${id}/imports/preview`,
+      json({ source_asset_id, sheet_name: sheet_name || null })
     ),
-  cancelExecution: (id: string, idempotencyKey?: string) =>
-    request<ExecutionRead>(
-      `/samples/${id}/execution/cancel`,
-      json({}, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+  commitImport: (dataId: string, importId: string, payload: unknown) =>
+    request<DataRepresentation>(
+      `/data/${dataId}/imports/${importId}/commit`,
+      { ...json(payload), method: 'POST' },
+      60000
     ),
+
+  createView: (payload: unknown) => request<ViewRecord>('/views', json(payload)),
+  getView: (id: string) => request<ViewRecord>(`/views/${id}`),
+  updateView: (id: string, payload: unknown, etag?: string) =>
+    request<ViewRecord>(`/views/${id}`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
+      method: 'PUT'
+    }),
+  listViewRevisions: (id: string) => request<unknown[]>(`/views/${id}/revisions`),
+  createClaim: (payload: unknown) => request<ClaimRecord>('/claims', json(payload)),
+  getClaim: (id: string) => request<ClaimRecord>(`/claims/${id}`),
+  updateClaim: (id: string, payload: unknown, etag?: string) =>
+    request<ClaimRecord>(`/claims/${id}`, {
+      ...json(payload, etag ? { 'If-Match': etag } : {}),
+      method: 'PUT'
+    }),
+
+  listAssets: (id: string) => request<Asset[]>(`/objects/${id}/assets`),
+  uploadAsset: (id: string, file: File) => {
+    const body = new FormData();
+    body.append('file', file);
+    return request<Asset>(`/objects/${id}/assets`, { method: 'POST', body }, 60000);
+  },
+  deleteAsset: (id: string) => request<void>(`/assets/${id}`, { method: 'DELETE' }),
+  downloadUrl: (id: string) => `${API_BASE}/assets/${id}/download`,
+
   listChangeSets: (projectId?: string) =>
     request<ChangeSet[]>(`/change-sets${projectId ? `?project_scope_id=${projectId}` : ''}`),
   getChangeSet: (id: string) => request<ChangeSet>(`/change-sets/${id}`),
@@ -276,45 +307,5 @@ export const api = {
     ),
   reviewChangeSet: (id: string, payload: unknown) =>
     request<ChangeSet>(`/change-sets/${id}/review`, json(payload)),
-  createRelation: (payload: {
-    source_object_id: string;
-    target_object_id: string;
-    relation_type: ObjectRelation['relation_type'];
-    role?: string | null;
-    properties_jsonb?: JsonObject;
-  }) => request<ObjectRelation>('/relations', json(payload)),
-  updateRelation: (id: string, payload: { role?: string | null; properties_jsonb?: JsonObject }) =>
-    request<ObjectRelation>(`/relations/${id}`, { ...json(payload), method: 'PATCH' }),
-  deleteRelation: (id: string) => request<void>(`/relations/${id}`, { method: 'DELETE' }),
-  listRevisions: (id: string) => request<ObjectRevision[]>(`/objects/${id}/revisions`),
-  createRevision: (id: string, change_note?: string) =>
-    request<ObjectRevision>(`/objects/${id}/revisions`, json({ change_note: change_note || null })),
-  getRevision: (id: string, number: number) =>
-    request<ObjectRevision>(`/objects/${id}/revisions/${number}`),
-  listAttachments: (id: string) => request<Attachment[]>(`/objects/${id}/attachments`),
-  uploadAttachment: (id: string, file: File) => {
-    const body = new FormData();
-    body.append('file', file);
-    return request<Attachment>(`/objects/${id}/attachments`, { method: 'POST', body }, 60000);
-  },
-  deleteAttachment: (id: string) => request<void>(`/attachments/${id}`, { method: 'DELETE' }),
-  downloadUrl: (id: string) => `${API_BASE}/attachments/${id}/download`,
-  sampleContext: (id: string, depth = 3) =>
-    request<SampleContext>(`/samples/${id}/context?depth=${depth}`),
-  experimentContext: (id: string) => request<ExperimentContext>(`/experiments/${id}/context`),
-  listPayloads: (id: string) => request<DataPayload[]>(`/data/${id}/payloads`),
-  getPayload: (id: string) => request<DataPayload>(`/data-payloads/${id}`),
-  listPoints: (id: string) => request<DataPoint[]>(`/data-payloads/${id}/points`),
-  listImports: (id: string) => request<DataImport[]>(`/data/${id}/imports`),
-  previewImport: (id: string, source_attachment_id: string, sheet_name?: string | null) =>
-    request<ImportPreview>(
-      `/data/${id}/imports/preview`,
-      json({ source_attachment_id, sheet_name: sheet_name || null })
-    ),
-  commitImport: (dataId: string, importId: string, payload: unknown) =>
-    request<DataPayload>(
-      `/data/${dataId}/imports/${importId}/commit`,
-      { ...json(payload), method: 'POST' },
-      60000
-    )
+  applyChangeSet: (id: string) => request<ChangeSet>(`/change-sets/${id}/apply`, { method: 'POST' })
 };

@@ -19,8 +19,7 @@ jobs:
           POSTGRES_USER: scientific
           POSTGRES_PASSWORD: scientific
           POSTGRES_DB: scientific_rd
-        ports:
-          - 5432:5432
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U scientific -d scientific_rd"
           --health-interval 5s
@@ -28,7 +27,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
-      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd_test
     defaults:
       run:
         working-directory: api
@@ -40,64 +39,68 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Install backend dependencies
-        run: uv sync --locked
-      - name: Migrate a blank PostgreSQL database
+      - run: uv sync --locked
+      - name: Migrate fresh PostgreSQL database
         run: uv run alembic upgrade head
-      - name: Check model and migration parity
+      - name: Create isolated backend test database
+        run: PGPASSWORD=scientific createdb -h localhost -U scientific scientific_rd_test
+      - name: Verify migration metadata parity
         run: uv run alembic check
-      - name: Verify repeat-safe synthetic seed
+      - name: Reject removed v0.2 runtime references
+        run: uv run python -m scripts.verify_no_legacy_runtime
+      - name: Verify repeat-safe golden fixture
+        run: uv run python -m scripts.verify_seed
+      - name: Run canonical graph benchmark smoke
+        run: uv run python -m scripts.benchmark_object_graph
+      - name: Backend quality and PostgreSQL tests
         run: |
-          uv run python -m app.seed
-          uv run python -m app.seed
-          uv run python - <<'PY'
-          from sqlalchemy import func, select
+          uv run ruff check app tests scripts alembic/versions
+          uv run ruff format --check app tests scripts alembic/versions
+          uv run pytest -q
 
-          from app.db import SessionLocal
-          from app.graph_query_service import graph_query_service
-          from app.models import DataPayload, ObjectRelation, ObjectType, ResearchObject
-
-          with SessionLocal() as db:
-              assert db.scalar(select(func.count()).select_from(ObjectType)) == 7
-              assert db.scalar(select(func.count()).select_from(ResearchObject).where(ResearchObject.code == "PRJ-001")) == 1
-              assert db.scalar(select(func.count()).select_from(DataPayload)) == 6
-              assert db.scalar(select(func.count()).select_from(DataPayload).where(DataPayload.payload_kind == "scalar")) == 1
-              assert db.scalar(select(func.count()).select_from(DataPayload).where(DataPayload.payload_kind == "table")) == 1
-              assert db.scalar(select(func.count()).select_from(ObjectRelation).where(ObjectRelation.relation_type == "includes")) == 3
-              assert db.scalar(select(func.count()).select_from(ObjectRelation).where(ObjectRelation.relation_type == "related_to")) == 0
-              codes = [
-                  "SMP-001", "SMP-002", "SMP-003", "SMP-004",
-                  "DAT-001", "DAT-002", "DAT-003", "DAT-004",
-                  "PRC-001", "PRC-002", "PRC-003", "PRC-004",
-                  "PRC-005", "PRC-006", "PRC-007", "PRC-008",
-                  "EXP-001", "EXP-002", "EXP-003",
-              ]
-              objects = {item.code: item for item in db.scalars(select(ResearchObject).where(ResearchObject.code.in_(codes)))}
-              assert all(item.kind == "sample" for item in objects.values() if item.code.startswith("SMP-"))
-              owner_rows = db.scalars(select(ObjectRelation).where(ObjectRelation.relation_type == "contains")).all()
-              owners = {row.target_object_id: row.source_object_id for row in owner_rows}
-              assert owners[objects["SMP-001"].id] == objects["EXP-001"].id
-              assert owners[objects["SMP-002"].id] == objects["EXP-002"].id
-              assert owners[objects["SMP-003"].id] == objects["EXP-003"].id
-              assert owners[objects["SMP-004"].id] == objects["EXP-002"].id
-              direct = graph_query_service.get_sample_context(db, objects["SMP-001"].id)
-              assert {item["code"] for item in direct["direct"]["data"]} == {"DAT-001"}
-              downstream_codes = {item["code"] for item in direct["downstream"]["samples"]}
-              assert downstream_codes == {"SMP-002", "SMP-003", "SMP-004"}, downstream_codes
-              experiment = graph_query_service.get_experiment_context(db, objects["EXP-002"].id)
-              assert {item["code"] for item in experiment["input_samples"]} == {"SMP-001"}
-          PY
-      - name: Backend lint and format
+  migration-legacy:
+    name: Migration / Legacy 0006 → v0.3
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Create legacy 0006 database and fixture
         run: |
-          uv run ruff check app tests alembic/versions
-          uv run ruff format --check app tests alembic/versions
-      - name: Benchmark smoke
-        run: uv run python -m scripts.benchmark_object_graph --objects 100 --relations 100
-      - name: Run backend API tests against PostgreSQL
-        run: uv run pytest -q
+          uv run alembic upgrade 0006_agent_changes
+          uv run python -m scripts.prepare_legacy_v02_fixture
+      - name: Upgrade legacy data to v0.3 and verify cutover
+        run: |
+          uv run alembic upgrade head
+          uv run python -m scripts.verify_legacy_cutover
+          uv run alembic check
 
-  frontend:
-    name: Frontend
+  frontend-quality:
+    name: Frontend / Quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -110,22 +113,55 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Format check
-        run: npm run format:check
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Test
-        run: npm test -- --run
-      - name: Production build
-        run: npm run build
+      - run: npm ci
+      - name: Check runtime dependency advisories
+        run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint:strict
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test -- --run
+      - run: npm run build
 
-  browser-acceptance:
-    name: Browser / Sample Record acceptance
-    needs: [backend-postgresql, frontend]
+  mcp-contract:
+    name: MCP / Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd_test
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run alembic upgrade head
+      - run: PGPASSWORD=scientific createdb -h localhost -U scientific scientific_rd_test
+      - name: Verify stdio and streamable HTTP with MCP ClientSession
+        run: uv run pytest -q tests/test_mcp_contract.py
+
+  browser-first-run:
+    name: Browser / First Run
+    needs: [backend-postgresql, migration-legacy, frontend-quality, mcp-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -135,8 +171,7 @@ jobs:
           POSTGRES_USER: scientific
           POSTGRES_PASSWORD: scientific
           POSTGRES_DB: scientific_rd
-        ports:
-          - 5432:5432
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U scientific -d scientific_rd"
           --health-interval 5s
@@ -146,7 +181,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
       API_URL: http://127.0.0.1:8000/api/v1
       WEB_URL: http://127.0.0.1:3000
-      ARTIFACT_DIR: output/playwright/sample-record
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -160,59 +195,111 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install backend dependencies and seed PostgreSQL 17
+      - name: Install and migrate API without synthetic seed data
         working-directory: api
         run: |
           uv sync --locked
           uv run alembic upgrade head
-          uv run python -m app.seed
-          uv run python -m app.seed
       - name: Start API
         working-directory: api
         run: |
-          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$GITHUB_WORKSPACE/api-browser.log" 2>&1 &
-          for attempt in {1..30}; do
-            curl --fail --silent "$API_URL/health" && exit 0
-            sleep 1
-          done
-          cat "$GITHUB_WORKSPACE/api-browser.log"
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$GITHUB_WORKSPACE/api-first-run.log" 2>&1 &
+          for attempt in {1..30}; do curl --fail --silent "$API_URL/health" && exit 0; sleep 1; done
           exit 1
-      - name: Install and build frontend
+      - name: Build and start frontend
         working-directory: web
-        env:
-          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
         run: |
           npm ci
           npm run build
-      - name: Start frontend
-        working-directory: web
-        env:
-          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
-        run: |
-          nohup npm run start -- --hostname 127.0.0.1 --port 3000 > "$GITHUB_WORKSPACE/web-browser.log" 2>&1 &
-          for attempt in {1..30}; do
-            curl --fail --silent "$WEB_URL/dashboard/samples" >/dev/null && exit 0
-            sleep 1
-          done
-          cat "$GITHUB_WORKSPACE/web-browser.log"
+          nohup npm run start -- --hostname 127.0.0.1 --port 3000 > "$GITHUB_WORKSPACE/web-first-run.log" 2>&1 &
+          for attempt in {1..30}; do curl --fail --silent "$WEB_URL/dashboard/samples" >/dev/null && exit 0; sleep 1; done
           exit 1
-      - name: Install Chromium for Playwright CLI
+      - name: Install Playwright Chromium
         working-directory: web
-        run: npx --yes --package @playwright/cli playwright-cli install-browser chromium
-      - name: Run real browser Sample Record acceptance
-        run: bash .github/scripts/sample-record-browser-smoke.sh
-      - name: Run real browser workspace domain acceptance
-        env:
-          ARTIFACT_DIR: output/playwright/workspace
-        run: bash .github/scripts/workspace-browser-smoke.sh
-      - name: Upload browser acceptance evidence
+        run: npm run e2e:install
+      - name: Run fresh browser acceptance
+        working-directory: web
+        run: npm run e2e -- e2e/first-run.spec.ts
+      - name: Upload first-run browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scientific-workspace-browser-acceptance
+          name: browser-first-run-evidence
           path: |
-            output/playwright/sample-record
-            output/playwright/workspace
-            api-browser.log
-            web-browser.log
+            web/output/playwright
+            api-first-run.log
+            web-first-run.log
+          if-no-files-found: warn
+
+  browser-golden-scientific-workflow:
+    name: Browser / Golden Scientific Workflow
+    needs: [backend-postgresql, migration-legacy, frontend-quality, mcp-contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      API_URL: http://127.0.0.1:8000/api/v1
+      WEB_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install, migrate, and verify named golden fixture
+        working-directory: api
+        run: |
+          uv sync --locked
+          uv run alembic upgrade head
+          uv run python -m scripts.verify_seed
+      - name: Start API
+        working-directory: api
+        run: |
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$GITHUB_WORKSPACE/api-golden.log" 2>&1 &
+          for attempt in {1..30}; do curl --fail --silent "$API_URL/health" && exit 0; sleep 1; done
+          exit 1
+      - name: Build and start frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          nohup npm run start -- --hostname 127.0.0.1 --port 3000 > "$GITHUB_WORKSPACE/web-golden.log" 2>&1 &
+          for attempt in {1..30}; do curl --fail --silent "$WEB_URL/dashboard/samples" >/dev/null && exit 0; sleep 1; done
+          exit 1
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npm run e2e:install
+      - name: Run composer and golden scientific browser acceptance
+        working-directory: web
+        run: npm run e2e -- e2e/sample-composer.spec.ts e2e/golden-scientific-workflow.spec.ts
+      - name: Upload golden browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-golden-scientific-workflow-evidence
+          path: |
+            web/output/playwright
+            api-golden.log
+            web-golden.log
           if-no-files-found: warn
