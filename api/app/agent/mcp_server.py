@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
@@ -13,23 +14,23 @@ from sqlalchemy.orm import selectinload
 
 from app.capabilities import capabilities
 from app.change_set_service import propose_change_set
+from app.claim_service import get_claim
 from app.core.config import get_settings
 from app.data_service import get_data_record
 from app.db import SessionLocal
-from app.execution_service import get_execution
-from app.experiment_comparison_service import compare_experiment
 from app.experiment_record_service import get_experiment_record
 from app.graph_query_service import DEFAULT_DEPTH, graph_query_service
 from app.models import ObjectType, ObjectTypeVersion
+from app.process_definition_service import get_process_definition
+from app.process_execution_service import get_process_execution
 from app.project_context_service import get_project_context, search_project
 from app.sample_record_service import get_sample_record
 from app.schemas import ChangeSetProposal
-from app.services import get_object, get_type_version
+from app.services import get_object, get_type_version, object_out
+from app.view_service import get_view
 
 
 class BearerTokenVerifier:
-    """Minimal token verifier for explicitly configured local/reverse-proxy tokens."""
-
     async def verify_token(self, token: str) -> AccessToken | None:
         configured = get_settings().mcp_bearer_token
         if configured and token == configured:
@@ -50,10 +51,10 @@ def _call(function: Any, *args: Any, **kwargs: Any) -> Any:
         return function(db, *args, **kwargs)
 
 
-_settings = get_settings()
-_auth: dict[str, Any] = {}
-if _settings.mcp_bearer_token:
-    _auth = {
+settings = get_settings()
+auth: dict[str, Any] = {}
+if settings.mcp_bearer_token:
+    auth = {
         "auth": AuthSettings(
             issuer_url="http://localhost:8001",
             resource_server_url="http://localhost:8001/mcp",
@@ -64,13 +65,10 @@ if _settings.mcp_bearer_token:
 
 mcp = FastMCP(
     "Scientific Workspace",
-    instructions=(
-        "Use high-level scientific domain tools. Search before creating resources; "
-        "writes are proposal-first and never silently overwrite records."
-    ),
+    instructions="Use canonical v0.3 domain tools. Search before creating resources; writes from agents are proposal-first.",
     streamable_http_path="/mcp",
     stateless_http=True,
-    **_auth,
+    **auth,
 )
 http_app = mcp.streamable_http_app()
 
@@ -82,8 +80,6 @@ def workspace_capabilities() -> dict[str, Any]:
 
 @mcp.tool()
 def project_context(project_id: str) -> dict[str, Any]:
-    import uuid
-
     return _call(get_project_context, uuid.UUID(project_id))
 
 
@@ -96,68 +92,28 @@ def project_search(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    import uuid
-
-    bounded_limit = min(max(limit, 1), 200)
     return _call(
         search_project,
         uuid.UUID(project_id),
         q=q or None,
         kinds=kinds,
         status=status,
-        limit=bounded_limit,
+        limit=min(max(limit, 1), 200),
         offset=max(offset, 0),
     )
 
 
 @mcp.tool()
-def sample_record(sample_id: str) -> dict[str, Any]:
-    import uuid
-
-    return _call(get_sample_record, uuid.UUID(sample_id))
-
-
-@mcp.tool()
-def sample_lineage(sample_id: str, depth: int = DEFAULT_DEPTH) -> dict[str, Any]:
-    import uuid
-
-    return _call(
-        graph_query_service.trace_sample_lineage, uuid.UUID(sample_id), min(max(depth, 0), 8)
-    )
+def research_object_record(object_id: str) -> dict[str, Any]:
+    with SessionLocal() as db:
+        item = get_object(db, uuid.UUID(object_id))
+        if item is None:
+            raise LookupError("research object not found")
+        return object_out(item)
 
 
 @mcp.tool()
-def sample_execution(sample_id: str) -> dict[str, Any]:
-    import uuid
-
-    return _call(get_execution, uuid.UUID(sample_id))
-
-
-@mcp.tool()
-def experiment_record(experiment_id: str) -> dict[str, Any]:
-    import uuid
-
-    return _call(get_experiment_record, uuid.UUID(experiment_id))
-
-
-@mcp.tool()
-def experiment_comparison(experiment_id: str, differences_only: bool = False) -> dict[str, Any]:
-    import uuid
-
-    return _call(compare_experiment, uuid.UUID(experiment_id), differences_only=differences_only)
-
-
-@mcp.tool()
-def data_record(data_id: str) -> dict[str, Any]:
-    import uuid
-
-    return _call(get_data_record, uuid.UUID(data_id))
-
-
-@mcp.tool()
-def object_schema(kind: str, type_id: str | None = None) -> dict[str, Any]:
-    import uuid
-
+def object_type_schema(kind: str, type_id: str | None = None) -> dict[str, Any]:
     with SessionLocal() as db:
         version = get_type_version(db, kind, uuid.UUID(type_id) if type_id else None)
         return {
@@ -170,15 +126,55 @@ def object_schema(kind: str, type_id: str | None = None) -> dict[str, Any]:
         }
 
 
+@mcp.tool()
+def process_definition(definition_id: str) -> dict[str, Any]:
+    return _call(get_process_definition, uuid.UUID(definition_id))
+
+
+@mcp.tool()
+def process_execution(execution_id: str) -> dict[str, Any]:
+    return _call(get_process_execution, uuid.UUID(execution_id))
+
+
+@mcp.tool()
+def sample_record(sample_id: str) -> dict[str, Any]:
+    return _call(get_sample_record, uuid.UUID(sample_id))
+
+
+@mcp.tool()
+def sample_lineage(sample_id: str, depth: int = DEFAULT_DEPTH) -> dict[str, Any]:
+    return _call(
+        graph_query_service.trace_sample_lineage, uuid.UUID(sample_id), min(max(depth, 0), 8)
+    )
+
+
+@mcp.tool()
+def experiment_record(experiment_id: str) -> dict[str, Any]:
+    return _call(get_experiment_record, uuid.UUID(experiment_id))
+
+
+@mcp.tool()
+def data_record(data_id: str) -> dict[str, Any]:
+    return _call(get_data_record, uuid.UUID(data_id))
+
+
+@mcp.tool()
+def view_record(view_id: str) -> dict[str, Any]:
+    return _call(get_view, uuid.UUID(view_id))
+
+
+@mcp.tool()
+def claim_record(claim_id: str) -> dict[str, Any]:
+    return _call(get_claim, uuid.UUID(claim_id))
+
+
 def _proposal(
     operation_kind: str,
     project_id: str,
     payload: dict[str, Any],
-    target_id: str | None,
-    base_record_sha256: str | None,
+    target_id: str | None = None,
+    base_record_sha256: str | None = None,
 ) -> dict[str, Any]:
-    import uuid
-
     proposal = ChangeSetProposal(
         operation_kind=operation_kind,
         project_scope_id=uuid.UUID(project_id),
@@ -192,41 +188,45 @@ def _proposal(
 
 
 @mcp.tool()
-def propose_create_sample(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return _proposal("create_sample_record", project_id, payload, None, None)
+def propose_create_research_object(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_research_object", project_id, payload)
 
 
 @mcp.tool()
-def propose_update_sample(
-    project_id: str, sample_id: str, base_record_sha256: str, payload: dict[str, Any]
+def propose_update_research_object(
+    project_id: str, object_id: str, base_record_sha256: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    return _proposal("update_sample_record", project_id, payload, sample_id, base_record_sha256)
+    return _proposal("update_research_object", project_id, payload, object_id, base_record_sha256)
 
 
 @mcp.tool()
-def propose_create_experiment(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return _proposal("create_experiment_record", project_id, payload, None, None)
+def propose_create_process_definition(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_process_definition", project_id, payload)
 
 
 @mcp.tool()
-def propose_update_experiment(
-    project_id: str, experiment_id: str, base_record_sha256: str, payload: dict[str, Any]
-) -> dict[str, Any]:
-    return _proposal(
-        "update_experiment_record", project_id, payload, experiment_id, base_record_sha256
-    )
+def propose_create_process_execution(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_process_execution", project_id, payload)
 
 
 @mcp.tool()
-def propose_create_data(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return _proposal("create_data_record", project_id, payload, None, None)
+def propose_create_data_record(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_data_record", project_id, payload)
 
 
 @mcp.tool()
-def propose_update_execution(
-    project_id: str, sample_id: str, base_record_sha256: str, payload: dict[str, Any]
-) -> dict[str, Any]:
-    return _proposal("update_execution", project_id, payload, sample_id, base_record_sha256)
+def propose_create_experiment_record(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_experiment_record", project_id, payload)
+
+
+@mcp.tool()
+def propose_create_view(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_view", project_id, payload)
+
+
+@mcp.tool()
+def propose_create_claim(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_claim", project_id, payload)
 
 
 @mcp.resource("workspace://capabilities")
@@ -241,8 +241,6 @@ def project_context_resource(project_id: str) -> str:
 
 @mcp.resource("project://{project_id}/schemas")
 def project_schemas_resource(project_id: str) -> str:
-    import uuid
-
     with SessionLocal() as db:
         project = get_object(db, uuid.UUID(project_id))
         if project is None or project.kind != "project":
@@ -273,11 +271,6 @@ def sample_record_resource(sample_id: str) -> str:
     return _json(sample_record(sample_id))
 
 
-@mcp.resource("sample://{sample_id}/execution")
-def sample_execution_resource(sample_id: str) -> str:
-    return _json(sample_execution(sample_id))
-
-
 @mcp.resource("sample://{sample_id}/lineage")
 def sample_lineage_resource(sample_id: str) -> str:
     return _json(sample_lineage(sample_id))
@@ -288,14 +281,19 @@ def experiment_record_resource(experiment_id: str) -> str:
     return _json(experiment_record(experiment_id))
 
 
-@mcp.resource("experiment://{experiment_id}/comparison")
-def experiment_comparison_resource(experiment_id: str) -> str:
-    return _json(experiment_comparison(experiment_id))
-
-
 @mcp.resource("data://{data_id}/record")
 def data_record_resource(data_id: str) -> str:
     return _json(data_record(data_id))
+
+
+@mcp.resource("view://{view_id}/record")
+def view_record_resource(view_id: str) -> str:
+    return _json(view_record(view_id))
+
+
+@mcp.resource("claim://{claim_id}/record")
+def claim_record_resource(claim_id: str) -> str:
+    return _json(claim_record(claim_id))
 
 
 def run(transport: str = "stdio", *, host: str = "127.0.0.1", port: int = 8001) -> None:

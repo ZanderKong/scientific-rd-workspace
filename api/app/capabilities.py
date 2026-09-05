@@ -7,15 +7,19 @@ from app.models import OBJECT_KINDS, RELATION_TYPES
 
 def capabilities() -> dict[str, Any]:
     return {
-        "api_contract_version": 1,
+        "api_contract_version": "0.3",
         "object_kinds": list(OBJECT_KINDS),
         "relation_types": list(RELATION_TYPES),
-        "payload_kinds": ["scalar", "xy_series", "table", "file"],
+        "representation_kinds": ["raw_file", "table", "image", "description", "structured"],
         "features": {
             "sample_record": True,
-            "experiment_membership": True,
-            "experiment_comparison": True,
-            "sample_execution": True,
+            "experiment_references": True,
+            "process_definition_versions": True,
+            "process_execution_bindings": True,
+            "data_representations": True,
+            "views": True,
+            "claims": True,
+            "assets": True,
             "change_sets": True,
             "idempotency": True,
             "optimistic_concurrency": True,

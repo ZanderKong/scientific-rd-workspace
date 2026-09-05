@@ -28,7 +28,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
-      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      TEST_DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd_test
     defaults:
       run:
         working-directory: api
@@ -44,6 +44,9 @@ jobs:
         run: uv sync --locked
       - name: Migrate a blank PostgreSQL database
         run: uv run alembic upgrade head
+      - name: Create isolated backend test database
+        run: |
+          PGPASSWORD=scientific psql -h localhost -U scientific -d scientific_rd -c 'CREATE DATABASE scientific_rd_test'
       - name: Check model and migration parity
         run: uv run alembic check
       - name: Verify repeat-safe synthetic seed
@@ -215,4 +218,90 @@ jobs:
             output/playwright/workspace
             api-browser.log
             web-browser.log
+          if-no-files-found: warn
+
+  browser-first-run:
+    name: Browser / Plan 10 first-run acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: scientific
+          POSTGRES_PASSWORD: scientific
+          POSTGRES_DB: scientific_rd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U scientific -d scientific_rd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://scientific:scientific@localhost:5432/scientific_rd
+      API_URL: http://127.0.0.1:8000/api/v1
+      WEB_URL: http://127.0.0.1:3000
+      ARTIFACT_DIR: output/playwright/plan10-first-run
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install backend dependencies and migrate blank PostgreSQL 17
+        working-directory: api
+        run: |
+          uv sync --locked
+          uv run alembic upgrade head
+      - name: Start API
+        working-directory: api
+        run: |
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$GITHUB_WORKSPACE/api-first-run.log" 2>&1 &
+          for attempt in {1..30}; do
+            curl --fail --silent "$API_URL/health" && exit 0
+            sleep 1
+          done
+          cat "$GITHUB_WORKSPACE/api-first-run.log"
+          exit 1
+      - name: Install and build frontend
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+        run: |
+          npm ci
+          npm run build
+      - name: Start frontend
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000/api/v1
+        run: |
+          nohup npm run start -- --hostname 127.0.0.1 --port 3000 > "$GITHUB_WORKSPACE/web-first-run.log" 2>&1 &
+          for attempt in {1..30}; do
+            curl --fail --silent "$WEB_URL/dashboard/samples" >/dev/null && exit 0
+            sleep 1
+          done
+          cat "$GITHUB_WORKSPACE/web-first-run.log"
+          exit 1
+      - name: Install Chromium for Playwright CLI
+        working-directory: web
+        run: npx --yes --package @playwright/cli playwright-cli install-browser chromium
+      - name: Run Plan 10 no-seed first-run acceptance
+        run: bash .github/scripts/plan10-first-run-browser-smoke.sh
+      - name: Upload first-run evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan10-first-run-browser-acceptance
+          path: |
+            output/playwright/plan10-first-run
+            api-first-run.log
+            web-first-run.log
           if-no-files-found: warn

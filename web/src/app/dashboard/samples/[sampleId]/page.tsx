@@ -1,5 +1,4 @@
 import { SampleDetail } from '@/features/workspace/sample-record/sample-detail';
-import { getLocale } from 'next-intl/server';
 
 export default async function SampleDetailPage({
   params
@@ -7,6 +6,5 @@ export default async function SampleDetailPage({
   params: Promise<{ sampleId: string }>;
 }) {
   const { sampleId } = await params;
-  const locale = await getLocale();
-  return <SampleDetail sampleId={sampleId} zh={locale === 'zh-CN'} />;
+  return <SampleDetail sampleId={sampleId} />;
 }

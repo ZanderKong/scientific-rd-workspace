@@ -80,11 +80,13 @@ npm ci
 npm run dev
 ```
 
-打开：
+默认打开：
 
 ```text
 http://localhost:3000/dashboard/samples
 ```
+
+Overview、Projects、Experiment Comparison、Equipment、Data 详情和 Settings 仍可通过侧栏或深链接访问。
 
 ## 验证
 
@@ -102,15 +104,17 @@ npm test -- --run
 npm run build
 ```
 
-CI 使用 PostgreSQL 17，并覆盖 fresh migration、migration/model parity、repeat-safe seed、API tests、前端构建、浏览器工作流与 MCP 协议检查。项目不使用 SQLite 作为替代运行时。
+CI 使用 PostgreSQL 17，并覆盖 fresh migration、migration/model parity、repeat-safe seed、API tests、前端构建和浏览器工作流。MCP 契约通过源码与文档维护，当前 CI 尚未包含独立的 MCP 协议检查；项目不使用 SQLite 作为替代运行时。
 
 ## 文档
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — 系统边界与依赖方向
-- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — 产品与领域边界
-- [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) — canonical data model
-- [`docs/UI_SPEC.md`](docs/UI_SPEC.md) — 主要 UI 与交互约定
-- [`docs/api/DOMAIN_API.md`](docs/api/DOMAIN_API.md) — domain API
-- [`docs/api/ERRORS_AND_CONCURRENCY.md`](docs/api/ERRORS_AND_CONCURRENCY.md) — 错误、并发与写入安全
-- [`docs/agent/AGENT_INTERFACE.md`](docs/agent/AGENT_INTERFACE.md) — 外部智能体接口约定
-- [`docs/agent/MCP_CLIENT_SETUP.md`](docs/agent/MCP_CLIENT_SETUP.md) — MCP 客户端接入
+- [`docs/handoff/CURRENT_STATE.md`](docs/handoff/CURRENT_STATE.md) — 唯一当前状态
+- [`docs/current/PRODUCT_SPEC.md`](docs/current/PRODUCT_SPEC.md) — 产品与领域边界
+- [`docs/current/DATA_MODEL.md`](docs/current/DATA_MODEL.md) — canonical data model
+- [`docs/current/UI_SPEC.md`](docs/current/UI_SPEC.md) — 主要 UI 与交互约定
+- [`docs/current/api/DOMAIN_API.md`](docs/current/api/DOMAIN_API.md) — domain API
+- [`docs/current/api/ERRORS_AND_CONCURRENCY.md`](docs/current/api/ERRORS_AND_CONCURRENCY.md) — 错误、并发与写入安全
+- [`docs/current/agent/AGENT_INTERFACE.md`](docs/current/agent/AGENT_INTERFACE.md) — 外部智能体接口约定
+- [`docs/current/agent/MCP_CLIENT_SETUP.md`](docs/current/agent/MCP_CLIENT_SETUP.md) — MCP 客户端接入
+- [`docs/`](docs/) — 当前、历史与归档资料索引

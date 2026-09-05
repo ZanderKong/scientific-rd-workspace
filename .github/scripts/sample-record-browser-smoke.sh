@@ -50,15 +50,15 @@ fi
 pw open "$web_url/dashboard/samples"
 pw resize 1440 900
 snapshot 01-samples
-assert_snapshot 01-samples 'Samples'
-assert_snapshot 01-samples '新建 Sample'
+assert_snapshot 01-samples '样品'
+assert_snapshot 01-samples '新建样品'
 
-run_code "const scope = page.locator('select[aria-label=\"Project Scope\"]'); if (!(await scope.isVisible())) { await page.locator('[data-sidebar=trigger]').click(); } await scope.waitFor({state: 'visible'}); await page.waitForFunction((code) => Array.from(document.querySelectorAll('select[aria-label=\"Project Scope\"] option')).some((option) => option.textContent?.includes(code)), '${project_code}'); await page.evaluate((code) => { const select = document.querySelector('select[aria-label=\"Project Scope\"]'); if (!(select instanceof HTMLSelectElement)) throw new Error('Project Scope select is missing'); const option = Array.from(select.options).find((candidate) => candidate.textContent?.includes(code)); if (!option) throw new Error('Seeded project option is missing'); select.value = option.value; select.dispatchEvent(new Event('change', {bubbles: true})); }, '${project_code}'); await page.waitForTimeout(500)"
+run_code "const trigger = page.getByRole('button', {name: /当前项目|新建或选择项目/}); if (!(await trigger.isVisible())) { await page.getByRole('button', {name: '切换侧边栏'}).click(); await page.waitForTimeout(150); } await trigger.click(); const menu = page.getByTestId('project-switcher-menu'); await menu.getByRole('textbox', {name: '搜索项目'}).fill('${project_code}'); await menu.getByRole('option', {name: /${project_code}/}).click(); await page.waitForTimeout(500)"
 snapshot 02-scoped-samples
-assert_snapshot 02-scoped-samples '新建 Sample'
+assert_snapshot 02-scoped-samples '新建样品'
 pw screenshot --filename 02-scoped-samples-1440.png --full-page
 
-run_code "await page.getByRole('button', {name: '新建 Sample'}).click(); await page.waitForTimeout(500)"
+run_code "await page.getByRole('button', {name: '新建样品'}).click(); await page.waitForTimeout(500)"
 snapshot 03-new-composer
 assert_snapshot 03-new-composer 'Process Blocks'
 assert_snapshot 03-new-composer '第 1 个 Process'

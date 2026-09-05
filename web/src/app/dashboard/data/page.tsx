@@ -1,5 +1,5 @@
-import { WorkspaceApp } from '@/features/workspace/components/workspace-app';
+import { DataLanding } from '@/features/data/data-landing';
 
 export default function DataPage() {
-  return <WorkspaceApp view='list' kind='data' />;
+  return <DataLanding />;
 }

@@ -1,7 +1,6 @@
 import { SidebarTrigger } from '../ui/sidebar';
 import { Breadcrumbs } from '../breadcrumbs';
 import { ThemeModeToggle } from '../themes/theme-mode-toggle';
-import { LocaleSwitcher } from './locale-switcher';
 
 export default function Header() {
   return (
@@ -11,7 +10,6 @@ export default function Header() {
         <Breadcrumbs />
       </div>
       <div className='flex shrink-0 items-center gap-2'>
-        <LocaleSwitcher />
         <ThemeModeToggle />
       </div>
     </header>

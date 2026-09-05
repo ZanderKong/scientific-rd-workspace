@@ -7,14 +7,16 @@ import re
 import uuid
 from typing import Any
 
+from fastapi.encoders import jsonable_encoder
 from jsonschema import Draft202012Validator
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
-    Attachment,
-    DataPayload,
+    Asset,
+    DataRepresentation,
+    ObjectAssetLink,
     ObjectCodeCounter,
     ObjectRelation,
     ObjectRevision,
@@ -23,33 +25,30 @@ from app.models import (
     ResearchObject,
 )
 from app.relation_semantics import (
-    RelationCandidate,
     SemanticConflict,
-    normalize_relation_role,
-    validate_candidate_relations,
     validate_relation_kinds,
     validate_relation_scope,
     validate_scope_mutation,
 )
-from app.schemas import ObjectCreate, RelationCreate, RelationPatch, UsageSchema
+from app.schemas import ObjectCreate, ProcessFieldSchema, RelationCreate, RelationPatch
 
 CODE_PREFIX = {
-    "material": "MAT",
-    "sample": "SMP",
-    "equipment": "EQP",
-    "process": "PRC",
+    "research_object": "ROO",
+    "process_definition": "PFD",
     "data": "DAT",
     "experiment": "EXP",
     "project": "PRJ",
+    "view": "VEW",
+    "claim": "CLM",
 }
 OBJECT_ALIASES = {
-    "material": {"material", "reagent", "mat", "原料", "试剂"},
-    "sample": {"sample", "smp", "样品"},
-    "equipment": {"equipment", "eqp", "设备", "仪器"},
-    "process": {"process", "prc", "过程", "操作"},
-    "data": {"data", "dat", "数据", "测试结果"},
-    "experiment": {"experiment", "exp", "实验"},
-    "project": {"project", "prj", "项目", "vault", "scope"},
+    "research_object": {"research_object", "object", "resource", "样品", "原料", "设备", "物体"},
+    "process_definition": {"process_definition", "definition", "process", "过程", "工艺"},
+    "data": {"data", "数据", "测试结果"},
+    "experiment": {"experiment", "实验"},
+    "project": {"project", "项目", "vault", "scope"},
+    "view": {"view", "视图"},
+    "claim": {"claim", "判断", "结论"},
 }
 
 
@@ -90,19 +89,30 @@ def get_type_version(
     return version
 
 
-def validate_properties(version: ObjectTypeVersion, properties: dict[str, Any]) -> None:
+def validate_properties(version: ObjectTypeVersion | None, properties: dict[str, Any]) -> None:
+    if version is None:
+        return
     errors = sorted(
         Draft202012Validator(version.json_schema).iter_errors(properties),
         key=lambda error: list(error.path),
     )
     if errors:
-        details = []
-        for error in errors[:20]:
-            path = ".".join(str(item) for item in error.path) or "$"
-            details.append({"path": path, "message": error.message})
+        details = [
+            {"path": ".".join(str(item) for item in error.path) or "$", "message": error.message}
+            for error in errors[:20]
+        ]
         raise ValueError(
             json.dumps({"code": "schema_validation_failed", "errors": details}, ensure_ascii=False)
         )
+
+
+def normalize_tags(tags: list[str] | None) -> list[str]:
+    result: list[str] = []
+    for tag in tags or []:
+        value = str(tag).strip()
+        if value and value not in result:
+            result.append(value)
+    return result
 
 
 def validate_object_scope(db: Session, kind: str, project_scope_id: uuid.UUID | None) -> None:
@@ -110,7 +120,7 @@ def validate_object_scope(db: Session, kind: str, project_scope_id: uuid.UUID | 
         if project_scope_id is not None:
             raise ValueError("project objects cannot have a project scope")
         return
-    if kind not in {"material", "equipment"} and project_scope_id is None:
+    if project_scope_id is None and kind in {"data", "experiment", "view", "claim"}:
         raise ValueError(f"{kind} objects require project_scope_id")
     if project_scope_id is not None:
         scope = db.get(ResearchObject, project_scope_id)
@@ -118,13 +128,10 @@ def validate_object_scope(db: Session, kind: str, project_scope_id: uuid.UUID | 
             raise ValueError("project_scope_id must point to a Project object")
 
 
-def normalize_usage_schema(kind: str, usage_schema: dict[str, Any] | None) -> dict[str, Any]:
-    payload = usage_schema or {}
-    if not payload:
+def normalize_process_fields(value: dict[str, Any] | None) -> dict[str, Any]:
+    if not value:
         return {}
-    if kind not in {"material", "equipment"}:
-        raise ValueError("usage_schema_jsonb is only supported for material and equipment objects")
-    return UsageSchema.model_validate(payload).model_dump(exclude_none=True)
+    return ProcessFieldSchema.model_validate(value).model_dump(exclude_none=True)
 
 
 def _object_query() -> Any:
@@ -151,7 +158,7 @@ def _next_code(db: Session, kind: str) -> str:
         db.flush()
     value = counter.next_value
     counter.next_value = value + 1
-    return f"{CODE_PREFIX[kind]}-{value:03d}"
+    return f"{CODE_PREFIX[kind]}-{value:04d}"
 
 
 def _advance_counter(db: Session, kind: str, code: str) -> None:
@@ -169,22 +176,27 @@ def _advance_counter(db: Session, kind: str, code: str) -> None:
 
 
 def _create_object_in_session(db: Session, payload: ObjectCreate) -> ResearchObject:
-    version = get_type_version(db, payload.kind, payload.type_version_id)
+    version = (
+        get_type_version(db, payload.kind, payload.type_version_id)
+        if payload.type_version_id
+        else None
+    )
     validate_object_scope(db, payload.kind, payload.project_scope_id)
     validate_properties(version, payload.properties_jsonb)
-    usage_schema = normalize_usage_schema(payload.kind, payload.usage_schema_jsonb)
+    fields = normalize_process_fields(payload.process_field_definitions)
     code = (payload.code or _next_code(db, payload.kind)).strip()
     if get_object_by_code(db, code) is not None:
-        raise SemanticConflict("object code already exists")
+        raise SemanticConflict("object code already exists", code="semantic_conflict")
     obj = ResearchObject(
         code=code,
         kind=payload.kind,
         title=payload.title.strip(),
         status=payload.status.strip(),
         project_scope_id=payload.project_scope_id,
-        type_version_id=version.id,
+        type_version_id=version.id if version else None,
         properties_jsonb=copy.deepcopy(payload.properties_jsonb),
-        usage_schema_jsonb=copy.deepcopy(usage_schema),
+        tags_jsonb=normalize_tags(payload.tags),
+        process_field_definitions_jsonb=fields,
         content_document=copy.deepcopy(payload.content_document),
     )
     db.add(obj)
@@ -206,12 +218,12 @@ def create_object(db: Session, payload: ObjectCreate) -> ResearchObject:
 def _validate_object_changes(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> None:
     next_scope = changes.get("project_scope_id", obj.project_scope_id)
     next_properties = changes.get("properties_jsonb", obj.properties_jsonb)
-    next_usage_schema = changes.get("usage_schema_jsonb", obj.usage_schema_jsonb)
+    next_fields = changes.get("process_field_definitions", obj.process_field_definitions_jsonb)
     validate_object_scope(db, obj.kind, next_scope)
     if next_scope != obj.project_scope_id:
         validate_scope_mutation(db, obj, next_scope)
     validate_properties(obj.type_version, next_properties)
-    normalize_usage_schema(obj.kind, next_usage_schema)
+    normalize_process_fields(next_fields)
 
 
 def _update_object_in_session(
@@ -223,7 +235,8 @@ def _update_object_in_session(
         "status",
         "project_scope_id",
         "properties_jsonb",
-        "usage_schema_jsonb",
+        "tags",
+        "process_field_definitions",
         "content_document",
     ):
         if field in changes:
@@ -232,7 +245,21 @@ def _update_object_in_session(
                 value = value.strip()
                 if not value:
                     raise ValueError(f"{field} must not be blank")
-            setattr(obj, field, copy.deepcopy(value))
+            if field == "tags":
+                value = normalize_tags(value)
+            if field == "process_field_definitions":
+                value = normalize_process_fields(value)
+            if field == "project_scope_id" and value == obj.id:
+                raise ValueError("an object cannot scope itself")
+            setattr(
+                obj,
+                "tags_jsonb"
+                if field == "tags"
+                else "process_field_definitions_jsonb"
+                if field == "process_field_definitions"
+                else field,
+                copy.deepcopy(value),
+            )
     db.flush()
     return obj
 
@@ -248,43 +275,25 @@ def update_object(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> 
 
 
 def validate_relation(source: ResearchObject, target: ResearchObject, relation_type: str) -> None:
-    """Keep the historical public helper while routing kind/scope checks centrally."""
     validate_relation_kinds(source, target, relation_type)
     validate_relation_scope(source, target)
 
 
-def _candidate(
-    source: ResearchObject,
-    target: ResearchObject,
-    relation_type: str,
-    role: str | None,
-    properties: dict[str, Any],
-    relation_id: uuid.UUID | None = None,
-) -> RelationCandidate:
-    return RelationCandidate(
-        source=source,
-        target=target,
-        relation_type=relation_type,
-        role=normalize_relation_role(role),
-        properties=copy.deepcopy(properties),
-        relation_id=relation_id,
-    )
-
-
 def _create_relation_in_session(db: Session, payload: RelationCreate) -> ObjectRelation:
+    if payload.relation_type in {"subject", "derived_from"}:
+        raise SemanticConflict(
+            "subject and derived_from are system-managed relations", code="system_managed_relation"
+        )
     source = get_object(db, payload.source_object_id)
     target = get_object(db, payload.target_object_id)
     if source is None or target is None:
         raise LookupError("source or target object not found")
-    candidate = _candidate(
-        source, target, payload.relation_type, payload.role, payload.properties_jsonb
-    )
-    validate_candidate_relations(db, [candidate])
+    validate_relation(source, target, payload.relation_type)
     relation = ObjectRelation(
         source_object_id=source.id,
         target_object_id=target.id,
         relation_type=payload.relation_type,
-        role=candidate.role,
+        role=payload.role.strip() if payload.role else None,
         properties_jsonb=copy.deepcopy(payload.properties_jsonb),
     )
     db.add(relation)
@@ -317,32 +326,20 @@ def get_relation(db: Session, relation_id: uuid.UUID) -> ObjectRelation | None:
     )
 
 
-def _update_relation_in_session(
-    db: Session, relation: ObjectRelation, payload: RelationPatch
-) -> ObjectRelation:
-    changes = payload.model_dump(exclude_unset=True)
-    role = normalize_relation_role(changes.get("role", relation.role))
-    properties = changes.get("properties_jsonb", relation.properties_jsonb) or {}
-    candidate = _candidate(
-        relation.source_object,
-        relation.target_object,
-        relation.relation_type,
-        role,
-        properties,
-        relation.id,
-    )
-    validate_candidate_relations(db, [candidate], exclude_ids={relation.id})
-    relation.role = role
-    relation.properties_jsonb = copy.deepcopy(properties)
-    db.flush()
-    return relation
-
-
 def update_relation(
     db: Session, relation: ObjectRelation, payload: RelationPatch
 ) -> ObjectRelation:
+    if relation.relation_type in {"subject", "derived_from"}:
+        raise SemanticConflict(
+            "system-managed relations cannot be edited", code="system_managed_relation"
+        )
+    changes = payload.model_dump(exclude_unset=True)
+    if "role" in changes:
+        relation.role = changes["role"].strip() if changes["role"] else None
+    if "properties_jsonb" in changes:
+        relation.properties_jsonb = copy.deepcopy(changes["properties_jsonb"] or {})
     try:
-        _update_relation_in_session(db, relation, payload)
+        db.flush()
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -374,85 +371,96 @@ def list_relations(db: Session, object_id: uuid.UUID) -> list[ObjectRelation]:
 
 
 def _summary(obj: ResearchObject) -> dict[str, Any]:
-    return {
-        "id": str(obj.id),
-        "code": obj.code,
-        "kind": obj.kind,
-        "title": obj.title,
-        "status": obj.status,
-        "project_scope_id": str(obj.project_scope_id) if obj.project_scope_id else None,
-        "type_key": obj.type_version.object_type.key,
-        "type_label_zh": obj.type_version.object_type.label_zh,
-        "type_label_en": obj.type_version.object_type.label_en,
-    }
+    return jsonable_encoder(
+        {
+            "id": str(obj.id),
+            "code": obj.code,
+            "kind": obj.kind,
+            "title": obj.title,
+            "status": obj.status,
+            "project_scope_id": str(obj.project_scope_id) if obj.project_scope_id else None,
+            "type_key": obj.type_version.object_type.key if obj.type_version else "generic",
+            "type_label_zh": obj.type_version.object_type.label_zh if obj.type_version else "",
+            "type_label_en": obj.type_version.object_type.label_en if obj.type_version else "",
+        }
+    )
 
 
 def object_out(obj: ResearchObject) -> dict[str, Any]:
     return {
         **_summary(obj),
-        "type_version_id": str(obj.type_version_id),
-        "type_version": obj.type_version.version,
+        "type_version_id": str(obj.type_version_id) if obj.type_version_id else None,
+        "type_version": obj.type_version.version if obj.type_version else None,
+        "tags": obj.tags_jsonb or [],
         "properties_jsonb": obj.properties_jsonb or {},
-        "usage_schema_jsonb": obj.usage_schema_jsonb or {},
+        "process_field_definitions": obj.process_field_definitions_jsonb or {},
         "content_document": obj.content_document or [],
-        "created_at": obj.created_at.isoformat() if obj.created_at else None,
-        "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,
+        "created_at": obj.created_at,
+        "updated_at": obj.updated_at,
     }
 
 
 def relation_out(relation: ObjectRelation) -> dict[str, Any]:
     return {
-        "id": str(relation.id),
-        "source_object_id": str(relation.source_object_id),
-        "target_object_id": str(relation.target_object_id),
+        "id": relation.id,
+        "source_object_id": relation.source_object_id,
+        "target_object_id": relation.target_object_id,
         "relation_type": relation.relation_type,
         "role": relation.role,
         "properties_jsonb": relation.properties_jsonb or {},
         "source": _summary(relation.source_object),
         "target": _summary(relation.target_object),
-        "created_at": relation.created_at.isoformat() if relation.created_at else None,
-        "updated_at": relation.updated_at.isoformat() if relation.updated_at else None,
+        "created_at": relation.created_at,
+        "updated_at": relation.updated_at,
     }
 
 
 def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
     relations = list_relations(db, obj.id)
-    attachments = db.scalars(select(Attachment).where(Attachment.object_id == obj.id)).all()
-    payloads = db.scalars(select(DataPayload).where(DataPayload.data_object_id == obj.id)).all()
-    return {
-        "schema_version": 1,
-        "object": object_out(obj),
-        "direct_relations": [relation_out(item) for item in relations],
-        "attachments": [
-            {
-                "id": str(item.id),
-                "original_filename": item.original_filename,
-                "content_type": item.content_type,
-                "size_bytes": item.size_bytes,
-                "sha256": item.sha256,
-            }
-            for item in attachments
-        ],
-        "data_payloads": [
-            {
-                "id": str(item.id),
-                "payload_kind": item.payload_kind,
-                "name": item.name,
-                "summary": item.summary_jsonb or {},
-                "payload_sha256": item.payload_sha256,
-            }
-            for item in payloads
-        ],
-    }
+    links = db.scalars(select(ObjectAssetLink).where(ObjectAssetLink.object_id == obj.id)).all()
+    representations = (
+        db.scalars(
+            select(DataRepresentation).where(DataRepresentation.data_object_id == obj.id)
+        ).all()
+        if obj.kind == "data"
+        else []
+    )
+    return jsonable_encoder(
+        {
+            "schema_version": 2,
+            "object": jsonable_encoder(object_out(obj)),
+            "direct_relations": [relation_out(item) for item in relations],
+            "assets": [
+                {"asset_id": str(item.asset_id), "role": item.role, "order_index": item.order_index}
+                for item in links
+            ],
+            "representations": [
+                {
+                    "id": str(item.id),
+                    "kind": item.kind,
+                    "name": item.name,
+                    "summary": item.summary_jsonb or {},
+                    "representation_sha256": item.representation_sha256,
+                }
+                for item in representations
+            ],
+        }
+    )
 
 
 def _create_revision_in_session(
-    db: Session, object_id: uuid.UUID, change_note: str | None
+    db: Session,
+    object_id: uuid.UUID,
+    change_note: str | None,
+    *,
+    change_set_id: uuid.UUID | None = None,
+    source_client_name: str | None = None,
+    source_client_version: str | None = None,
+    source_transport: str | None = None,
 ) -> ObjectRevision:
     obj = db.scalar(select(ResearchObject).where(ResearchObject.id == object_id).with_for_update())
     if obj is None:
         raise LookupError("object not found")
-    obj = get_object(db, object_id) or obj
     latest = db.scalar(
         select(ObjectRevision.revision_number)
         .where(ObjectRevision.object_id == object_id)
@@ -466,6 +474,10 @@ def _create_revision_in_session(
         snapshot_jsonb=copy.deepcopy(snapshot),
         snapshot_sha256=sha256_json(snapshot),
         change_note=change_note.strip() if change_note else None,
+        change_set_id=change_set_id,
+        source_client_name=source_client_name,
+        source_client_version=source_client_version,
+        source_transport=source_transport,
     )
     db.add(revision)
     db.flush()
@@ -478,13 +490,15 @@ def create_revision(db: Session, object_id: uuid.UUID, change_note: str | None) 
     return revision
 
 
-def serialize_attachment(attachment: Attachment) -> dict[str, Any]:
+def serialize_asset(asset: Asset) -> dict[str, Any]:
     return {
-        "id": attachment.id,
-        "object_id": attachment.object_id,
-        "original_filename": attachment.original_filename,
-        "content_type": attachment.content_type,
-        "size_bytes": attachment.size_bytes,
-        "sha256": attachment.sha256,
-        "created_at": attachment.created_at,
+        "id": asset.id,
+        "storage_backend": asset.storage_backend,
+        "bucket": asset.bucket,
+        "object_key": asset.object_key,
+        "original_filename": asset.original_filename,
+        "mime_type": asset.mime_type,
+        "size_bytes": asset.size_bytes,
+        "sha256": asset.sha256,
+        "created_at": asset.created_at,
     }

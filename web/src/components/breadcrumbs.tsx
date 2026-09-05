@@ -17,12 +17,18 @@ export function Breadcrumbs() {
     processes: 'processes',
     data: 'data',
     materials: 'materials',
-    equipment: 'equipment'
+    equipment: 'equipment',
+    settings: 'settings',
+    changes: 'changes',
+    views: 'views',
+    claims: 'claims',
+    new: 'new',
+    edit: 'edit'
   };
   const key = known[label] ?? known[segments[segments.length - 2] ?? ''] ?? 'overview';
   return (
     <nav aria-label='Breadcrumb' className='text-sm text-muted-foreground'>
-      <Link href='/dashboard/overview' className='hover:text-foreground'>
+      <Link href='/dashboard/samples' className='hover:text-foreground'>
         {t('workspace')}
       </Link>
       <span className='mx-2'>/</span>
