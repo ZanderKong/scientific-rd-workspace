@@ -83,6 +83,7 @@ class S3StorageProvider:
         bucket: str,
         access_key_id: str | None,
         secret_access_key: str | None,
+        force_path_style: bool = False,
         client: object | None = None,
     ) -> None:
         if client is None:
@@ -90,20 +91,45 @@ class S3StorageProvider:
                 import boto3
             except ImportError as exc:  # pragma: no cover - optional dependency path
                 raise RuntimeError("S3 storage requires boto3 or an injected client") from exc
-            client = boto3.client(
-                "s3",
-                endpoint_url=endpoint_url,
-                region_name=region,
-                aws_access_key_id=access_key_id,
-                aws_secret_access_key=secret_access_key,
-            )
+            client_kwargs = {
+                "service_name": "s3",
+                "endpoint_url": endpoint_url,
+                "region_name": region,
+                "aws_access_key_id": access_key_id,
+                "aws_secret_access_key": secret_access_key,
+            }
+            if force_path_style:
+                from botocore.config import Config
+
+                client_kwargs["config"] = Config(s3={"addressing_style": "path"})
+            client = boto3.client(**client_kwargs)
         self.client = client
         self.bucket = bucket
 
     def put(self, object_key: str, source: BinaryIO) -> tuple[int, str]:
-        content = source.read()
-        self.client.put_object(Bucket=self.bucket, Key=object_key, Body=content)
-        return len(content), hashlib.sha256(content).hexdigest()
+        class HashingReader:
+            def __init__(self, wrapped: BinaryIO) -> None:
+                self.wrapped = wrapped
+                self.size = 0
+                self.digest = hashlib.sha256()
+
+            def read(self, size: int = -1) -> bytes:
+                chunk = self.wrapped.read(size)
+                if chunk:
+                    self.size += len(chunk)
+                    self.digest.update(chunk)
+                return chunk
+
+        reader = HashingReader(source)
+        upload_fileobj = getattr(self.client, "upload_fileobj", None)
+        if upload_fileobj is not None:
+            upload_fileobj(reader, self.bucket, object_key)
+        else:
+            # Keep compatibility with the small injected fake used in unit tests;
+            # real boto3 clients take the streaming path above.
+            content = reader.read()
+            self.client.put_object(Bucket=self.bucket, Key=object_key, Body=content)
+        return reader.size, reader.digest.hexdigest()
 
     def open(self, object_key: str) -> BinaryIO:
         response = self.client.get_object(Bucket=self.bucket, Key=object_key)

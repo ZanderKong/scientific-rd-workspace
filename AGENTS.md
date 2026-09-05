@@ -39,7 +39,7 @@ External clients should prefer domain-level operations over low-level graph muta
 ## 工作约定
 
 - 开始前检查 Git 状态并阅读 `docs/handoff/CURRENT_STATE.md`。
-- 数据库改动只通过 Alembic；`0001`–`0006` 是不可修改的 v0.2 历史，v0.3 使用 `0007`–`0010` 正式迁移。
+- 数据库改动只通过 Alembic；`0001`–`0006` 是不可修改的 v0.2 历史，v0.3 使用 `0007`–`0012` 正式迁移。
 - 前端 API 类型与后端 Pydantic schema 必须显式对齐；错误、加载、空状态必须可见。
 - 不引入第二套数据库、队列、状态管理或表单引擎；不使用 React Flow。
 - 外部 agent 默认通过 ChangeSet proposal 写入；MCP 只调用 canonical service，不内嵌 LLM。

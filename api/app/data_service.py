@@ -236,8 +236,19 @@ def _create_representation_in_session(
             raise SemanticConflict(
                 "source representation must belong to the same Data", code="validation_failed"
             )
-        if source.id == payload.source_representation_id:
-            raise SemanticConflict("representation cannot derive from itself")
+        seen: set[uuid.UUID] = set()
+        current = source
+        while current is not None:
+            if current.id in seen:
+                raise SemanticConflict(
+                    "representation lineage cycle is not allowed", code="cycle_detected"
+                )
+            seen.add(current.id)
+            current = (
+                db.get(DataRepresentation, current.source_representation_id)
+                if current.source_representation_id is not None
+                else None
+            )
     inline = _validate_inline(payload.kind, payload.inline_payload_jsonb)
     item = DataRepresentation(
         data_object_id=data.id,
@@ -319,6 +330,7 @@ def create_representation(
             db.add(record)
         if record.origin_representation_id is None:
             record.origin_representation_id = item.id
+        _create_revision_in_session(db, data.id, f"add representation {item.kind}: {item.name}")
         db.commit()
         result = db.scalar(_representation_query(data.id).where(DataRepresentation.id == item.id))
         if result is None:
@@ -329,7 +341,7 @@ def create_representation(
         raise
 
 
-def set_system_relations(
+def sync_system_relations_for_data(
     db: Session,
     data_id: uuid.UUID,
     *,
@@ -337,14 +349,12 @@ def set_system_relations(
     derived_from_ids: list[uuid.UUID] | None = None,
 ) -> None:
     data = _data_object(db, data_id)
+    validated: dict[str, list[ResearchObject]] = {}
     for relation_type, ids in (("subject", subject_ids), ("derived_from", derived_from_ids)):
         if ids is None:
             continue
-        db.query(ObjectRelation).filter(
-            ObjectRelation.source_object_id == data.id,
-            ObjectRelation.relation_type == relation_type,
-        ).delete(synchronize_session=False)
         seen: set[uuid.UUID] = set()
+        targets: list[ResearchObject] = []
         for target_id in ids:
             if target_id in seen:
                 continue
@@ -357,13 +367,21 @@ def set_system_relations(
             validate_relation_scope(data, target)
             if relation_type == "derived_from":
                 validate_derived_cycle(db, data, target)
-            db.add(
-                ObjectRelation(
-                    source_object_id=data.id,
-                    target_object_id=target.id,
-                    relation_type=relation_type,
-                    role=None,
-                    properties_jsonb={"system_managed": True},
-                )
-            )
+            targets.append(target)
             seen.add(target_id)
+        validated[relation_type] = targets
+    for relation_type, targets in validated.items():
+        db.query(ObjectRelation).filter(
+            ObjectRelation.source_object_id == data.id,
+            ObjectRelation.relation_type == relation_type,
+        ).delete(synchronize_session=False)
+        db.add_all(
+            ObjectRelation(
+                source_object_id=data.id,
+                target_object_id=target.id,
+                relation_type=relation_type,
+                role=None,
+                properties_jsonb={"system_managed": True},
+            )
+            for target in targets
+        )

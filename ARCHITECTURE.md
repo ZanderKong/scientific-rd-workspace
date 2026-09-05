@@ -18,7 +18,7 @@ MCP adapter ──────────┘             │
 - `ProcessDefinition` owns versioned templates. `ProcessExecution` pins one version and stores many object/data bindings, field snapshots and execution revisions.
 - `Experiment` is a non-owning reference context. It never owns scientific provenance or execution state.
 - `DataRecord` owns multiple immutable `DataRepresentation` rows, an optional origin representation and system-managed `subject` / `derived_from` edges.
-- `View` references Data without copying values. `Claim` stores a statement, source/confidence and ordered evidence.
+- `View` references Data without copying values. Process Executions that consume a View persist both `source_view_id` and `source_view_revision_id`. `Claim` stores a statement, source/confidence and ordered evidence with scope and cycle checks.
 - `Asset` stores file metadata; bytes go through `StorageProvider` with Local as the default and optional S3-compatible routing.
 
 ## Service boundaries
@@ -42,6 +42,6 @@ Old payload, composition, comparison and SampleExecution endpoints are not activ
 
 ## Persistence and migration
 
-PostgreSQL is mandatory. Alembic revisions `0001`–`0006` remain unchanged. Revisions `0007`–`0010` migrate the old storage shape to v0.3 and remove legacy tables/runtime names. Fresh database upgrade and an isolated 0006-to-head upgrade are release gates.
+PostgreSQL is mandatory. Alembic revisions `0001`–`0006` remain unchanged. Revisions `0007`–`0012` migrate the old storage shape to v0.3, remove legacy tables/runtime names, persist View provenance pins and align explicit migration indexes/constraints. Fresh database upgrade and an isolated 0006-to-head upgrade are release gates.
 
 No SQLite fallback, queue, React Flow, second global state store, or final visual redesign is part of this cutover.

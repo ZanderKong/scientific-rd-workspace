@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     Asset,
+    DataRecord,
     DataRepresentation,
     ObjectAssetLink,
     ObjectCodeCounter,
@@ -208,6 +209,7 @@ def _create_object_in_session(db: Session, payload: ObjectCreate) -> ResearchObj
 def create_object(db: Session, payload: ObjectCreate) -> ResearchObject:
     try:
         obj = _create_object_in_session(db, payload)
+        _create_revision_in_session(db, obj.id, "create Research Object")
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -266,7 +268,9 @@ def _update_object_in_session(
 
 def update_object(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> ResearchObject:
     try:
+        change_note = changes.get("change_note") or "update Research Object"
         _update_object_in_session(db, obj, changes)
+        _create_revision_in_session(db, obj.id, change_note)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -349,6 +353,19 @@ def update_relation(
     return get_relation(db, relation.id) or relation
 
 
+def delete_relation(db: Session, relation: ObjectRelation) -> None:
+    if relation.relation_type in {"subject", "derived_from"}:
+        raise SemanticConflict(
+            "system-managed relations cannot be deleted", code="system_managed_relation"
+        )
+    db.delete(relation)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise SemanticConflict("relation deletion conflicts with graph integrity") from exc
+
+
 def list_relations(db: Session, object_id: uuid.UUID) -> list[ObjectRelation]:
     return list(
         db.scalars(
@@ -425,6 +442,7 @@ def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
         if obj.kind == "data"
         else []
     )
+    data_record = db.get(DataRecord, obj.id) if obj.kind == "data" else None
     return jsonable_encoder(
         {
             "schema_version": 2,
@@ -444,6 +462,17 @@ def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
                 }
                 for item in representations
             ],
+            "data_record": {
+                "scientific_type": data_record.scientific_type,
+                "description": data_record.description,
+                "origin_representation_id": (
+                    str(data_record.origin_representation_id)
+                    if data_record and data_record.origin_representation_id
+                    else None
+                ),
+            }
+            if data_record
+            else None,
         }
     )
 

@@ -11,8 +11,14 @@ export function buildNewDraft(): SampleRecordDraft {
 
 export function recordToDraft(record: SampleRecord): SampleRecordDraft {
   return {
-    sample: { title: record.sample.title, code: record.sample.code, status: record.sample.status, tags: record.sample.tags.join(',') },
+    sample: {
+      title: record.sample.title,
+      code: record.sample.code,
+      status: record.sample.status,
+      tags: record.sample.tags.join(',')
+    },
     steps: record.steps.map(({ execution }) => ({
+      execution_id: execution.id,
       process_definition_id: execution.process_definition_id,
       process_definition_version_id: execution.process_definition_version_id,
       project_scope_id: execution.project_scope_id,
@@ -20,16 +26,55 @@ export function recordToDraft(record: SampleRecord): SampleRecordDraft {
       status: execution.status as ProcessExecutionDraft['status'],
       values: execution.values,
       note: execution.note,
-      object_bindings: execution.object_bindings.filter((binding) => binding.role !== 'sample_record').map((binding) => ({ research_object_id: binding.research_object_id, direction: binding.direction, role: binding.role, values: binding.values, order_index: binding.order_index })),
-      data_bindings: execution.data_bindings.map((binding) => ({ data_id: binding.data_id, direction: binding.direction, role: binding.role, values: binding.values, order_index: binding.order_index }))
+      object_bindings: execution.object_bindings
+        .filter((binding) => binding.role !== 'sample_record')
+        .map((binding) => ({
+          research_object_id: binding.research_object_id,
+          direction: binding.direction,
+          role: binding.role,
+          values: binding.values,
+          order_index: binding.order_index
+        })),
+      data_bindings: execution.data_bindings.map((binding) => ({
+        data_id: binding.data_id,
+        direction: binding.direction,
+        role: binding.role,
+        values: binding.values,
+        order_index: binding.order_index
+      })),
+      precedes_execution_ids: execution.precedes_execution_ids,
+      source_view_id: execution.source_view_id,
+      source_view_revision_id: execution.source_view_revision_id
     }))
   };
 }
 
 export function draftToCreatePayload(projectId: string, draft: SampleRecordDraft) {
-  return { project_scope_id: projectId, sample: { title: draft.sample.title, code: draft.sample.code?.trim() || undefined, status: draft.sample.status, tags: draft.sample.tags.split(',').map((tag) => tag.trim()).filter(Boolean) }, steps: draft.steps };
+  return {
+    project_scope_id: projectId,
+    sample: {
+      title: draft.sample.title,
+      code: draft.sample.code?.trim() || undefined,
+      status: draft.sample.status,
+      tags: draft.sample.tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    },
+    steps: draft.steps
+  };
 }
 
 export function draftToPutPayload(draft: SampleRecordDraft) {
-  return { sample: { title: draft.sample.title, status: draft.sample.status, tags: draft.sample.tags.split(',').map((tag) => tag.trim()).filter(Boolean) }, steps: draft.steps };
+  return {
+    sample: {
+      title: draft.sample.title,
+      status: draft.sample.status,
+      tags: draft.sample.tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    },
+    steps: draft.steps
+  };
 }

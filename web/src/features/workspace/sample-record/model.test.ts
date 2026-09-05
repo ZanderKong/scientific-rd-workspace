@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNewDraft, draftToCreatePayload } from './model';
+import { buildNewDraft, draftToCreatePayload, draftToPutPayload } from './model';
 
 describe('v0.3 sample record model', () => {
   it('starts with a tag-based Research Object draft', () => {
@@ -22,6 +22,23 @@ describe('v0.3 sample record model', () => {
       project_scope_id: 'project-1',
       sample: { title: 'Sample A', tags: ['样品'] },
       steps: [{ process_definition_id: 'definition-1' }]
+    });
+  });
+
+  it('keeps execution identity when serializing an edited aggregate', () => {
+    const draft = buildNewDraft();
+    draft.sample.title = 'Sample A';
+    draft.steps.push({
+      execution_id: 'execution-1',
+      process_definition_id: 'definition-1',
+      process_definition_version_id: 'version-1',
+      status: 'completed',
+      object_bindings: [],
+      data_bindings: []
+    });
+    expect(draftToPutPayload(draft).steps[0]).toMatchObject({
+      execution_id: 'execution-1',
+      process_definition_version_id: 'version-1'
     });
   });
 });

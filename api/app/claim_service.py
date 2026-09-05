@@ -9,6 +9,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.models import ClaimEvidence, ClaimRecord, ClaimRevision, ResearchObject
+from app.relation_semantics import SemanticConflict
 from app.schemas import ClaimCreate, ClaimPut, ObjectCreate
 from app.services import (
     _create_object_in_session,
@@ -44,7 +45,12 @@ def _validate_evidence(
             if target is None or target.kind != kind:
                 raise ValueError(f"claim evidence must target a {kind}")
             if target.id == claim_id:
-                raise ValueError("Claim cannot cite itself")
+                raise SemanticConflict("Claim cannot cite itself", code="cycle_detected")
+            claim = get_object(db, claim_id)
+            if claim is None or target.project_scope_id != claim.project_scope_id:
+                raise SemanticConflict(
+                    "Claim evidence must remain in the same project scope", code="scope_conflict"
+                )
         polarity = item.get("polarity", "support")
         if polarity not in {"support", "counter"}:
             raise ValueError("claim evidence polarity must be support or counter")
@@ -58,6 +64,33 @@ def _validate_evidence(
                 "order_index": item.get("order_index", index),
             }
         )
+    adjacency: dict[uuid.UUID, set[uuid.UUID]] = {}
+    rows = db.scalars(select(ClaimEvidence).where(ClaimEvidence.evidence_kind == "claim")).all()
+    for row in rows:
+        if row.evidence_id is not None and row.claim_id != claim_id:
+            adjacency.setdefault(row.claim_id, set()).add(row.evidence_id)
+    adjacency[claim_id] = {
+        item["evidence_id"]
+        for item in result
+        if item["evidence_kind"] == "claim" and item["evidence_id"] is not None
+    }
+    visiting: set[uuid.UUID] = set()
+    visited: set[uuid.UUID] = set()
+
+    def visit(node: uuid.UUID) -> bool:
+        if node in visiting:
+            return True
+        if node in visited:
+            return False
+        visiting.add(node)
+        if any(visit(child) for child in adjacency.get(node, ())):
+            return True
+        visiting.remove(node)
+        visited.add(node)
+        return False
+
+    if any(visit(node) for node in adjacency):
+        raise SemanticConflict("Claim evidence cycle is not allowed", code="cycle_detected")
     return result
 
 

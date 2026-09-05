@@ -9,7 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.data_service import set_system_relations
+from app.data_service import sync_system_relations_for_data
 from app.models import (
     ProcessDefinitionVersion,
     ProcessExecution,
@@ -20,7 +20,7 @@ from app.models import (
     ResearchObject,
 )
 from app.process_definition_service import get_current_version
-from app.relation_semantics import SemanticConflict, validate_relation_scope
+from app.relation_semantics import SemanticConflict
 from app.schemas import ProcessExecutionCreate, ProcessExecutionPut
 from app.services import get_object, object_out, sha256_json
 
@@ -88,6 +88,8 @@ def execution_out(db: Session, item: ProcessExecution) -> dict[str, Any]:
         "project_scope_id": item.project_scope_id,
         "process_definition_id": item.process_definition_id,
         "process_definition_version_id": item.process_definition_version_id,
+        "source_view_id": item.source_view_id,
+        "source_view_revision_id": item.source_view_revision_id,
         "title_snapshot": item.title_snapshot,
         "status": item.status,
         "execution_field_definitions": item.execution_field_definition_snapshot_jsonb or {},
@@ -157,7 +159,58 @@ def _check_precedes_cycle(db: Session, source_id: uuid.UUID, targets: list[uuid.
         return False
 
     if visit(source_id):
-        raise SemanticConflict("ProcessExecution precedes cycle is not allowed")
+        raise SemanticConflict(
+            "ProcessExecution precedes cycle is not allowed", code="cycle_detected"
+        )
+
+
+def _validate_execution_scope(db: Session, scope_id: uuid.UUID | None) -> None:
+    if scope_id is None:
+        return
+    scope = get_object(db, scope_id)
+    if scope is None or scope.kind != "project":
+        raise SemanticConflict(
+            "project_scope_id must point to a Project object", code="scope_conflict"
+        )
+
+
+def _validate_definition_scope(
+    definition: ResearchObject, execution_scope_id: uuid.UUID | None
+) -> None:
+    if (
+        definition.project_scope_id is not None
+        and definition.project_scope_id != execution_scope_id
+    ):
+        raise SemanticConflict(
+            "ProcessDefinition is outside the execution project scope", code="scope_conflict"
+        )
+
+
+def _validate_view_source(
+    db: Session,
+    execution_scope_id: uuid.UUID | None,
+    source_view_id: uuid.UUID | None,
+    source_view_revision_id: uuid.UUID | None,
+) -> None:
+    if source_view_id is None and source_view_revision_id is None:
+        return
+    if source_view_id is None or source_view_revision_id is None:
+        raise SemanticConflict(
+            "source_view_id and source_view_revision_id must be provided together",
+            code="validation_failed",
+        )
+    view = get_object(db, source_view_id)
+    if view is None or view.kind != "view":
+        raise SemanticConflict("source_view_id must point to a View", code="invalid_binding_target")
+    if view.project_scope_id not in {None, execution_scope_id}:
+        raise SemanticConflict("source View crosses project scope", code="scope_conflict")
+    from app.models import ViewRevision
+
+    revision = db.get(ViewRevision, source_view_revision_id)
+    if revision is None or revision.view_id != view.id:
+        raise SemanticConflict(
+            "source_view_revision_id must belong to source_view_id", code="validation_failed"
+        )
 
 
 def _resolve_values(values: dict[str, Any]) -> dict[str, Any]:
@@ -173,6 +226,25 @@ def _resolve_values(values: dict[str, Any]) -> dict[str, Any]:
 def _replace_bindings(
     db: Session, item: ProcessExecution, payload: ProcessExecutionCreate | ProcessExecutionPut
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    existing_sample_members = set(
+        db.scalars(
+            select(ProcessExecutionObjectBinding.research_object_id).where(
+                ProcessExecutionObjectBinding.execution_id == item.id,
+                ProcessExecutionObjectBinding.direction == "context",
+                ProcessExecutionObjectBinding.role == "sample_record",
+            )
+        ).all()
+    )
+    requested_sample_members = {
+        binding.research_object_id
+        for binding in payload.object_bindings
+        if binding.direction == "context" and binding.role == "sample_record"
+    }
+    if len(existing_sample_members | requested_sample_members) > 1:
+        raise SemanticConflict(
+            "a ProcessExecution may belong to only one Sample Record",
+            code="semantic_conflict",
+        )
     db.query(ProcessExecutionObjectBinding).filter(
         ProcessExecutionObjectBinding.execution_id == item.id
     ).delete(synchronize_session=False)
@@ -189,8 +261,15 @@ def _replace_bindings(
         target = get_object(db, object_id)
         if target is None:
             raise LookupError("bound Research Object not found")
-        if item.project_scope_id is not None:
-            validate_relation_scope(_definition(db, item.process_definition_id), target)
+        if target.kind != "research_object":
+            raise SemanticConflict(
+                "ProcessExecution object bindings must target Research Objects",
+                code="invalid_binding_target",
+            )
+        if target.project_scope_id not in {None, item.project_scope_id}:
+            raise SemanticConflict(
+                "Research Object is outside the execution project scope", code="scope_conflict"
+            )
         snapshot = copy.deepcopy(
             binding.field_definition_snapshot or target.process_field_definitions_jsonb or {}
         )
@@ -210,7 +289,26 @@ def _replace_bindings(
     for index, binding in enumerate(payload.data_bindings):
         target = get_object(db, binding.data_id)
         if target is None or target.kind != "data":
-            raise ValueError("data binding must target a Data object")
+            raise SemanticConflict(
+                "data binding must target a Data object", code="invalid_binding_target"
+            )
+        if target.project_scope_id not in {None, item.project_scope_id}:
+            raise SemanticConflict(
+                "Data is outside the execution project scope", code="scope_conflict"
+            )
+        if binding.direction == "output":
+            existing = db.scalar(
+                select(ProcessExecutionDataBinding.id).where(
+                    ProcessExecutionDataBinding.data_id == target.id,
+                    ProcessExecutionDataBinding.direction == "output",
+                    ProcessExecutionDataBinding.execution_id != item.id,
+                )
+            )
+            if existing is not None:
+                raise SemanticConflict(
+                    "Data already has a canonical output producer",
+                    code="data_already_has_producer",
+                )
         db.add(
             ProcessExecutionDataBinding(
                 execution_id=item.id,
@@ -232,73 +330,132 @@ def _replace_bindings(
 def _sync_provenance(
     db: Session,
     item: ProcessExecution,
-    subject_ids: list[uuid.UUID],
-    bound_data_ids: list[uuid.UUID],
+    affected_data_ids: list[uuid.UUID],
 ) -> None:
-    output_data_ids = [
-        binding.data_id for binding in item.data_bindings if binding.direction == "output"
-    ]
-    input_data_ids = [
-        binding.data_id for binding in item.data_bindings if binding.direction == "input"
-    ]
-    for data_id in output_data_ids:
-        set_system_relations(db, data_id, subject_ids=subject_ids, derived_from_ids=input_data_ids)
+    current_bindings = db.scalars(
+        select(ProcessExecutionDataBinding).where(
+            ProcessExecutionDataBinding.execution_id == item.id
+        )
+    ).all()
+    current_output_data_ids = {
+        binding.data_id for binding in current_bindings if binding.direction == "output"
+    }
+    for data_id in set(affected_data_ids) | current_output_data_ids:
+        producer = db.scalar(
+            select(ProcessExecutionDataBinding)
+            .where(
+                ProcessExecutionDataBinding.data_id == data_id,
+                ProcessExecutionDataBinding.direction == "output",
+            )
+            .order_by(ProcessExecutionDataBinding.created_at)
+        )
+        if producer is None:
+            sync_system_relations_for_data(db, data_id, subject_ids=[], derived_from_ids=[])
+            continue
+        producer_execution = db.get(ProcessExecution, producer.execution_id)
+        if producer_execution is None:
+            continue
+        producer_object_bindings = db.scalars(
+            select(ProcessExecutionObjectBinding).where(
+                ProcessExecutionObjectBinding.execution_id == producer_execution.id
+            )
+        ).all()
+        producer_data_bindings = db.scalars(
+            select(ProcessExecutionDataBinding).where(
+                ProcessExecutionDataBinding.execution_id == producer_execution.id
+            )
+        ).all()
+        subjects = [
+            binding.research_object_id
+            for binding in producer_object_bindings
+            if binding.direction == "input" and binding.role == "subject"
+        ]
+        inputs = [
+            binding.data_id for binding in producer_data_bindings if binding.direction == "input"
+        ]
+        sync_system_relations_for_data(db, data_id, subject_ids=subjects, derived_from_ids=inputs)
+
+
+def _replace_precedes(db: Session, item: ProcessExecution, target_ids: list[uuid.UUID]) -> None:
+    targets = []
+    for target_id in target_ids:
+        target = db.get(ProcessExecution, target_id)
+        if target is None:
+            raise LookupError("ProcessExecution target not found")
+        if target.id == item.id:
+            raise SemanticConflict("ProcessExecution cannot precede itself", code="cycle_detected")
+        if target.project_scope_id != item.project_scope_id:
+            raise SemanticConflict(
+                "ProcessExecution precedes relation crosses project scopes", code="scope_conflict"
+            )
+        targets.append(target.id)
+    _check_precedes_cycle(db, item.id, targets)
+    db.query(ProcessExecutionRelation).filter(
+        ProcessExecutionRelation.source_execution_id == item.id
+    ).delete(synchronize_session=False)
+    db.add_all(
+        ProcessExecutionRelation(
+            source_execution_id=item.id,
+            target_execution_id=target_id,
+            relation_type="precedes",
+        )
+        for target_id in targets
+    )
+    db.flush()
+
+
+def _create_process_execution_in_session(
+    db: Session, payload: ProcessExecutionCreate, *, create_revision: bool = True
+) -> ProcessExecution:
+    definition = _definition(db, payload.process_definition_id)
+    version = (
+        db.get(ProcessDefinitionVersion, payload.process_definition_version_id)
+        if payload.process_definition_version_id
+        else get_current_version(db, definition.id)
+    )
+    if version is None or version.process_definition_id != definition.id:
+        raise SemanticConflict(
+            "definition version does not belong to ProcessDefinition", code="validation_failed"
+        )
+    scope_id = (
+        payload.project_scope_id
+        if payload.project_scope_id is not None
+        else definition.project_scope_id
+    )
+    _validate_execution_scope(db, scope_id)
+    _validate_definition_scope(definition, scope_id)
+    _validate_view_source(db, scope_id, payload.source_view_id, payload.source_view_revision_id)
+    item = ProcessExecution(
+        project_scope_id=scope_id,
+        process_definition_id=definition.id,
+        process_definition_version_id=version.id,
+        source_view_id=payload.source_view_id,
+        source_view_revision_id=payload.source_view_revision_id,
+        title_snapshot=payload.title_snapshot or definition.title,
+        status=payload.status,
+        execution_field_definition_snapshot_jsonb=copy.deepcopy(
+            payload.execution_field_definitions or version.execution_field_definitions_jsonb or {}
+        ),
+        values_jsonb=copy.deepcopy(payload.values),
+        note=payload.note,
+        occurred_at=payload.occurred_at,
+        started_at=datetime.now(UTC) if payload.status in {"running", "completed"} else None,
+        completed_at=datetime.now(UTC) if payload.status == "completed" else None,
+    )
+    db.add(item)
+    db.flush()
+    _replace_bindings(db, item, payload)
+    _replace_precedes(db, item, payload.precedes_execution_ids)
+    db.flush()
+    _sync_provenance(db, item, [])
+    if create_revision:
+        _revision(db, item, "create process execution")
+    return item
 
 
 def create_process_execution(db: Session, payload: ProcessExecutionCreate) -> dict[str, Any]:
     try:
-        definition = _definition(db, payload.process_definition_id)
-        version = (
-            db.get(ProcessDefinitionVersion, payload.process_definition_version_id)
-            if payload.process_definition_version_id
-            else get_current_version(db, definition.id)
-        )
-        if version is None or version.process_definition_id != definition.id:
-            raise ValueError("definition version does not belong to ProcessDefinition")
-        scope_id = (
-            payload.project_scope_id
-            if payload.project_scope_id is not None
-            else definition.project_scope_id
-        )
-        if scope_id is not None:
-            scope = get_object(db, scope_id)
-            if scope is None or scope.kind != "project":
-                raise ValueError("project_scope_id must point to a Project object")
-        item = ProcessExecution(
-            project_scope_id=scope_id,
-            process_definition_id=definition.id,
-            process_definition_version_id=version.id,
-            title_snapshot=payload.title_snapshot or definition.title,
-            status=payload.status,
-            execution_field_definition_snapshot_jsonb=copy.deepcopy(
-                payload.execution_field_definitions
-                or version.execution_field_definitions_jsonb
-                or {}
-            ),
-            values_jsonb=copy.deepcopy(payload.values),
-            note=payload.note,
-            occurred_at=payload.occurred_at,
-            started_at=datetime.now(UTC) if payload.status in {"running", "completed"} else None,
-            completed_at=datetime.now(UTC) if payload.status == "completed" else None,
-        )
-        db.add(item)
-        db.flush()
-        subjects, bound_data_ids = _replace_bindings(db, item, payload)
-        _check_precedes_cycle(db, item.id, payload.precedes_execution_ids)
-        for target_id in payload.precedes_execution_ids:
-            target = db.get(ProcessExecution, target_id)
-            if target is None:
-                raise LookupError("preceding ProcessExecution not found")
-            db.add(
-                ProcessExecutionRelation(
-                    source_execution_id=item.id,
-                    target_execution_id=target.id,
-                    relation_type="precedes",
-                )
-            )
-        db.flush()
-        _sync_provenance(db, item, subjects, bound_data_ids)
-        _revision(db, item, "create process execution")
+        item = _create_process_execution_in_session(db, payload)
         db.commit()
         return execution_out(db, _execution(db, item.id))
     except Exception:
@@ -310,62 +467,78 @@ def get_process_execution(db: Session, execution_id: uuid.UUID) -> dict[str, Any
     return execution_out(db, _execution(db, execution_id))
 
 
+def _update_process_execution_in_session(
+    db: Session,
+    execution_id: uuid.UUID,
+    payload: ProcessExecutionPut,
+    *,
+    create_revision: bool = True,
+) -> ProcessExecution:
+    item = _execution(db, execution_id)
+    old_output_ids = {
+        binding.data_id for binding in item.data_bindings if binding.direction == "output"
+    }
+    definition_id = payload.process_definition_id or item.process_definition_id
+    definition = _definition(db, definition_id)
+    version_id = payload.process_definition_version_id or item.process_definition_version_id
+    version = db.get(ProcessDefinitionVersion, version_id)
+    if version is None or version.process_definition_id != definition.id:
+        raise SemanticConflict(
+            "definition version does not belong to ProcessDefinition", code="validation_failed"
+        )
+    if payload.base_record_sha256:
+        current = execution_out(db, item)["record_sha256"]
+        if payload.base_record_sha256 != current:
+            raise SemanticConflict("stale_record", code="stale_record")
+    next_scope = (
+        payload.project_scope_id if payload.project_scope_id is not None else item.project_scope_id
+    )
+    _validate_execution_scope(db, next_scope)
+    _validate_definition_scope(definition, next_scope)
+    source_view_id = (
+        payload.source_view_id if payload.source_view_id is not None else item.source_view_id
+    )
+    source_view_revision_id = (
+        payload.source_view_revision_id
+        if payload.source_view_revision_id is not None
+        else item.source_view_revision_id
+    )
+    _validate_view_source(db, next_scope, source_view_id, source_view_revision_id)
+    item.process_definition_id = definition.id
+    item.process_definition_version_id = version.id
+    item.project_scope_id = next_scope
+    item.source_view_id = source_view_id
+    item.source_view_revision_id = source_view_revision_id
+    item.title_snapshot = payload.title_snapshot or item.title_snapshot or definition.title
+    item.status = payload.status
+    item.execution_field_definition_snapshot_jsonb = copy.deepcopy(
+        payload.execution_field_definitions
+        or item.execution_field_definition_snapshot_jsonb
+        or version.execution_field_definitions_jsonb
+        or {}
+    )
+    item.values_jsonb = copy.deepcopy(payload.values)
+    item.note = payload.note
+    item.occurred_at = payload.occurred_at
+    if item.status == "running" and item.started_at is None:
+        item.started_at = datetime.now(UTC)
+    item.completed_at = datetime.now(UTC) if item.status == "completed" else None
+    _replace_bindings(db, item, payload)
+    _replace_precedes(db, item, payload.precedes_execution_ids)
+    db.flush()
+    _sync_provenance(db, item, list(old_output_ids))
+    if create_revision:
+        _revision(db, item, payload.change_note)
+    return item
+
+
 def update_process_execution(
     db: Session, execution_id: uuid.UUID, payload: ProcessExecutionPut
 ) -> dict[str, Any]:
     try:
-        item = _execution(db, execution_id)
-        definition_id = payload.process_definition_id or item.process_definition_id
-        definition = _definition(db, definition_id)
-        version_id = payload.process_definition_version_id or item.process_definition_version_id
-        version = db.get(ProcessDefinitionVersion, version_id)
-        if version is None or version.process_definition_id != definition.id:
-            raise ValueError("definition version does not belong to ProcessDefinition")
-        if payload.base_record_sha256:
-            current = execution_out(db, item)["record_sha256"]
-            if payload.base_record_sha256 != current:
-                raise SemanticConflict("stale_record", code="stale_record")
-        item.process_definition_id = definition.id
-        item.process_definition_version_id = version.id
-        item.project_scope_id = (
-            payload.project_scope_id
-            if payload.project_scope_id is not None
-            else item.project_scope_id
-        )
-        item.title_snapshot = payload.title_snapshot or item.title_snapshot or definition.title
-        item.status = payload.status
-        item.execution_field_definition_snapshot_jsonb = copy.deepcopy(
-            payload.execution_field_definitions
-            or item.execution_field_definition_snapshot_jsonb
-            or version.execution_field_definitions_jsonb
-            or {}
-        )
-        item.values_jsonb = copy.deepcopy(payload.values)
-        item.note = payload.note
-        item.occurred_at = payload.occurred_at
-        if item.status == "running" and item.started_at is None:
-            item.started_at = datetime.now(UTC)
-        item.completed_at = datetime.now(UTC) if item.status == "completed" else None
-        db.query(ProcessExecutionRelation).filter(
-            ProcessExecutionRelation.source_execution_id == item.id
-        ).delete(synchronize_session=False)
-        subjects, bound_data_ids = _replace_bindings(db, item, payload)
-        _check_precedes_cycle(db, item.id, payload.precedes_execution_ids)
-        for target_id in payload.precedes_execution_ids:
-            if db.get(ProcessExecution, target_id) is None:
-                raise LookupError("preceding ProcessExecution not found")
-            db.add(
-                ProcessExecutionRelation(
-                    source_execution_id=item.id,
-                    target_execution_id=target_id,
-                    relation_type="precedes",
-                )
-            )
-        db.flush()
-        _sync_provenance(db, item, subjects, bound_data_ids)
-        _revision(db, item, payload.change_note)
+        item = _update_process_execution_in_session(db, execution_id, payload)
         db.commit()
-        return execution_out(db, _execution(db, execution_id))
+        return execution_out(db, _execution(db, item.id))
     except Exception:
         db.rollback()
         raise

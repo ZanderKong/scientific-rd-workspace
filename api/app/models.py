@@ -85,6 +85,7 @@ class ObjectTypeVersion(Base):
     ui_schema: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     object_type: Mapped[ObjectType] = relationship(back_populates="versions")
     objects: Mapped[list[ResearchObject]] = relationship(back_populates="type_version")
 
@@ -224,6 +225,12 @@ class ObjectRelation(Base):
             unique=True,
             postgresql_nulls_not_distinct=True,
         ),
+        Index(
+            "ix_object_relations_system_shortcuts",
+            "source_object_id",
+            "relation_type",
+            postgresql_where=text("relation_type IN ('subject','derived_from')"),
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     source_object_id: Mapped[uuid.UUID] = mapped_column(
@@ -271,6 +278,13 @@ class ObjectRevision(Base):
     change_set: Mapped[ChangeSet | None] = relationship(back_populates="revisions")
 
 
+@event.listens_for(ObjectRevision, "before_update", propagate=True)
+def prevent_object_revision_mutation(
+    _mapper: Any, _connection: Any, target: ObjectRevision
+) -> None:
+    raise ValueError("object revisions are immutable")
+
+
 class ObjectCodeCounter(Base):
     __tablename__ = "object_code_counters"
     kind: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -299,6 +313,24 @@ class ProcessDefinitionVersion(Base):
         back_populates="process_definition_versions", foreign_keys=[process_definition_id]
     )
     executions: Mapped[list[ProcessExecution]] = relationship(back_populates="definition_version")
+
+
+@event.listens_for(ProcessDefinitionVersion, "before_update")
+def prevent_process_definition_version_mutation(
+    _mapper: Any, _connection: Any, target: ProcessDefinitionVersion
+) -> None:
+    state = inspect(target)
+    immutable_fields = (
+        "process_definition_id",
+        "version",
+        "description",
+        "execution_field_definitions_jsonb",
+        "ui_schema_jsonb",
+        "created_at",
+        "created_by",
+    )
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("process definition versions are immutable; publish a new version")
 
 
 class ProcessDefinitionState(Base):
@@ -331,6 +363,12 @@ class ProcessExecution(Base):
     )
     process_definition_version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("process_definition_versions.id"), index=True
+    )
+    source_view_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_objects.id"), nullable=True, index=True
+    )
+    source_view_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("view_revisions.id"), nullable=True, index=True
     )
     title_snapshot: Mapped[str | None] = mapped_column(String(240), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft", server_default="draft")
@@ -377,6 +415,7 @@ class ProcessExecutionObjectBinding(Base):
         ),
         Index("ix_execution_object_bindings_execution", "execution_id"),
         Index("ix_execution_object_bindings_object", "research_object_id"),
+        Index("ix_process_execution_object_bindings_direction", "research_object_id", "direction"),
         Index(
             "uq_execution_object_output",
             "research_object_id",
@@ -413,6 +452,7 @@ class ProcessExecutionDataBinding(Base):
         ),
         Index("ix_execution_data_bindings_execution", "execution_id"),
         Index("ix_execution_data_bindings_data", "data_id"),
+        Index("ix_process_execution_data_bindings_direction", "data_id", "direction"),
         Index(
             "uq_execution_data_output",
             "data_id",
@@ -476,7 +516,7 @@ class ProcessExecutionRevision(Base):
     snapshot_sha256: Mapped[str] = mapped_column(String(64))
     change_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     change_set_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("change_sets.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("change_sets.id", ondelete="SET NULL"), nullable=True, index=True
     )
     source_client_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source_client_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -551,6 +591,10 @@ class DataRepresentation(Base):
         Index("ix_data_representations_data", "data_object_id"),
         Index("ix_data_representations_asset", "asset_id"),
         Index("ix_data_representations_source", "source_representation_id"),
+        CheckConstraint(
+            "source_representation_id IS NULL OR source_representation_id <> id",
+            name="ck_data_representations_source_not_self",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     data_object_id: Mapped[uuid.UUID] = mapped_column(
@@ -594,6 +638,13 @@ class DataRepresentation(Base):
         cascade="all, delete-orphan",
         order_by="DataTableRow.ordinal",
     )
+
+
+@event.listens_for(DataRepresentation, "before_update")
+def prevent_data_representation_mutation(
+    _mapper: Any, _connection: Any, target: DataRepresentation
+) -> None:
+    raise ValueError("data representations are immutable; create a new representation")
 
 
 class DataPoint(Base):
@@ -719,7 +770,7 @@ class ViewState(Base):
 
 class ViewDataRef(Base):
     __tablename__ = "view_data_refs"
-    __table_args__ = (UniqueConstraint("view_id", "data_id", name="uq_view_data_refs"),)
+    __table_args__ = ()
     view_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("view_states.view_id", ondelete="CASCADE"), primary_key=True
     )
@@ -823,6 +874,23 @@ class ClaimRevision(Base):
     )
 
 
+@event.listens_for(ProcessExecutionRevision, "before_update", propagate=True)
+def prevent_process_execution_revision_mutation(
+    _mapper: Any, _connection: Any, target: ProcessExecutionRevision
+) -> None:
+    raise ValueError("process execution revisions are immutable")
+
+
+@event.listens_for(ViewRevision, "before_update", propagate=True)
+def prevent_view_revision_mutation(_mapper: Any, _connection: Any, target: ViewRevision) -> None:
+    raise ValueError("view revisions are immutable")
+
+
+@event.listens_for(ClaimRevision, "before_update", propagate=True)
+def prevent_claim_revision_mutation(_mapper: Any, _connection: Any, target: ClaimRevision) -> None:
+    raise ValueError("claim revisions are immutable")
+
+
 class IdempotencyRecord(Base):
     __tablename__ = "api_idempotency_records"
     __table_args__ = (
@@ -846,6 +914,10 @@ class ChangeSet(Base):
         CheckConstraint(
             "status in ('proposed','approved','rejected','applied','stale','failed')",
             name="ck_change_sets_status",
+        ),
+        CheckConstraint(
+            "operation_kind like 'create_%' or operation_kind like 'update_%'",
+            name="ck_change_sets_operation_kind",
         ),
         Index("ix_change_sets_project_status", "project_scope_id", "status"),
         Index("ix_change_sets_target", "target_kind", "target_id"),

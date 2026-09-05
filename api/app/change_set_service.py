@@ -92,6 +92,8 @@ def _validate_payload(db: Session, proposal: ChangeSetProposal) -> dict[str, Any
     model = mapping.get(operation)
     if model is None:
         raise ValueError("unsupported ChangeSet operation")
+    if operation.startswith("create_") and proposal.target_id is not None:
+        raise ValueError("create proposals must not provide target_id")
     if operation.startswith("update_") and (
         proposal.target_id is None or proposal.base_record_sha256 is None
     ):
@@ -170,10 +172,8 @@ def _apply_operation(db: Session, item: ChangeSet) -> dict[str, Any]:
         updated = update_object(
             db, obj, ObjectPatch.model_validate(body).model_dump(exclude_unset=True)
         )
-        return {
-            "object": object_out(updated),
-            "record_sha256": item.base_record_sha256,
-        }
+        output = object_out(updated)
+        return {"object": output, "record_sha256": sha256_json(output)}
     if operation == "create_process_definition":
         return create_process_definition(db, ProcessDefinitionCreate.model_validate(body))
     if operation == "create_process_execution":
@@ -227,11 +227,13 @@ def apply_change_set(db: Session, change_set_id: uuid.UUID) -> dict[str, Any]:
     try:
         result = _apply_operation(db, item)
         if item.target_id is None and isinstance(result, dict):
-            for key in ("object", "data", "experiment", "view", "claim"):
+            for key in ("object", "data", "experiment", "view", "claim", "process_definition"):
                 value = result.get(key)
                 if isinstance(value, dict) and value.get("id"):
                     item.target_id = uuid.UUID(str(value["id"]))
                     break
+            if item.target_id is None and result.get("id"):
+                item.target_id = uuid.UUID(str(result["id"]))
         item.status = "applied"
         item.applied_at = datetime.now(UTC)
         item.reviewed_at = item.reviewed_at or datetime.now(UTC)

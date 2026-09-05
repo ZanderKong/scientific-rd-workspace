@@ -61,4 +61,4 @@ Representations are immutable and content-addressed. A Data record may set one `
 
 ## Governance and migration
 
-ChangeSets, idempotency records, ETag/If-Match and revisions remain active. Alembic `0001`–`0006` are immutable v0.2 history; `0007` adds canonical tables/transition columns, `0008` copies old records, `0009` removes legacy storage, and `0010` finalizes strict checks/indexes. PostgreSQL is the only supported database.
+ChangeSets, idempotency records, ETag/If-Match and revisions remain active. Alembic `0001`–`0006` are immutable v0.2 history; `0007` adds canonical tables/transition columns, `0008` copies old records, `0009` removes legacy storage, `0010` finalizes strict checks/indexes, `0011` persists ProcessExecution View revision pins, and `0012` aligns explicit migration metadata with runtime indexes/constraints. PostgreSQL is the only supported database.

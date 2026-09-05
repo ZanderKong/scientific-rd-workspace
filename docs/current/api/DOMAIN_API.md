@@ -63,7 +63,11 @@ GET          /views/{id}/revisions
 POST/GET/PUT /claims/{id}
 ```
 
-View config references Data without copying values. Claims expose statement/source/confidence/evidence and append-only revisions.
+View config references Data without copying values. An Execution that consumes a View must persist both the View id and the exact View revision id. Claims expose statement/source/confidence/evidence and append-only revisions; Claim evidence is scope-checked and claim-to-claim cycles are rejected.
+
+## ChangeSets
+
+External-agent writes use `POST /change-sets/propose`, review, then apply. Create proposals do not carry a target id; apply records the created aggregate identity. Update proposals require `target_id` and `base_record_sha256`, and the applied result returns the new aggregate hash.
 
 ## Safety contract
 

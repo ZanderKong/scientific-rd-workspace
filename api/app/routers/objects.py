@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -26,7 +29,6 @@ from app.data_service import (
     create_representation,
     get_data_record,
     representation_out,
-    set_system_relations,
     update_data_record,
 )
 from app.db import get_db
@@ -44,7 +46,6 @@ from app.models import (
     DataImport,
     DataRepresentation,
     ObjectAssetLink,
-    ObjectRelation,
     ObjectRevision,
     ObjectType,
     ResearchObject,
@@ -137,6 +138,9 @@ from app.services import (
     update_object,
     update_relation,
 )
+from app.services import (
+    delete_relation as delete_relation_service,
+)
 from app.storage import (
     LocalStorageProvider,
     S3StorageProvider,
@@ -147,6 +151,7 @@ from app.storage import (
 from app.view_service import create_view, get_view, list_view_revisions, update_view
 
 router = APIRouter(tags=["research-object-graph"])
+logger = logging.getLogger(__name__)
 
 
 def _storage() -> StorageRouter:
@@ -160,6 +165,7 @@ def _storage() -> StorageRouter:
             bucket=settings.s3_bucket,
             access_key_id=settings.s3_access_key_id,
             secret_access_key=settings.s3_secret_access_key,
+            force_path_style=settings.s3_force_path_style,
         )
     return StorageRouter(
         local,
@@ -413,11 +419,14 @@ def patch_relation(
 
 @router.delete("/relations/{relation_id}", status_code=204)
 def delete_relation(relation_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
-    item = db.get(ObjectRelation, relation_id)
+    item = get_relation(db, relation_id)
     if item is None:
         raise HTTPException(status_code=404, detail="relation not found")
-    db.delete(item)
-    db.commit()
+    try:
+        delete_relation_service(db, item)
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
 
 
 @router.post("/objects/{object_id}/revisions", response_model=ObjectRevisionOut, status_code=201)
@@ -846,21 +855,6 @@ def representation(
     return DataRepresentationOut.model_validate(representation_out(item))
 
 
-@router.put("/data/{data_id}/relations", status_code=204)
-def put_data_relations(
-    data_id: uuid.UUID,
-    subjects: list[uuid.UUID] = Query(default=[]),
-    derived_from: list[uuid.UUID] = Query(default=[]),
-    db: Session = Depends(get_db),
-) -> None:
-    try:
-        set_system_relations(db, data_id, subject_ids=subjects, derived_from_ids=derived_from)
-        db.commit()
-    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
-        db.rollback()
-        raise _error(exc) from exc
-
-
 @router.post("/views", response_model=ViewOut, status_code=201)
 def post_view(payload: ViewCreate, db: Session = Depends(get_db)) -> ViewOut:
     try:
@@ -963,12 +957,28 @@ def upload_asset(
     filename = sanitise_filename(file.filename or "asset")
     mime_type = file.content_type or "application/octet-stream"
     storage = _storage()
-    provider = storage.choose(mime_type=mime_type)
-    object_key = f"objects/{object_id}/{uuid.uuid4()}-{filename}"
+    temp_path: Path | None = None
     try:
-        size, digest = provider.put(object_key, file.file)
-        if size > settings.max_upload_bytes:
+        with tempfile.NamedTemporaryFile(prefix="scientific-asset-", delete=False) as temp:
+            temp_path = Path(temp.name)
+            digest_builder = hashlib.sha256()
+            size = 0
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > settings.max_upload_bytes:
+                    raise ValueError("uploaded asset exceeds size limit")
+                digest_builder.update(chunk)
+                temp.write(chunk)
+        digest = digest_builder.hexdigest()
+        provider = storage.choose(mime_type=mime_type, size_bytes=size)
+        opaque_key = uuid.uuid4().hex
+        object_key = f"objects/{opaque_key[:2]}/{opaque_key}"
+        with temp_path.open("rb") as source:
+            stored_size, stored_digest = provider.put(object_key, source)
+        if stored_size != size or stored_digest != digest:
             provider.delete(object_key)
+            raise ValueError("stored asset checksum mismatch")
+        if size > settings.max_upload_bytes:
             raise ValueError("uploaded asset exceeds size limit")
         asset = Asset(
             storage_backend=provider.backend,
@@ -987,13 +997,17 @@ def upload_asset(
         return AssetOut.model_validate(serialize_asset(asset))
     except Exception as exc:
         db.rollback()
-        try:
-            provider.delete(object_key)
-        except Exception:
-            pass
+        if "provider" in locals() and "object_key" in locals():
+            try:
+                provider.delete(object_key)
+            except Exception:
+                logger.warning("failed to clean up uploaded asset %s", object_key, exc_info=True)
         if isinstance(exc, (LookupError, ValueError, IntegrityError)):
             raise _error(exc) from exc
         raise
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 @router.get("/objects/{object_id}/assets", response_model=list[AssetOut])
@@ -1033,9 +1047,45 @@ def delete_asset(asset_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
     if asset is None:
         raise HTTPException(status_code=404, detail="asset not found")
     try:
-        _provider_for_asset(_storage(), asset).delete(asset.object_key)
+        object_link_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(ObjectAssetLink)
+                .where(ObjectAssetLink.asset_id == asset.id)
+            )
+            or 0
+        )
+        representation_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(DataRepresentation)
+                .where(DataRepresentation.asset_id == asset.id)
+            )
+            or 0
+        )
+        import_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(DataImport)
+                .where(DataImport.source_asset_id == asset.id)
+            )
+            or 0
+        )
+        if object_link_count or representation_count or import_count:
+            raise SemanticConflict(
+                "Asset is still referenced by scientific records", code="asset_in_use"
+            )
+        provider = _provider_for_asset(_storage(), asset)
         db.delete(asset)
         db.commit()
+        try:
+            provider.delete(asset.object_key)
+        except Exception:
+            logger.warning(
+                "asset row deleted but physical cleanup failed for %s",
+                asset.id,
+                exc_info=True,
+            )
     except Exception as exc:
         db.rollback()
         raise _error(exc) from exc

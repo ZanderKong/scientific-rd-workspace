@@ -322,6 +322,8 @@ class ProcessExecutionOut(BaseModel):
     project_scope_id: uuid.UUID | None
     process_definition_id: uuid.UUID
     process_definition_version_id: uuid.UUID
+    source_view_id: uuid.UUID | None = None
+    source_view_revision_id: uuid.UUID | None = None
     title_snapshot: str | None
     status: str
     execution_field_definitions: dict[str, Any]
@@ -722,7 +724,6 @@ class ChangeSetProposal(BaseModel):
         "create_research_object",
         "update_research_object",
         "create_process_definition",
-        "update_process_definition",
         "create_process_execution",
         "update_process_execution",
         "create_data_record",

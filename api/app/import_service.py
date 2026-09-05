@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.data_service import _create_representation_in_session
-from app.models import Asset, DataImport, DataRepresentation, DataTableRow, ResearchObject
+from app.models import (
+    Asset,
+    DataImport,
+    DataRecord,
+    DataRepresentation,
+    DataTableRow,
+    ResearchObject,
+)
 from app.schemas import DataRepresentationCreate, ImportCommitMapping, ImportPreviewRequest
 from app.storage import StorageProvider
 
@@ -355,10 +362,19 @@ def commit_import(
                 values_jsonb=values,
             )
         )
+    data_record = db.get(DataRecord, data.id)
+    if data_record is None:
+        data_record = DataRecord(data_object_id=data.id)
+        db.add(data_record)
+    if data_record.origin_representation_id is None:
+        data_record.origin_representation_id = raw_rep.id
     record.status = "completed"
     record.representation_id = representation.id
     record.mapping_json = mapping.model_dump(mode="json")
     record.completed_at = datetime.now(UTC)
+    from app.services import _create_revision_in_session
+
+    _create_revision_in_session(db, data.id, f"commit import {record.id}")
     db.commit()
     return (
         db.scalar(select(DataRepresentation).where(DataRepresentation.id == representation.id))

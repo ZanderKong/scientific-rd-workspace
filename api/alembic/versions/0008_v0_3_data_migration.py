@@ -16,6 +16,16 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     op.execute(
         """
+        UPDATE research_objects SET tags_jsonb = CASE kind
+          WHEN 'material' THEN CASE WHEN tags_jsonb @> '[\"原料\"]'::jsonb THEN tags_jsonb ELSE tags_jsonb || '[\"原料\"]'::jsonb END
+          WHEN 'equipment' THEN CASE WHEN tags_jsonb @> '[\"设备\"]'::jsonb THEN tags_jsonb ELSE tags_jsonb || '[\"设备\"]'::jsonb END
+          WHEN 'sample' THEN CASE WHEN tags_jsonb @> '[\"样品\"]'::jsonb THEN tags_jsonb ELSE tags_jsonb || '[\"样品\"]'::jsonb END
+          ELSE tags_jsonb END
+        WHERE kind IN ('material','equipment','sample')
+        """
+    )
+    op.execute(
+        """
         UPDATE object_types SET is_default = false
         WHERE kind IN ('material','sample','equipment','process')
         """
@@ -163,7 +173,7 @@ def upgrade() -> None:
           (id, process_definition_id, version, description,
            execution_field_definitions_jsonb, ui_schema_jsonb, created_at)
         SELECT gen_random_uuid(), id, 1, properties_jsonb ->> 'description',
-               COALESCE(properties_jsonb -> 'parameters', '{}'::jsonb), NULL, created_at
+               COALESCE(usage_schema_jsonb, '{}'::jsonb), NULL, created_at
         FROM research_objects
         WHERE kind = 'process_definition'
         ON CONFLICT (process_definition_id, version) DO NOTHING
@@ -178,15 +188,41 @@ def upgrade() -> None:
         """
     )
     op.execute(
+        "CREATE TEMP TABLE legacy_sample_execution_map (sample_execution_id uuid primary key, execution_id uuid not null) ON COMMIT DROP"
+    )
+    op.execute(
+        "INSERT INTO legacy_sample_execution_map SELECT id, gen_random_uuid() FROM legacy_sample_executions"
+    )
+    op.execute(
+        "CREATE TEMP TABLE legacy_process_execution_map (process_id uuid primary key, execution_id uuid not null) ON COMMIT DROP"
+    )
+    op.execute(
+        "INSERT INTO legacy_process_execution_map SELECT id, gen_random_uuid() FROM research_objects WHERE kind = 'process_definition'"
+    )
+    op.execute(
         """
         INSERT INTO process_executions
           (id, project_scope_id, process_definition_id, process_definition_version_id,
            title_snapshot, status, execution_field_definition_snapshot_jsonb,
            values_jsonb, note, occurred_at, started_at, completed_at, created_at, updated_at)
-        SELECT p.id, p.project_scope_id, p.id, s.current_version_id, p.title, 'completed',
-               v.execution_field_definitions_jsonb, '{}'::jsonb, NULL, NULL, p.created_at,
+        SELECT m.execution_id, p.project_scope_id, p.id, s.current_version_id, p.title, 'completed',
+               v.execution_field_definitions_jsonb,
+               COALESCE(
+                 (
+                   SELECT jsonb_object_agg(parameter.key, parameter.value)
+                   FROM jsonb_each(COALESCE(p.properties_jsonb -> 'parameters', '{}'::jsonb)) AS parameter
+                   WHERE NOT (
+                     jsonb_typeof(parameter.value) = 'object'
+                     AND parameter.value ? 'value_type'
+                   )
+                 ),
+                 p.properties_jsonb -> 'values',
+                 '{}'::jsonb
+               ),
+               NULL, NULL, p.created_at,
                p.updated_at, p.created_at, p.updated_at
         FROM research_objects p
+        JOIN legacy_process_execution_map m ON m.process_id = p.id
         JOIN process_definition_state s ON s.process_definition_id = p.id
         JOIN process_definition_versions v ON v.id = s.current_version_id
         WHERE p.kind = 'process_definition'
@@ -200,13 +236,14 @@ def upgrade() -> None:
         INSERT INTO process_execution_object_bindings
           (id, execution_id, research_object_id, direction, role,
            field_definition_snapshot_jsonb, values_jsonb, order_index, created_at)
-        SELECT gen_random_uuid(), r.source_object_id, r.target_object_id,
+        SELECT gen_random_uuid(), m.execution_id, r.target_object_id,
                CASE WHEN r.relation_type = 'produces' THEN 'output' ELSE 'input' END,
                r.role, COALESCE(o.process_field_definitions_jsonb, '{}'::jsonb),
-               COALESCE(r.properties_jsonb -> 'quantity', '{}'::jsonb), 0, r.created_at
+               (COALESCE(r.properties_jsonb, '{}'::jsonb) - 'usage_values') || COALESCE(r.properties_jsonb -> 'usage_values', '{}'::jsonb), 0, r.created_at
         FROM object_relations r
         JOIN research_objects source ON source.id = r.source_object_id
         JOIN research_objects o ON o.id = r.target_object_id
+        JOIN legacy_process_execution_map m ON m.process_id = r.source_object_id
         WHERE source.kind = 'process_definition'
           AND o.kind <> 'data'
           AND r.relation_type IN ('uses','produces')
@@ -217,12 +254,13 @@ def upgrade() -> None:
         """
         INSERT INTO process_execution_data_bindings
           (id, execution_id, data_id, direction, role, values_jsonb, order_index, created_at)
-        SELECT gen_random_uuid(), r.source_object_id, r.target_object_id,
+        SELECT gen_random_uuid(), m.execution_id, r.target_object_id,
                CASE WHEN r.relation_type = 'produces' THEN 'output' ELSE 'input' END,
-               r.role, COALESCE(r.properties_jsonb -> 'quantity', '{}'::jsonb), 0, r.created_at
+               r.role, (COALESCE(r.properties_jsonb, '{}'::jsonb) - 'usage_values') || COALESCE(r.properties_jsonb -> 'usage_values', '{}'::jsonb), 0, r.created_at
         FROM object_relations r
         JOIN research_objects source ON source.id = r.source_object_id
         JOIN research_objects target ON target.id = r.target_object_id
+        JOIN legacy_process_execution_map m ON m.process_id = r.source_object_id
         WHERE source.kind = 'process_definition'
           AND target.kind = 'data'
           AND r.relation_type IN ('uses','produces')
@@ -233,10 +271,12 @@ def upgrade() -> None:
         """
         INSERT INTO process_execution_relations
           (id, source_execution_id, target_execution_id, relation_type, created_at)
-        SELECT gen_random_uuid(), r.source_object_id, r.target_object_id, 'precedes', r.created_at
+        SELECT gen_random_uuid(), source_map.execution_id, target_map.execution_id, 'precedes', r.created_at
         FROM object_relations r
         JOIN research_objects source ON source.id = r.source_object_id
         JOIN research_objects target ON target.id = r.target_object_id
+        JOIN legacy_process_execution_map source_map ON source_map.process_id = r.source_object_id
+        JOIN legacy_process_execution_map target_map ON target_map.process_id = r.target_object_id
         WHERE source.kind = 'process_definition' AND target.kind = 'process_definition'
           AND r.relation_type = 'precedes'
         ON CONFLICT (source_execution_id, target_execution_id, relation_type) DO NOTHING
@@ -282,26 +322,64 @@ def upgrade() -> None:
         """
     )
 
-    # Old SampleExecution identities are retained as generic completed
-    # executions when a process definition exists, preserving the audit trail.
+    # Old SampleExecution rows without a resolvable process are pinned to one
+    # explicit, clearly-labelled definition instead of guessing a real one.
+    op.execute(
+        """
+        INSERT INTO research_objects
+          (id, code, kind, title, status, project_scope_id, type_version_id,
+           properties_jsonb, tags_jsonb, process_field_definitions_jsonb,
+           content_document, created_at, updated_at)
+        SELECT gen_random_uuid(), 'PFD-LEGACY-SAMPLE', 'process_definition',
+               'Legacy Sample Execution', 'active', NULL, NULL, '{}'::jsonb,
+               '[\"legacy\",\"migration\"]'::jsonb, '{}'::jsonb, '[]'::jsonb,
+               now(), now()
+        WHERE EXISTS (SELECT 1 FROM legacy_sample_executions)
+          AND NOT EXISTS (
+            SELECT 1 FROM research_objects WHERE code = 'PFD-LEGACY-SAMPLE'
+          )
+        """
+    )
+    op.execute(
+        """
+        INSERT INTO process_definition_versions
+          (id, process_definition_id, version, description,
+           execution_field_definitions_jsonb, ui_schema_jsonb, created_at)
+        SELECT gen_random_uuid(), id, 1, 'Unresolved legacy SampleExecution', '{}', NULL, now()
+        FROM research_objects
+        WHERE code = 'PFD-LEGACY-SAMPLE'
+          AND NOT EXISTS (
+            SELECT 1 FROM process_definition_versions v
+            WHERE v.process_definition_id = research_objects.id
+          )
+        """
+    )
+    op.execute(
+        """
+        INSERT INTO process_definition_state (process_definition_id, current_version_id)
+        SELECT v.process_definition_id, v.id
+        FROM process_definition_versions v
+        JOIN research_objects d ON d.id = v.process_definition_id
+        WHERE d.code = 'PFD-LEGACY-SAMPLE'
+        ON CONFLICT (process_definition_id) DO NOTHING
+        """
+    )
     op.execute(
         """
         INSERT INTO process_executions
           (id, project_scope_id, process_definition_id, process_definition_version_id,
            title_snapshot, status, execution_field_definition_snapshot_jsonb,
            values_jsonb, note, occurred_at, started_at, completed_at, created_at, updated_at)
-        SELECT e.id, sample.project_scope_id, definition.id, state.current_version_id,
+        SELECT m.execution_id, sample.project_scope_id, definition.id, state.current_version_id,
                'Migrated Sample Execution', e.status,
                version.execution_field_definitions_jsonb, e.plan_snapshot_jsonb,
                'migrate v0.2 SampleExecution', NULL, e.started_at, e.completed_at,
                e.created_at, e.updated_at
         FROM legacy_sample_executions e
+        JOIN legacy_sample_execution_map m ON m.sample_execution_id = e.id
         JOIN research_objects sample ON sample.id = e.sample_id
         CROSS JOIN LATERAL (
-          SELECT id FROM research_objects
-          WHERE kind = 'process_definition'
-          ORDER BY created_at, id
-          LIMIT 1
+          SELECT id FROM research_objects WHERE code = 'PFD-LEGACY-SAMPLE'
         ) definition
         JOIN process_definition_state state ON state.process_definition_id = definition.id
         JOIN process_definition_versions version ON version.id = state.current_version_id
@@ -313,10 +391,11 @@ def upgrade() -> None:
         INSERT INTO process_execution_object_bindings
           (id, execution_id, research_object_id, direction, role,
            field_definition_snapshot_jsonb, values_jsonb, order_index, created_at)
-        SELECT gen_random_uuid(), e.id, e.sample_id, 'context', 'sample_record',
+        SELECT gen_random_uuid(), m.execution_id, e.sample_id, 'context', 'sample_record',
                '{}', '{}', 0, e.created_at
         FROM legacy_sample_executions e
-        JOIN process_executions execution ON execution.id = e.id
+        JOIN legacy_sample_execution_map m ON m.sample_execution_id = e.id
+        JOIN process_executions execution ON execution.id = m.execution_id
         ON CONFLICT DO NOTHING
         """
     )
@@ -324,10 +403,14 @@ def upgrade() -> None:
         """
         INSERT INTO process_execution_revisions
           (id, execution_id, revision_number, snapshot_jsonb, snapshot_sha256, change_note, created_at)
-        SELECT gen_random_uuid(), e.id, 1, jsonb_build_object('migrated_from', 'sample_executions', 'sample_id', e.sample_id),
-               md5(e.id::text), 'migrate v0.2 SampleExecution', e.created_at
+        SELECT gen_random_uuid(), m.execution_id, 1,
+               jsonb_build_object('migrated_from', 'sample_executions', 'sample_id', e.sample_id,
+                                  'semantic_resolution', 'unresolved'),
+               encode(digest(jsonb_build_object('migrated_from', 'sample_executions', 'sample_id', e.sample_id,
+                                                'semantic_resolution', 'unresolved')::text, 'sha256'), 'hex'),
+               'migrate v0.2 SampleExecution', e.created_at
         FROM legacy_sample_executions e
-        JOIN process_executions p ON p.id = e.id
+        JOIN legacy_sample_execution_map m ON m.sample_execution_id = e.id
         ON CONFLICT (execution_id, revision_number) DO NOTHING
         """
     )

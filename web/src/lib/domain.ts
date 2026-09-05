@@ -67,7 +67,18 @@ export interface ResearchObject {
   updated_at: string;
 }
 
-export type ObjectSummary = Pick<ResearchObject, 'id' | 'code' | 'kind' | 'title' | 'status' | 'project_scope_id' | 'type_key' | 'type_label_zh' | 'type_label_en'>;
+export type ObjectSummary = Pick<
+  ResearchObject,
+  | 'id'
+  | 'code'
+  | 'kind'
+  | 'title'
+  | 'status'
+  | 'project_scope_id'
+  | 'type_key'
+  | 'type_label_zh'
+  | 'type_label_en'
+>;
 
 export interface ObjectRelation {
   id: string;
@@ -145,6 +156,8 @@ export interface ProcessExecution {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  source_view_id?: string | null;
+  source_view_revision_id?: string | null;
   object_bindings: ProcessExecutionObjectBinding[];
   data_bindings: ProcessExecutionDataBinding[];
   precedes_execution_ids: string[];
@@ -167,6 +180,7 @@ export interface ProcessExecutionDataBindingDraft {
 }
 
 export interface ProcessExecutionDraft {
+  execution_id?: string | null;
   process_definition_id: string;
   process_definition_version_id?: string | null;
   project_scope_id?: string | null;
@@ -177,9 +191,14 @@ export interface ProcessExecutionDraft {
   object_bindings: ProcessExecutionObjectBindingDraft[];
   data_bindings?: ProcessExecutionDataBindingDraft[];
   precedes_execution_ids?: string[];
+  source_view_id?: string | null;
+  source_view_revision_id?: string | null;
 }
 
-export interface SampleRecordStep { execution: ProcessExecution; ordinal: number }
+export interface SampleRecordStep {
+  execution: ProcessExecution;
+  ordinal: number;
+}
 export interface SampleRecord {
   record_sha256: string;
   sample: ResearchObject;
@@ -203,11 +222,31 @@ export interface SampleRecordCreatePayload {
   steps: ProcessExecutionDraft[];
   change_note?: string | null;
 }
-export interface SampleRecordPutPayload { sample?: JsonObject; steps: ProcessExecutionDraft[]; change_note?: string | null }
+export interface SampleRecordPutPayload {
+  sample?: JsonObject;
+  steps: ProcessExecutionDraft[];
+  change_note?: string | null;
+}
 
-export interface ExperimentReference { relation_id: string; role: string | null; note: string | null; order_index: number; object: ResearchObject }
-export interface ExperimentRecord { record_sha256: string; experiment: ResearchObject; references: Record<string, ExperimentReference[]> }
-export interface ExperimentReferenceDraft { target_id: string; target_kind?: ResearchObjectKind; role?: string | null; note?: string | null; order_index?: number }
+export interface ExperimentReference {
+  relation_id: string;
+  role: string | null;
+  note: string | null;
+  order_index: number;
+  object: ResearchObject;
+}
+export interface ExperimentRecord {
+  record_sha256: string;
+  experiment: ResearchObject;
+  references: Record<string, ExperimentReference[]>;
+}
+export interface ExperimentReferenceDraft {
+  target_id: string;
+  target_kind?: ResearchObjectKind;
+  role?: string | null;
+  note?: string | null;
+  order_index?: number;
+}
 
 export interface DataRepresentation {
   id: string;
@@ -240,7 +279,17 @@ export interface DataRecord {
   derived_from: ResearchObject[];
   imports: DataImport[];
 }
-export interface Asset { id: string; storage_backend: string; bucket: string | null; object_key: string; original_filename: string; mime_type: string | null; size_bytes: number; sha256: string; created_at: string }
+export interface Asset {
+  id: string;
+  storage_backend: string;
+  bucket: string | null;
+  object_key: string;
+  original_filename: string;
+  mime_type: string | null;
+  size_bytes: number;
+  sha256: string;
+  created_at: string;
+}
 export interface DataImport {
   id: string;
   data_object_id: string;
@@ -264,14 +313,94 @@ export interface DataImport {
   column_count?: number;
 }
 
-export interface ViewRevision { id: string; view_id: string; revision_number: number; snapshot_jsonb: JsonObject; snapshot_sha256: string; change_note: string | null; created_at: string }
-export interface ViewRecord { record_sha256: string; view: ResearchObject; description: string | null; config: JsonObject; data: ResearchObject[]; current_revision_id: string | null; revisions: ViewRevision[] }
-export interface ClaimEvidence { id: string; evidence_kind: 'data' | 'view' | 'claim' | 'external'; evidence_id: string | null; external_ref: string | null; polarity: 'support' | 'counter'; note: string | null; order_index: number; object: ResearchObject | null }
-export interface ClaimRecord { record_sha256: string; claim: ResearchObject; statement: string; source_type: string; source_ref: string | null; confidence: string | null; metadata_jsonb: JsonObject; evidence: ClaimEvidence[]; current_revision_id: string | null; revisions: JsonObject[] }
+export interface ViewRevision {
+  id: string;
+  view_id: string;
+  revision_number: number;
+  snapshot_jsonb: JsonObject;
+  snapshot_sha256: string;
+  change_note: string | null;
+  created_at: string;
+}
+export interface ViewRecord {
+  record_sha256: string;
+  view: ResearchObject;
+  description: string | null;
+  config: JsonObject;
+  data: ResearchObject[];
+  current_revision_id: string | null;
+  revisions: ViewRevision[];
+}
+export interface ClaimEvidence {
+  id: string;
+  evidence_kind: 'data' | 'view' | 'claim' | 'external';
+  evidence_id: string | null;
+  external_ref: string | null;
+  polarity: 'support' | 'counter';
+  note: string | null;
+  order_index: number;
+  object: ResearchObject | null;
+}
+export interface ClaimRecord {
+  record_sha256: string;
+  claim: ResearchObject;
+  statement: string;
+  source_type: string;
+  source_ref: string | null;
+  confidence: string | null;
+  metadata_jsonb: JsonObject;
+  evidence: ClaimEvidence[];
+  current_revision_id: string | null;
+  revisions: JsonObject[];
+}
 
-export interface ProjectContext { record_sha256: string; project: ResearchObject; counts: Record<string, number>; recent_research_objects: ResearchObject[]; recent_experiments: ResearchObject[]; recent_data: ResearchObject[]; capabilities: Record<string, unknown> }
-export interface ProjectRecord { record_sha256: string; project: ResearchObject; context: ProjectContext }
-export interface ProjectSearch { items: ResearchObject[]; total: number; limit: number; offset: number }
-export interface ProjectSummary { project: ResearchObject; counts: Record<string, number>; recent: ResearchObject[] }
-export interface WorkspaceSummary { counts: Record<string, number>; recent: ResearchObject[]; projects: ResearchObject[] }
-export interface ChangeSet { id: string; project_scope_id: string; status: string; operation_kind: string; target_kind: ResearchObjectKind; target_id: string | null; base_record_sha256: string | null; request_payload_jsonb: JsonObject; preview_jsonb: JsonObject; diff_jsonb: JsonObject[]; source_client_name: string; source_client_version: string | null; source_transport: string; idempotency_key: string | null; created_at: string; reviewed_at: string | null; applied_at: string | null; failure_jsonb: JsonObject | null }
+export interface ProjectContext {
+  record_sha256: string;
+  project: ResearchObject;
+  counts: Record<string, number>;
+  recent_research_objects: ResearchObject[];
+  recent_experiments: ResearchObject[];
+  recent_data: ResearchObject[];
+  capabilities: Record<string, unknown>;
+}
+export interface ProjectRecord {
+  record_sha256: string;
+  project: ResearchObject;
+  context: ProjectContext;
+}
+export interface ProjectSearch {
+  items: ResearchObject[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+export interface ProjectSummary {
+  project: ResearchObject;
+  counts: Record<string, number>;
+  recent: ResearchObject[];
+}
+export interface WorkspaceSummary {
+  counts: Record<string, number>;
+  recent: ResearchObject[];
+  projects: ResearchObject[];
+}
+export interface ChangeSet {
+  id: string;
+  project_scope_id: string;
+  status: string;
+  operation_kind: string;
+  target_kind: ResearchObjectKind;
+  target_id: string | null;
+  base_record_sha256: string | null;
+  request_payload_jsonb: JsonObject;
+  preview_jsonb: JsonObject;
+  diff_jsonb: JsonObject[];
+  source_client_name: string;
+  source_client_version: string | null;
+  source_transport: string;
+  idempotency_key: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  applied_at: string | null;
+  failure_jsonb: JsonObject | null;
+}
