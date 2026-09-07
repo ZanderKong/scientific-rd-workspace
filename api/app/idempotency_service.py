@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import IdempotencyRecord
@@ -39,18 +40,43 @@ def run_idempotent(
     )
     if existing is not None:
         if existing.request_hash != request_hash:
-            raise ValueError("idempotency_conflict")
-        raise IdempotencyReplay(copy.deepcopy(existing.response_jsonb), existing.response_status)
+            raise ValueError("idempotency_conflict") from None
+        if existing.response_status == 102:
+            raise ValueError("idempotency_in_progress") from None
+        raise IdempotencyReplay(
+            copy.deepcopy(existing.response_jsonb), existing.response_status
+        ) from None
+    record = IdempotencyRecord(
+        id=uuid.uuid4(),
+        idempotency_key=key,
+        request_hash=request_hash,
+        response_status=102,
+        response_jsonb={},
+    )
+    try:
+        # Keep the idempotency reservation inside a savepoint.  A duplicate
+        # key is an expected concurrent outcome and must not roll back the
+        # caller's aggregate transaction (which may already hold locks or
+        # have staged validation work).
+        with db.begin_nested():
+            db.add(record)
+            db.flush()
+    except IntegrityError:
+        existing = db.scalar(
+            select(IdempotencyRecord)
+            .where(IdempotencyRecord.idempotency_key == key)
+            .with_for_update()
+        )
+        if existing is None or existing.request_hash != request_hash:
+            raise ValueError("idempotency_conflict") from None
+        if existing.response_status == 102:
+            raise ValueError("idempotency_in_progress") from None
+        raise IdempotencyReplay(
+            copy.deepcopy(existing.response_jsonb), existing.response_status
+        ) from None
     result = operation()
     serialised = jsonable_encoder(result)
-    db.add(
-        IdempotencyRecord(
-            id=uuid.uuid4(),
-            idempotency_key=key,
-            request_hash=request_hash,
-            response_status=response_status,
-            response_jsonb=copy.deepcopy(serialised),
-        )
-    )
+    record.response_status = response_status
+    record.response_jsonb = copy.deepcopy(serialised)
     db.commit()
     return serialised

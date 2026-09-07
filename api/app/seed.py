@@ -10,12 +10,13 @@ from app.claim_service import create_claim
 from app.data_service import create_representation
 from app.db import SessionLocal
 from app.experiment_record_service import create_experiment_record
-from app.models import ObjectType, ObjectTypeVersion, ResearchObject
+from app.models import ObjectRevision, ObjectType, ObjectTypeVersion, ResearchObject
 from app.process_definition_service import create_process_definition
 from app.process_execution_service import create_process_execution
 from app.project_context_service import create_project_record
 from app.schemas import (
     ClaimCreate,
+    ClaimPrimarySource,
     DataRepresentationCreate,
     ExperimentObjectCreate,
     ExperimentRecordCreate,
@@ -27,6 +28,7 @@ from app.schemas import (
     ProcessExecutionObjectBindingCreate,
     ProjectRecordCreate,
     ViewCreate,
+    ViewDataRefCreate,
 )
 from app.services import create_object
 from app.view_service import create_view
@@ -86,6 +88,18 @@ def ensure_default_object_types(db: Session) -> None:
     for definition in TYPE_DEFINITIONS:
         _type(db, *definition)
     db.commit()
+
+
+def _current_revision_id(db: Session, object_id: uuid.UUID) -> uuid.UUID:
+    revision_id = db.scalar(
+        select(ObjectRevision.id)
+        .where(ObjectRevision.object_id == object_id)
+        .order_by(ObjectRevision.revision_number.desc())
+        .limit(1)
+    )
+    if revision_id is None:
+        raise RuntimeError(f"seed object {object_id} has no revision")
+    return revision_id
 
 
 def _object(
@@ -502,7 +516,14 @@ def seed() -> None:
                 title="S1 响应总览",
                 description="Data-only view",
                 config={"chart": "line", "x": "time_min", "y": "response"},
-                data_ids=[d1.id, d2.id],
+                data_refs=[
+                    ViewDataRefCreate(
+                        data_id=d1.id, data_revision_id=_current_revision_id(db, d1.id)
+                    ),
+                    ViewDataRefCreate(
+                        data_id=d2.id, data_revision_id=_current_revision_id(db, d2.id)
+                    ),
+                ],
             ),
         )
         create_view(
@@ -512,7 +533,11 @@ def seed() -> None:
                 code="VEW-002",
                 title="增长率卡片",
                 config={"metric": "growth_rate"},
-                data_ids=[d2.id],
+                data_refs=[
+                    ViewDataRefCreate(
+                        data_id=d2.id, data_revision_id=_current_revision_id(db, d2.id)
+                    )
+                ],
             ),
         )
         create_claim(
@@ -522,7 +547,12 @@ def seed() -> None:
                 code="CLM-001",
                 title="S1 对 Cl₂ 有响应",
                 statement="S1 exhibits a measurable chlorine response in the synthetic run.",
-                source_type="analysis",
+                author_provenance={"kind": "human", "method": "analysis"},
+                primary_source=ClaimPrimarySource(
+                    kind="view",
+                    object_id=uuid.UUID(str(view_a["view"]["id"])),
+                    revision_id=uuid.UUID(str(view_a["current_revision_id"])),
+                ),
                 confidence="medium",
                 evidence=[
                     {

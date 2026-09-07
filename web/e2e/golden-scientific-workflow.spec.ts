@@ -59,6 +59,8 @@ test('golden scientific records remain visible and shared references survive exp
       ]
     }
   });
+  const responseDataRevisions = await get(request, `/objects/${responseData.data.id}/revisions`);
+  const derivedDataRevisions = await get(request, `/objects/${derivedData.data.id}/revisions`);
   await post(request, '/process-executions', {
     process_definition_id: definition.process_definition.id,
     project_scope_id: projectId,
@@ -80,13 +82,29 @@ test('golden scientific records remain visible and shared references survive exp
     title: 'Golden response overview',
     description: 'Line view over response and rate',
     config: { chart: 'line', x: 'minute', y: 'response' },
-    data_ids: [responseData.data.id, derivedData.data.id]
+    data_refs: [
+      {
+        data_id: responseData.data.id,
+        data_revision_id: responseDataRevisions.at(-1).id,
+        representation_ids: [representation.id]
+      },
+      {
+        data_id: derivedData.data.id,
+        data_revision_id: derivedDataRevisions.at(-1).id,
+        representation_ids: []
+      }
+    ]
   });
   const claim = await post(request, '/claims', {
     project_scope_id: projectId,
     title: 'Golden sensor responds to Cl₂',
     statement: 'The golden sensor has a measurable response.',
-    source_type: 'analysis',
+    author_provenance: { kind: 'human', workflow: 'golden-browser-test' },
+    primary_source: {
+      kind: 'view',
+      object_id: view.view.id,
+      revision_id: view.current_revision_id
+    },
     confidence: 'medium',
     evidence: [
       { evidence_kind: 'data', evidence_id: responseData.data.id, polarity: 'support' },
@@ -121,9 +139,11 @@ test('golden scientific records remain visible and shared references survive exp
   await expect(page.getByText('Current revision')).toBeVisible();
 
   await page.goto(`/dashboard/claims/${claim.claim.id}?project=${projectId}`);
-  await expect(page.getByText('The golden sensor has a measurable response.')).toBeVisible();
+  await expect(
+    page.getByText('The golden sensor has a measurable response.', { exact: true })
+  ).toBeVisible();
   await expect(page.getByText('Confidence: medium')).toBeVisible();
-  await expect(page.getByText('Evidence')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Evidence' })).toBeVisible();
 
   await page.goto(`/dashboard/experiments/${experimentA.experiment.id}?project=${projectId}`);
   await expect(page.getByText('Golden experiment A')).toBeVisible();

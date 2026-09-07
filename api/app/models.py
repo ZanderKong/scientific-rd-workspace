@@ -140,6 +140,10 @@ class ResearchObject(Base):
             postgresql_using="gin",
             postgresql_ops={"title": "gin_trgm_ops"},
         ),
+        CheckConstraint(
+            "authoring_kind is null or authoring_kind in ('sample','data')",
+            name="ck_research_objects_authoring_kind",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(32))
@@ -164,6 +168,10 @@ class ResearchObject(Base):
     content_document: Mapped[list[dict[str, Any]]] = mapped_column(
         JsonColumn, default=list, server_default=text("'[]'::jsonb")
     )
+    document_format_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # Explicit ownership marker for scientific record aggregates.  Tags and
+    # occurrence rows are projections and may legitimately be empty.
+    authoring_kind: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -203,7 +211,10 @@ class ResearchObject(Base):
         back_populates="view", uselist=False, cascade="all, delete-orphan"
     )
     claim_record: Mapped[ClaimRecord | None] = relationship(
-        back_populates="claim", uselist=False, cascade="all, delete-orphan"
+        back_populates="claim",
+        foreign_keys="ClaimRecord.claim_id",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
 
 
@@ -348,13 +359,26 @@ class ProcessExecution(Base):
     __tablename__ = "process_executions"
     __table_args__ = (
         CheckConstraint(
-            "status in ('draft','running','completed','cancelled')",
+            "status in ('draft','recorded','running','completed','cancelled')",
             name="ck_process_executions_status",
+        ),
+        CheckConstraint(
+            "record_validity in ('active','retracted')",
+            name="ck_process_executions_record_validity",
+        ),
+        UniqueConstraint(
+            "authoring_record_id",
+            "authoring_occurrence_id",
+            name="uq_process_execution_authoring_occurrence",
         ),
         Index("ix_process_executions_scope", "project_scope_id"),
         Index("ix_process_executions_definition", "process_definition_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    authoring_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    authoring_occurrence_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     project_scope_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("research_objects.id"), nullable=True, index=True
     )
@@ -372,6 +396,9 @@ class ProcessExecution(Base):
     )
     title_snapshot: Mapped[str | None] = mapped_column(String(240), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft", server_default="draft")
+    record_validity: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active"
+    )
     execution_field_definition_snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(
         JsonColumn, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -414,13 +441,19 @@ class ProcessExecutionObjectBinding(Base):
             name="ck_execution_object_binding_direction",
         ),
         Index("ix_execution_object_bindings_execution", "execution_id"),
+        Index("ix_execution_object_binding_revision", "research_object_revision_id"),
+        UniqueConstraint(
+            "execution_id",
+            "authoring_occurrence_id",
+            name="uq_execution_object_binding_authoring_occurrence",
+        ),
         Index("ix_execution_object_bindings_object", "research_object_id"),
         Index("ix_process_execution_object_bindings_direction", "research_object_id", "direction"),
         Index(
             "uq_execution_object_output",
             "research_object_id",
             unique=True,
-            postgresql_where=text("direction = 'output'"),
+            postgresql_where=text("direction = 'output' AND is_active = true"),
         ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -430,6 +463,11 @@ class ProcessExecutionObjectBinding(Base):
     research_object_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
     )
+    research_object_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    authoring_occurrence_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     direction: Mapped[str] = mapped_column(String(16))
     role: Mapped[str | None] = mapped_column(String(64), nullable=True)
     field_definition_snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(
@@ -467,6 +505,9 @@ class ProcessExecutionDataBinding(Base):
     data_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
     )
+    data_revision_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     direction: Mapped[str] = mapped_column(String(16))
     role: Mapped[str | None] = mapped_column(String(64), nullable=True)
     values_jsonb: Mapped[dict[str, Any]] = mapped_column(
@@ -485,7 +526,10 @@ class ProcessExecutionRelation(Base):
             "source_execution_id",
             "target_execution_id",
             "relation_type",
-            name="uq_execution_relations",
+            "source_kind",
+            "source_record_id",
+            name="uq_execution_relations_source",
+            postgresql_nulls_not_distinct=True,
         ),
         CheckConstraint("relation_type = 'precedes'", name="ck_execution_relations_type"),
     )
@@ -498,6 +542,12 @@ class ProcessExecutionRelation(Base):
     )
     relation_type: Mapped[str] = mapped_column(
         String(32), default="precedes", server_default="precedes"
+    )
+    source_kind: Mapped[str] = mapped_column(
+        String(32), default="explicit", server_default="explicit"
+    )
+    source_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -525,6 +575,119 @@ class ProcessExecutionRevision(Base):
     execution: Mapped[ProcessExecution] = relationship(back_populates="revisions")
 
 
+class DocumentOccurrence(Base):
+    __tablename__ = "document_occurrences"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "occurrence_id", name="uq_document_occurrences_owner"),
+        CheckConstraint("kind in ('process','object')", name="ck_document_occurrences_kind"),
+        Index("ix_document_occurrences_owner_ordinal", "owner_id", "ordinal"),
+        Index("ix_document_occurrences_target", "target_id", "kind"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE")
+    )
+    occurrence_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    kind: Mapped[str] = mapped_column(String(16))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="RESTRICT")
+    )
+    target_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("process_executions.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    binding_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("process_execution_object_bindings.id", ondelete="RESTRICT"), nullable=True
+    )
+    field_definition_snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JsonColumn, default=dict, server_default=text("'{}'::jsonb")
+    )
+    values_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JsonColumn, default=dict, server_default=text("'{}'::jsonb")
+    )
+
+
+class OccurrenceFieldValue(Base):
+    __tablename__ = "occurrence_field_values"
+    __table_args__ = (
+        UniqueConstraint("occurrence_row_id", "field_key", name="uq_occurrence_field_values_field"),
+        CheckConstraint(
+            "value_type in ('number','text','boolean','select')",
+            name="ck_occurrence_field_values_type",
+        ),
+        Index(
+            "ix_occurrence_field_values_lookup",
+            "owner_id",
+            "target_id",
+            "field_key",
+        ),
+        Index(
+            "ix_occurrence_field_values_number",
+            "target_id",
+            "field_key",
+            "number_value",
+        ),
+        Index(
+            "ix_occurrence_field_values_text",
+            "target_id",
+            "field_key",
+            "text_value",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    occurrence_row_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("document_occurrences.id", ondelete="CASCADE"), index=True
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
+    )
+    occurrence_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="RESTRICT"), index=True
+    )
+    field_key: Mapped[str] = mapped_column(String(120))
+    value_type: Mapped[str] = mapped_column(String(16))
+    text_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    number_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    boolean_value: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+
+
+class DataSubjectAssignment(Base):
+    __tablename__ = "data_subject_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "data_id",
+            "subject_id",
+            "source_kind",
+            "source_ref_id",
+            name="uq_data_subject_assignment_source",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint(
+            "source_kind in ('manual','acquisition_document','producer')",
+            name="ck_data_subject_assignments_source_kind",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    data_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
+    )
+    subject_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="RESTRICT"), index=True
+    )
+    subject_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    source_kind: Mapped[str] = mapped_column(String(32))
+    source_ref_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class DataRecord(Base):
     __tablename__ = "data_records"
     data_object_id: Mapped[uuid.UUID] = mapped_column(
@@ -537,6 +700,36 @@ class DataRecord(Base):
     )
     data_object: Mapped[ResearchObject] = relationship(
         back_populates="data_record", foreign_keys=[data_object_id]
+    )
+
+
+class DataDraft(Base):
+    __tablename__ = "data_drafts"
+    __table_args__ = (
+        UniqueConstraint("data_id", name="uq_data_drafts_data"),
+        UniqueConstraint("finalize_idempotency_key", name="uq_data_drafts_finalize_key"),
+        CheckConstraint("status in ('editing','finalized')", name="ck_data_drafts_status"),
+        Index("ix_data_drafts_project_status", "project_scope_id", "status"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    data_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
+    )
+    project_scope_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="editing", server_default="editing")
+    draft_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JsonColumn, default=dict, server_default=text("'{}'::jsonb")
+    )
+    attachments_jsonb: Mapped[list[dict[str, Any]]] = mapped_column(
+        JsonColumn, default=list, server_default=text("'[]'::jsonb")
+    )
+    finalize_idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    finalized_result_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -754,6 +947,12 @@ class ViewState(Base):
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("view_revisions.id", ondelete="SET NULL", use_alter=True), nullable=True
     )
+    artifact_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT", name="fk_view_states_artifact_asset"),
+        nullable=True,
+        index=True,
+    )
+    artifact_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     view: Mapped[ResearchObject] = relationship(back_populates="view_state", foreign_keys=[view_id])
     data_refs: Mapped[list[ViewDataRef]] = relationship(
         back_populates="view_state",
@@ -777,8 +976,12 @@ class ViewDataRef(Base):
     data_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("research_objects.id", ondelete="CASCADE"), primary_key=True
     )
-    data_revision_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("object_revisions.id", ondelete="SET NULL"), nullable=True
+    data_revision_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT", name="fk_view_data_refs_revision"),
+        nullable=False,
+    )
+    representation_ids_jsonb: Mapped[list[str]] = mapped_column(
+        JsonColumn, default=list, server_default=text("'[]'::jsonb")
     )
     order_index: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     view_state: Mapped[ViewState] = relationship(back_populates="data_refs")
@@ -803,12 +1006,30 @@ class ViewRevision(Base):
 
 class ClaimRecord(Base):
     __tablename__ = "claim_records"
+    __table_args__ = (
+        CheckConstraint(
+            "primary_source_kind in ('experiment','data','view')",
+            name="ck_claim_primary_source_kind",
+        ),
+    )
     claim_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("research_objects.id", ondelete="CASCADE"), primary_key=True
     )
     statement: Mapped[str] = mapped_column(Text)
-    source_type: Mapped[str] = mapped_column(String(32), default="human", server_default="human")
-    source_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    author_provenance_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JsonColumn, default=dict, server_default=text("'{}'::jsonb")
+    )
+    primary_source_kind: Mapped[str] = mapped_column(String(32))
+    primary_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "research_objects.id", ondelete="RESTRICT", name="fk_claim_records_primary_source"
+        ),
+        index=True,
+    )
+    primary_source_revision_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    context_snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JsonColumn, default=dict, server_default=text("'{}'::jsonb")
+    )
     confidence: Mapped[str | None] = mapped_column(String(32), nullable=True)
     metadata_jsonb: Mapped[dict[str, Any]] = mapped_column(
         JsonColumn, default=dict, server_default=text("'{}'::jsonb")
@@ -819,6 +1040,7 @@ class ClaimRecord(Base):
     claim: Mapped[ResearchObject] = relationship(
         back_populates="claim_record", foreign_keys=[claim_id]
     )
+    primary_source: Mapped[ResearchObject] = relationship(foreign_keys=[primary_source_id])
     evidence: Mapped[list[ClaimEvidence]] = relationship(
         back_populates="claim_record",
         cascade="all, delete-orphan",
@@ -830,6 +1052,33 @@ class ClaimRecord(Base):
         cascade="all, delete-orphan",
         order_by="ClaimRevision.revision_number",
     )
+    context_references: Mapped[list[ClaimContextReference]] = relationship(
+        back_populates="claim_record", cascade="all, delete-orphan"
+    )
+
+
+class ClaimContextReference(Base):
+    __tablename__ = "claim_context_references"
+    __table_args__ = (
+        UniqueConstraint(
+            "claim_id", "reference_kind", "object_id", name="uq_claim_context_reference"
+        ),
+        CheckConstraint(
+            "reference_kind in ('primary','context')",
+            name="ck_claim_context_reference_kind",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    claim_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("claim_records.claim_id", ondelete="CASCADE"), index=True
+    )
+    reference_kind: Mapped[str] = mapped_column(String(16))
+    object_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="RESTRICT"), index=True
+    )
+    revision_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    claim_record: Mapped[ClaimRecord] = relationship(back_populates="context_references")
+    object: Mapped[ResearchObject] = relationship()
 
 
 class ClaimEvidence(Base):
@@ -871,6 +1120,70 @@ class ClaimRevision(Base):
     created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     claim_record: Mapped[ClaimRecord] = relationship(
         back_populates="revisions", foreign_keys=[claim_id]
+    )
+
+
+class RevisionReference(Base):
+    """Immutable protection edges from a historical revision to one target."""
+
+    __tablename__ = "revision_references"
+    __table_args__ = (
+        CheckConstraint(
+            "num_nonnulls(source_object_revision_id, source_execution_revision_id, "
+            "source_view_revision_id, source_claim_revision_id) = 1",
+            name="ck_revision_references_one_source",
+        ),
+        CheckConstraint(
+            "num_nonnulls(target_object_revision_id, target_representation_id, "
+            "target_execution_revision_id, target_view_revision_id, target_claim_revision_id, "
+            "target_asset_id, target_object_id) = 1",
+            name="ck_revision_references_one_target",
+        ),
+        Index("ix_revision_references_source_object_revision", "source_object_revision_id"),
+        Index("ix_revision_references_source_execution_revision", "source_execution_revision_id"),
+        Index("ix_revision_references_source_view", "source_view_revision_id"),
+        Index("ix_revision_references_source_claim", "source_claim_revision_id"),
+        Index("ix_revision_references_target_revision", "target_object_revision_id"),
+        Index("ix_revision_references_target_execution_revision", "target_execution_revision_id"),
+        Index("ix_revision_references_target_view_revision", "target_view_revision_id"),
+        Index("ix_revision_references_target_claim_revision", "target_claim_revision_id"),
+        Index("ix_revision_references_target_representation", "target_representation_id"),
+        Index("ix_revision_references_target_asset", "target_asset_id"),
+        Index("ix_revision_references_target_object", "target_object_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_object_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    source_execution_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("process_execution_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    source_view_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("view_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    source_claim_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_object_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("object_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_execution_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("process_execution_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_view_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("view_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_claim_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_representation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("data_representations.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_object_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_objects.id", ondelete="RESTRICT"), nullable=True
     )
 
 
@@ -947,6 +1260,7 @@ class ChangeSet(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_result_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
     failure_jsonb: Mapped[dict[str, Any] | None] = mapped_column(JsonColumn, nullable=True)
     project_scope: Mapped[ResearchObject] = relationship(foreign_keys=[project_scope_id])
     revisions: Mapped[list[ObjectRevision]] = relationship(back_populates="change_set")

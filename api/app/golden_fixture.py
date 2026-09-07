@@ -135,6 +135,7 @@ class GoldenCl2WorkflowFactory:
             .where(
                 ProcessExecutionObjectBinding.research_object_id == records[fixture.sample_code].id,
                 ProcessExecutionObjectBinding.role == "product",
+                ProcessExecutionObjectBinding.is_active.is_(True),
             )
         )
         if sample_bindings != 1:

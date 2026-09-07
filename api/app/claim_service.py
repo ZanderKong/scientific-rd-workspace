@@ -8,9 +8,18 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.models import ClaimEvidence, ClaimRecord, ClaimRevision, ResearchObject
-from app.relation_semantics import SemanticConflict
-from app.schemas import ClaimCreate, ClaimPut, ObjectCreate
+from app.models import (
+    ClaimContextReference,
+    ClaimEvidence,
+    ClaimRecord,
+    ClaimRevision,
+    ObjectRevision,
+    ResearchObject,
+    RevisionReference,
+    ViewRevision,
+)
+from app.relation_semantics import SemanticConflict, lock_project_graph
+from app.schemas import ClaimCreate, ClaimPrimarySource, ClaimPut, ObjectCreate
 from app.services import (
     _create_object_in_session,
     _create_revision_in_session,
@@ -21,16 +30,138 @@ from app.services import (
 )
 
 
-def _claim(db: Session, claim_id: uuid.UUID) -> ResearchObject:
-    item = get_object(db, claim_id)
+def _claim(db: Session, claim_id: uuid.UUID, *, lock: bool = False) -> ResearchObject:
+    item = (
+        db.scalar(select(ResearchObject).where(ResearchObject.id == claim_id).with_for_update())
+        if lock
+        else get_object(db, claim_id)
+    )
     if item is None or item.kind != "claim":
         raise LookupError("claim not found")
     return item
 
 
+def _locked_claim(db: Session, claim_id: uuid.UUID) -> ResearchObject:
+    item = _claim(db, claim_id)
+    lock_project_graph(db, item.project_scope_id)
+    return _claim(db, claim_id, lock=True)
+
+
+def _author_provenance(value: dict[str, Any]) -> dict[str, Any]:
+    kind = value.get("kind")
+    if kind not in {"human", "literature", "ai", "external"}:
+        raise ValueError("Claim author provenance kind is invalid")
+    return copy.deepcopy(value)
+
+
+def _primary_source(
+    db: Session,
+    project_scope_id: uuid.UUID,
+    requested: ClaimPrimarySource,
+) -> tuple[ResearchObject, dict[str, Any]]:
+    source = get_object(db, requested.object_id)
+    if source is None or source.kind != requested.kind:
+        raise ValueError("Claim primary source kind does not match its object")
+    if source.project_scope_id != project_scope_id:
+        raise SemanticConflict(
+            "Claim primary source must remain in the same project scope", code="scope_conflict"
+        )
+    if requested.kind == "view":
+        revision = db.get(ViewRevision, requested.revision_id)
+        if revision is None or revision.view_id != source.id:
+            raise ValueError("Claim View revision does not belong to its source")
+        revision_snapshot = revision.snapshot_jsonb
+        revision_sha256 = revision.snapshot_sha256
+    else:
+        revision = db.get(ObjectRevision, requested.revision_id)
+        if revision is None or revision.object_id != source.id:
+            raise ValueError("Claim source revision does not belong to its source")
+        revision_snapshot = revision.snapshot_jsonb
+        revision_sha256 = revision.snapshot_sha256
+    return source, {
+        "kind": requested.kind,
+        "object_id": str(source.id),
+        "revision_id": str(requested.revision_id),
+        "revision_sha256": revision_sha256,
+        "source_snapshot": copy.deepcopy(revision_snapshot),
+    }
+
+
+def _capture_context(
+    db: Session,
+    project_scope_id: uuid.UUID,
+    requested: ClaimPrimarySource,
+) -> dict[str, Any]:
+    source, context = _primary_source(db, project_scope_id, requested)
+    source_snapshot = context.get("source_snapshot") or {}
+    if requested.kind == "data":
+        context["subjects"] = copy.deepcopy(
+            (source_snapshot.get("data_record") or {}).get("subject_assignments", [])
+        )
+    elif requested.kind == "experiment":
+        context["members"] = [
+            {
+                "object_id": item["target_object_id"],
+                "revision_id": item.get("target_revision_id"),
+                "role": item.get("role"),
+                "order_index": (item.get("properties_jsonb") or {}).get("order_index", 0),
+            }
+            for item in source_snapshot.get("direct_relations", [])
+            if item.get("relation_type") == "references"
+        ]
+    else:
+        context["data_refs"] = copy.deepcopy(source_snapshot.get("data_refs", []))
+        context["artifact_asset_id"] = source_snapshot.get("artifact_asset_id")
+    return context
+
+
+def _replace_context_references(db: Session, record: ClaimRecord) -> None:
+    db.query(ClaimContextReference).filter(
+        ClaimContextReference.claim_id == record.claim_id
+    ).delete(synchronize_session=False)
+    rows: list[ClaimContextReference] = [
+        ClaimContextReference(
+            claim_id=record.claim_id,
+            reference_kind="primary",
+            object_id=record.primary_source_id,
+            revision_id=record.primary_source_revision_id,
+        )
+    ]
+    context = record.context_snapshot_jsonb or {}
+    if record.primary_source_kind == "data":
+        items = context.get("subjects", [])
+        object_key, revision_key = "subject_id", "subject_revision_id"
+    elif record.primary_source_kind == "experiment":
+        items = context.get("members", [])
+        object_key, revision_key = "object_id", "revision_id"
+    else:
+        items = context.get("data_refs", [])
+        object_key, revision_key = "data_id", "data_revision_id"
+    seen = {record.primary_source_id}
+    for item in items:
+        object_id = uuid.UUID(str(item[object_key]))
+        if object_id in seen:
+            continue
+        seen.add(object_id)
+        revision_value = item.get(revision_key)
+        rows.append(
+            ClaimContextReference(
+                claim_id=record.claim_id,
+                reference_kind="context",
+                object_id=object_id,
+                revision_id=uuid.UUID(str(revision_value)) if revision_value else None,
+            )
+        )
+    db.add_all(rows)
+    db.flush()
+
+
 def _validate_evidence(
     db: Session, claim_id: uuid.UUID, items: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    claim = get_object(db, claim_id)
+    if claim is not None:
+        lock_project_graph(db, claim.project_scope_id)
     result = []
     for index, item in enumerate(items):
         kind = item.get("evidence_kind")
@@ -94,6 +225,31 @@ def _validate_evidence(
     return result
 
 
+def _revision_target(
+    db: Session,
+    kind: str,
+    object_id: uuid.UUID,
+    revision_id: uuid.UUID | None,
+) -> dict[str, uuid.UUID]:
+    """Return exactly one typed revision/object target for a protection edge."""
+    if revision_id is None:
+        return {"target_object_id": object_id}
+    if kind == "view":
+        revision = db.get(ViewRevision, revision_id)
+        if revision is None or revision.view_id != object_id:
+            raise ValueError("Claim context View revision does not belong to its source")
+        return {"target_view_revision_id": revision.id}
+    if kind == "claim":
+        revision = db.get(ClaimRevision, revision_id)
+        if revision is None or revision.claim_id != object_id:
+            raise ValueError("Claim evidence revision does not belong to its source")
+        return {"target_claim_revision_id": revision.id}
+    revision = db.get(ObjectRevision, revision_id)
+    if revision is None or revision.object_id != object_id:
+        raise ValueError("Claim context revision does not belong to its source")
+    return {"target_object_revision_id": revision.id}
+
+
 def _revision(db: Session, record: ClaimRecord, change_note: str | None) -> ClaimRevision:
     latest = (
         db.scalar(
@@ -112,8 +268,13 @@ def _revision(db: Session, record: ClaimRecord, change_note: str | None) -> Clai
     snapshot = jsonable_encoder(
         {
             "statement": record.statement,
-            "source_type": record.source_type,
-            "source_ref": record.source_ref,
+            "author_provenance": record.author_provenance_jsonb or {},
+            "primary_source": {
+                "kind": record.primary_source_kind,
+                "object_id": str(record.primary_source_id),
+                "revision_id": str(record.primary_source_revision_id),
+            },
+            "context_snapshot": record.context_snapshot_jsonb or {},
             "confidence": record.confidence,
             "metadata_jsonb": record.metadata_jsonb or {},
             "evidence": [
@@ -137,6 +298,59 @@ def _revision(db: Session, record: ClaimRecord, change_note: str | None) -> Clai
         change_note=change_note,
     )
     db.add(revision)
+    db.flush()
+    references: list[RevisionReference] = [
+        RevisionReference(
+            source_claim_revision_id=revision.id,
+            **_revision_target(
+                db,
+                record.primary_source_kind,
+                record.primary_source_id,
+                record.primary_source_revision_id,
+            ),
+        )
+    ]
+    context = record.context_snapshot_jsonb or {}
+    for item in context.get("subjects", []) + context.get("members", []):
+        value = item.get("subject_id") or item.get("object_id")
+        if value:
+            object_id = uuid.UUID(str(value))
+            revision_value = item.get("subject_revision_id") or item.get("revision_id")
+            references.append(
+                RevisionReference(
+                    source_claim_revision_id=revision.id,
+                    **_revision_target(
+                        db,
+                        "object",
+                        object_id,
+                        uuid.UUID(str(revision_value)) if revision_value else None,
+                    ),
+                )
+            )
+    for item in context.get("data_refs", []):
+        if item.get("data_id"):
+            object_id = uuid.UUID(str(item["data_id"]))
+            revision_value = item.get("data_revision_id")
+            references.append(
+                RevisionReference(
+                    source_claim_revision_id=revision.id,
+                    **_revision_target(
+                        db,
+                        "data",
+                        object_id,
+                        uuid.UUID(str(revision_value)) if revision_value else None,
+                    ),
+                )
+            )
+    evidence = db.scalars(
+        select(ClaimEvidence).where(ClaimEvidence.claim_id == record.claim_id)
+    ).all()
+    references.extend(
+        RevisionReference(source_claim_revision_id=revision.id, target_object_id=item.evidence_id)
+        for item in evidence
+        if item.evidence_id is not None
+    )
+    db.add_all(references)
     db.flush()
     record.current_revision_id = revision.id
     return revision
@@ -171,8 +385,14 @@ def _body(db: Session, claim: ResearchObject, record: ClaimRecord) -> dict[str, 
     return {
         "claim": object_out(claim),
         "statement": record.statement,
-        "source_type": record.source_type,
-        "source_ref": record.source_ref,
+        "author_provenance": record.author_provenance_jsonb or {},
+        "primary_source": {
+            "kind": record.primary_source_kind,
+            "object_id": record.primary_source_id,
+            "revision_id": record.primary_source_revision_id,
+        },
+        "primary_source_object": object_out(record.primary_source),
+        "context_snapshot": record.context_snapshot_jsonb or {},
         "confidence": record.confidence,
         "metadata_jsonb": record.metadata_jsonb or {},
         "evidence": evidence_out,
@@ -198,9 +418,27 @@ def get_claim(db: Session, claim_id: uuid.UUID) -> dict[str, Any]:
     if record is None:
         raise LookupError("claim record not found")
     body = _body(db, claim, record)
+    claim_token = {
+        key: value
+        for key, value in body["claim"].items()
+        if key not in {"created_at", "updated_at"}
+    }
     return {
         "record_sha256": sha256_json(
-            {key: value for key, value in body.items() if key != "revisions"}
+            {
+                "claim": claim_token,
+                "statement": body["statement"],
+                "author_provenance": body["author_provenance"],
+                "primary_source": body["primary_source"],
+                "context_snapshot": body["context_snapshot"],
+                "confidence": body["confidence"],
+                "metadata_jsonb": body["metadata_jsonb"],
+                "evidence": [
+                    {key: value for key, value in item.items() if key != "object"}
+                    for item in body["evidence"]
+                ],
+                "current_revision_id": body["current_revision_id"],
+            }
         ),
         **body,
     }
@@ -215,14 +453,18 @@ def _replace_evidence(db: Session, record: ClaimRecord, items: list[dict[str, An
     db.flush()
 
 
-def create_claim(db: Session, payload: ClaimCreate) -> dict[str, Any]:
+def create_claim(db: Session, payload: ClaimCreate, *, commit: bool = True) -> dict[str, Any]:
     try:
+        statement = payload.statement.strip()
+        if not statement:
+            raise ValueError("Claim statement is required")
+        source, _ = _primary_source(db, payload.project_scope_id, payload.primary_source)
         claim = _create_object_in_session(
             db,
             ObjectCreate(
                 kind="claim",
                 code=payload.code,
-                title=payload.title,
+                title=payload.title or statement[:120],
                 project_scope_id=payload.project_scope_id,
                 properties_jsonb={},
                 content_document=[],
@@ -230,35 +472,51 @@ def create_claim(db: Session, payload: ClaimCreate) -> dict[str, Any]:
         )
         record = ClaimRecord(
             claim_id=claim.id,
-            statement=payload.statement.strip(),
-            source_type=payload.source_type,
-            source_ref=payload.source_ref,
+            statement=statement,
+            author_provenance_jsonb=_author_provenance(payload.author_provenance),
+            primary_source_kind=payload.primary_source.kind,
+            primary_source_id=source.id,
+            primary_source_revision_id=payload.primary_source.revision_id,
+            context_snapshot_jsonb=_capture_context(
+                db, payload.project_scope_id, payload.primary_source
+            ),
             confidence=payload.confidence,
             metadata_jsonb=copy.deepcopy(payload.metadata_jsonb),
         )
         db.add(record)
         db.flush()
+        _replace_context_references(db, record)
         _replace_evidence(db, record, payload.evidence)
         _revision(db, record, "create claim")
         _create_revision_in_session(db, claim.id, "create claim")
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return get_claim(db, claim.id)
     except Exception:
         db.rollback()
         raise
 
 
-def update_claim(db: Session, claim_id: uuid.UUID, payload: ClaimPut) -> dict[str, Any]:
+def update_claim(
+    db: Session,
+    claim_id: uuid.UUID,
+    payload: ClaimPut,
+    *,
+    expected_record_sha256: str | None = None,
+    commit: bool = True,
+) -> dict[str, Any]:
     try:
-        claim = _claim(db, claim_id)
+        claim = _locked_claim(db, claim_id)
         record = db.get(ClaimRecord, claim.id)
         if record is None:
             raise LookupError("claim record not found")
-        if (
-            payload.base_record_sha256
-            and payload.base_record_sha256 != get_claim(db, claim.id)["record_sha256"]
-        ):
-            raise ValueError("stale_record")
+        expected = expected_record_sha256 or payload.base_record_sha256
+        if not expected:
+            raise ValueError("revision_required")
+        if expected.strip('"') != get_claim(db, claim.id)["record_sha256"]:
+            raise SemanticConflict("The Claim changed after it was loaded", code="stale_record")
         changes = {
             key: value
             for key, value in payload.model_dump(exclude_unset=True).items()
@@ -266,15 +524,62 @@ def update_claim(db: Session, claim_id: uuid.UUID, payload: ClaimPut) -> dict[st
         }
         if changes:
             _update_object_in_session(db, claim, changes)
-        for key in ("statement", "source_type", "source_ref", "confidence", "metadata_jsonb"):
+        for key in ("statement", "confidence", "metadata_jsonb"):
             if key in payload.model_fields_set:
                 setattr(record, key, getattr(payload, key))
+        if payload.author_provenance is not None:
+            record.author_provenance_jsonb = _author_provenance(payload.author_provenance)
+        if payload.primary_source is not None:
+            source, _ = _primary_source(db, claim.project_scope_id, payload.primary_source)
+            record.primary_source_kind = payload.primary_source.kind
+            record.primary_source_id = source.id
+            record.primary_source_revision_id = payload.primary_source.revision_id
+            record.context_snapshot_jsonb = _capture_context(
+                db, claim.project_scope_id, payload.primary_source
+            )
+        elif payload.refresh_context:
+            record.context_snapshot_jsonb = _capture_context(
+                db,
+                claim.project_scope_id,
+                ClaimPrimarySource(
+                    kind=record.primary_source_kind,
+                    object_id=record.primary_source_id,
+                    revision_id=record.primary_source_revision_id,
+                ),
+            )
+        if payload.primary_source is not None or payload.refresh_context:
+            _replace_context_references(db, record)
         if payload.evidence is not None:
             _replace_evidence(db, record, payload.evidence)
         _revision(db, record, payload.change_note)
         _create_revision_in_session(db, claim.id, payload.change_note)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return get_claim(db, claim.id)
     except Exception:
         db.rollback()
         raise
+
+
+def list_claims_referencing(db: Session, object_id: uuid.UUID) -> list[dict[str, Any]]:
+    claim_ids = db.scalars(
+        select(ClaimContextReference.claim_id)
+        .where(ClaimContextReference.object_id == object_id)
+        .order_by(ClaimContextReference.claim_id)
+    ).all()
+    return [get_claim(db, claim_id) for claim_id in claim_ids]
+
+
+def get_claim_revision(db: Session, claim_id: uuid.UUID, revision_number: int) -> ClaimRevision:
+    _claim(db, claim_id)
+    revision = db.scalar(
+        select(ClaimRevision).where(
+            ClaimRevision.claim_id == claim_id,
+            ClaimRevision.revision_number == revision_number,
+        )
+    )
+    if revision is None:
+        raise LookupError("claim revision not found")
+    return revision

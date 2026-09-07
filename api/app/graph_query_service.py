@@ -110,6 +110,7 @@ class GraphQueryService:
             select(ProcessExecutionObjectBinding.execution_id).where(
                 ProcessExecutionObjectBinding.research_object_id == object_id,
                 ProcessExecutionObjectBinding.direction == "output",
+                ProcessExecutionObjectBinding.is_active.is_(True),
             )
         ).all()
         result: list[uuid.UUID] = []
@@ -119,6 +120,7 @@ class GraphQueryService:
                     select(ProcessExecutionObjectBinding.research_object_id).where(
                         ProcessExecutionObjectBinding.execution_id == execution_id,
                         ProcessExecutionObjectBinding.direction == "input",
+                        ProcessExecutionObjectBinding.is_active.is_(True),
                     )
                 ).all()
             )
@@ -129,6 +131,7 @@ class GraphQueryService:
             select(ProcessExecutionObjectBinding.execution_id).where(
                 ProcessExecutionObjectBinding.research_object_id == object_id,
                 ProcessExecutionObjectBinding.direction.in_(["input", "context"]),
+                ProcessExecutionObjectBinding.is_active.is_(True),
             )
         ).all()
         result: list[uuid.UUID] = []
@@ -138,6 +141,7 @@ class GraphQueryService:
                     select(ProcessExecutionObjectBinding.research_object_id).where(
                         ProcessExecutionObjectBinding.execution_id == execution_id,
                         ProcessExecutionObjectBinding.direction == "output",
+                        ProcessExecutionObjectBinding.is_active.is_(True),
                     )
                 ).all()
             )
@@ -180,6 +184,7 @@ class GraphQueryService:
             select(ProcessExecutionObjectBinding.execution_id).where(
                 ProcessExecutionObjectBinding.research_object_id == sample.id,
                 ProcessExecutionObjectBinding.direction == "output",
+                ProcessExecutionObjectBinding.is_active.is_(True),
             )
         ).all()
         executions = [
@@ -196,6 +201,7 @@ class GraphQueryService:
                     select(ProcessExecutionObjectBinding.research_object_id).where(
                         ProcessExecutionObjectBinding.execution_id == execution_id,
                         ProcessExecutionObjectBinding.direction == "input",
+                        ProcessExecutionObjectBinding.is_active.is_(True),
                     )
                 ).all()
             )

@@ -1,6 +1,6 @@
-# UI Specification v0.3
+# UI Specification v1.5
 
-The existing Next.js shell is semantically adapted to v0.3; this cutover does not attempt a final visual redesign.
+The Next.js shell exposes the v1.5 continuous authoring and fixed-version traceability workflows.
 
 ## Navigation
 
@@ -12,10 +12,10 @@ The UI displays one Research Object identity with code/title/status/tags/propert
 
 ## Process and Sample Record
 
-Process search selects a Process Definition and explicit version. The composer saves one aggregate Sample Record request whose steps become Process Executions. Each step renders definition/version, execution fields, bound Research Objects and bound Data, including multiple outputs. A Sample detail page renders the Process Execution projection and subject Data.
+Scientific Composer is a continuous BlockNote document. `/` inserts an atomic Process Ref, `@` inserts an Object Ref, and each Ref renders its PropertySlots at the source position. Slot editing, Ref deletion and body edits share undo history. Candidate search is server-backed. Sample detail supports canonical reload, immutable history, conflict-safe drafts and identity-remapped copy creation.
 
 ## Data, Experiment, View and Claim
 
-Data detail renders all representations, origin hash, subjects and derived-from sources. Experiment detail renders grouped references only. View detail renders Data references and config/revision state without copying scientific values. Claim detail renders statement, source/confidence and ordered supporting/counter evidence.
+Data Composer uses recoverable drafts and `begin → upload → validate → finalize`; Data detail renders representations, origin hash and explicit subject sources. Sample tables use server filtering/sorting/pagination, URL field columns, cross-page selection and URL Peek. Experiment creation uses the Sample picker. View detail shows pinned Data revisions, Representation IDs and Artifact hash. Claims have human/agent author provenance, one typed pinned primary source, a finite context snapshot and optional evidence.
 
-All network paths are v0.3 paths. Deprecated payload, composition, comparison and old execution calls are absent from the frontend client.
+All network paths remain under `/api/v1`. The frontend does not send the removed `steps`, View `data_ids` or Claim `source_type` formats.

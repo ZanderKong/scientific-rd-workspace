@@ -14,20 +14,21 @@ from sqlalchemy.orm import selectinload
 
 from app.capabilities import capabilities
 from app.change_set_service import propose_change_set
-from app.claim_service import get_claim
+from app.claim_service import get_claim, get_claim_revision, list_claims_referencing
 from app.core.config import get_settings
-from app.data_service import get_data_record
+from app.data_service import get_data_record, get_data_record_revision
 from app.db import SessionLocal
 from app.experiment_record_service import get_experiment_record
 from app.graph_query_service import DEFAULT_DEPTH, graph_query_service
 from app.models import ObjectType, ObjectTypeVersion
 from app.process_definition_service import get_process_definition
-from app.process_execution_service import get_process_execution
+from app.process_execution_service import get_process_execution, get_process_execution_revision
 from app.project_context_service import get_project_context, search_project
-from app.sample_record_service import get_sample_record
-from app.schemas import ChangeSetProposal
+from app.record_table_service import query_record_table
+from app.sample_record_service import get_sample_record, get_sample_record_revision
+from app.schemas import ChangeSetProposal, RecordTableQuery
 from app.services import get_object, get_type_version, object_out
-from app.view_service import get_view
+from app.view_service import get_view, get_view_revision
 
 
 class BearerTokenVerifier:
@@ -51,6 +52,21 @@ def _call(function: Any, *args: Any, **kwargs: Any) -> Any:
         return function(db, *args, **kwargs)
 
 
+def _revision_json(item: Any) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "object_id": getattr(item, "object_id", None),
+        "execution_id": getattr(item, "execution_id", None),
+        "view_id": getattr(item, "view_id", None),
+        "claim_id": getattr(item, "claim_id", None),
+        "revision_number": item.revision_number,
+        "snapshot_jsonb": item.snapshot_jsonb,
+        "snapshot_sha256": item.snapshot_sha256,
+        "change_note": item.change_note,
+        "created_at": item.created_at,
+    }
+
+
 settings = get_settings()
 auth: dict[str, Any] = {}
 if settings.mcp_bearer_token:
@@ -65,7 +81,7 @@ if settings.mcp_bearer_token:
 
 mcp = FastMCP(
     "Scientific Workspace",
-    instructions="Use canonical v0.3 domain tools. Search before creating resources; writes from agents are proposal-first.",
+    instructions="Use the canonical v1.5 scientific record tools. Search before creating resources; writes from agents are proposal-first.",
     streamable_http_path="/mcp",
     stateless_http=True,
     **auth,
@@ -137,8 +153,24 @@ def process_execution(execution_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def process_execution_revision(execution_id: str, revision_number: int) -> dict[str, Any]:
+    return _call(
+        lambda db, execution, number: _revision_json(
+            get_process_execution_revision(db, execution, number)
+        ),
+        uuid.UUID(execution_id),
+        revision_number,
+    )
+
+
+@mcp.tool()
 def sample_record(sample_id: str) -> dict[str, Any]:
     return _call(get_sample_record, uuid.UUID(sample_id))
+
+
+@mcp.tool()
+def sample_record_revision(sample_id: str, revision_number: int) -> dict[str, Any]:
+    return _call(get_sample_record_revision, uuid.UUID(sample_id), revision_number)
 
 
 @mcp.tool()
@@ -159,13 +191,50 @@ def data_record(data_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def data_record_revision(data_id: str, revision_number: int) -> dict[str, Any]:
+    return _call(
+        lambda db, data, number: _revision_json(get_data_record_revision(db, data, number)),
+        uuid.UUID(data_id),
+        revision_number,
+    )
+
+
+@mcp.tool()
 def view_record(view_id: str) -> dict[str, Any]:
     return _call(get_view, uuid.UUID(view_id))
 
 
 @mcp.tool()
+def view_revision(view_id: str, revision_number: int) -> dict[str, Any]:
+    return _call(
+        lambda db, view, number: _revision_json(get_view_revision(db, view, number)),
+        uuid.UUID(view_id),
+        revision_number,
+    )
+
+
+@mcp.tool()
 def claim_record(claim_id: str) -> dict[str, Any]:
     return _call(get_claim, uuid.UUID(claim_id))
+
+
+@mcp.tool()
+def claim_revision(claim_id: str, revision_number: int) -> dict[str, Any]:
+    return _call(
+        lambda db, claim, number: _revision_json(get_claim_revision(db, claim, number)),
+        uuid.UUID(claim_id),
+        revision_number,
+    )
+
+
+@mcp.tool()
+def record_table_query(payload: dict[str, Any]) -> dict[str, Any]:
+    return _call(query_record_table, RecordTableQuery.model_validate(payload))
+
+
+@mcp.tool()
+def claims_referencing(object_id: str) -> list[dict[str, Any]]:
+    return _call(list_claims_referencing, uuid.UUID(object_id))
 
 
 def _proposal(
@@ -207,6 +276,21 @@ def propose_create_process_definition(project_id: str, payload: dict[str, Any]) 
 @mcp.tool()
 def propose_create_process_execution(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _proposal("create_process_execution", project_id, payload)
+
+
+@mcp.tool()
+def propose_create_sample_record(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return _proposal("create_sample_record", project_id, payload)
+
+
+@mcp.tool()
+def propose_update_sample_record(
+    project_id: str,
+    sample_id: str,
+    base_record_sha256: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return _proposal("update_sample_record", project_id, payload, sample_id, base_record_sha256)
 
 
 @mcp.tool()

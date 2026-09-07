@@ -17,16 +17,21 @@ from app.models import (
     Asset,
     DataRecord,
     DataRepresentation,
+    DataSubjectAssignment,
+    DocumentOccurrence,
     ObjectAssetLink,
     ObjectCodeCounter,
     ObjectRelation,
     ObjectRevision,
     ObjectType,
     ObjectTypeVersion,
+    ProcessExecution,
+    ProcessExecutionRevision,
     ResearchObject,
 )
 from app.relation_semantics import (
     SemanticConflict,
+    lock_project_graph,
     validate_relation_kinds,
     validate_relation_scope,
     validate_scope_mutation,
@@ -206,18 +211,27 @@ def _create_object_in_session(db: Session, payload: ObjectCreate) -> ResearchObj
     return obj
 
 
-def create_object(db: Session, payload: ObjectCreate) -> ResearchObject:
+def create_object(db: Session, payload: ObjectCreate, *, commit: bool = True) -> ResearchObject:
     try:
         obj = _create_object_in_session(db, payload)
         _create_revision_in_session(db, obj.id, "create Research Object")
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except IntegrityError as exc:
         db.rollback()
         raise SemanticConflict("object write conflicts with an existing object") from exc
     return get_object(db, obj.id) or obj
 
 
-def _validate_object_changes(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> None:
+def _validate_object_changes(
+    db: Session,
+    obj: ResearchObject,
+    changes: dict[str, Any],
+    *,
+    managed_write: bool = False,
+) -> None:
     next_scope = changes.get("project_scope_id", obj.project_scope_id)
     next_properties = changes.get("properties_jsonb", obj.properties_jsonb)
     next_fields = changes.get("process_field_definitions", obj.process_field_definitions_jsonb)
@@ -227,11 +241,39 @@ def _validate_object_changes(db: Session, obj: ResearchObject, changes: dict[str
     validate_properties(obj.type_version, next_properties)
     normalize_process_fields(next_fields)
 
+    # A scientific record owns its canonical document, occurrence projection and
+    # metadata.  The explicit marker is required because an empty record has no
+    # occurrence row to discover.
+    if obj.authoring_kind is not None and not managed_write:
+        raise SemanticConflict(
+            "record-managed objects must be changed through the scientific record command",
+            code="managed_record",
+        )
+
+    # A scientific record owns its canonical document, occurrence projection
+    # and metadata.  Discover records created before the explicit marker from
+    # their durable projections as a safety net for direct service callers.
+    managed_projection = db.scalar(
+        select(DocumentOccurrence.id).where(DocumentOccurrence.owner_id == obj.id).limit(1)
+    )
+    authored_execution = db.scalar(
+        select(ProcessExecution.id).where(ProcessExecution.authoring_record_id == obj.id).limit(1)
+    )
+    if (managed_projection is not None or authored_execution is not None) and not managed_write:
+        raise SemanticConflict(
+            "record-managed objects must be changed through the scientific record command",
+            code="managed_record",
+        )
+
 
 def _update_object_in_session(
-    db: Session, obj: ResearchObject, changes: dict[str, Any]
+    db: Session,
+    obj: ResearchObject,
+    changes: dict[str, Any],
+    *,
+    managed_write: bool = False,
 ) -> ResearchObject:
-    _validate_object_changes(db, obj, changes)
+    _validate_object_changes(db, obj, changes, managed_write=managed_write)
     for field in (
         "title",
         "status",
@@ -266,16 +308,50 @@ def _update_object_in_session(
     return obj
 
 
-def update_object(db: Session, obj: ResearchObject, changes: dict[str, Any]) -> ResearchObject:
+def update_object(
+    db: Session,
+    obj: ResearchObject,
+    changes: dict[str, Any],
+    *,
+    expected_record_sha256: str | None = None,
+    commit: bool = True,
+) -> ResearchObject:
     try:
+        current = get_object(db, obj.id)
+        if current is None:
+            raise LookupError("research object not found")
+        scopes = {
+            scope
+            for scope in (
+                current.project_scope_id,
+                changes.get("project_scope_id", current.project_scope_id),
+            )
+            if scope is not None
+        }
+        for scope in sorted(scopes, key=str):
+            lock_project_graph(db, scope)
+        locked = db.scalar(
+            select(ResearchObject).where(ResearchObject.id == obj.id).with_for_update()
+        )
+        if locked is None:
+            raise LookupError("research object not found")
+        if expected_record_sha256 is not None:
+            current = sha256_json(object_out(locked))
+            if expected_record_sha256.strip('"') != current:
+                raise SemanticConflict(
+                    "The object changed after it was loaded", code="stale_record"
+                )
         change_note = changes.get("change_note") or "update Research Object"
-        _update_object_in_session(db, obj, changes)
-        _create_revision_in_session(db, obj.id, change_note)
-        db.commit()
+        _update_object_in_session(db, locked, changes)
+        _create_revision_in_session(db, locked.id, change_note)
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except IntegrityError as exc:
         db.rollback()
         raise SemanticConflict("object update conflicts with graph integrity") from exc
-    return get_object(db, obj.id) or obj
+    return get_object(db, obj.id) or locked
 
 
 def validate_relation(source: ResearchObject, target: ResearchObject, relation_type: str) -> None:
@@ -293,6 +369,7 @@ def _create_relation_in_session(db: Session, payload: RelationCreate) -> ObjectR
     if source is None or target is None:
         raise LookupError("source or target object not found")
     validate_relation(source, target, payload.relation_type)
+    lock_project_graph(db, source.project_scope_id or target.project_scope_id)
     relation = ObjectRelation(
         source_object_id=source.id,
         target_object_id=target.id,
@@ -337,6 +414,10 @@ def update_relation(
         raise SemanticConflict(
             "system-managed relations cannot be edited", code="system_managed_relation"
         )
+    lock_project_graph(
+        db,
+        relation.source_object.project_scope_id or relation.target_object.project_scope_id,
+    )
     changes = payload.model_dump(exclude_unset=True)
     if "role" in changes:
         relation.role = changes["role"].strip() if changes["role"] else None
@@ -358,6 +439,10 @@ def delete_relation(db: Session, relation: ObjectRelation) -> None:
         raise SemanticConflict(
             "system-managed relations cannot be deleted", code="system_managed_relation"
         )
+    lock_project_graph(
+        db,
+        relation.source_object.project_scope_id or relation.target_object.project_scope_id,
+    )
     db.delete(relation)
     try:
         db.commit()
@@ -412,6 +497,8 @@ def object_out(obj: ResearchObject) -> dict[str, Any]:
         "properties_jsonb": obj.properties_jsonb or {},
         "process_field_definitions": obj.process_field_definitions_jsonb or {},
         "content_document": obj.content_document or [],
+        "document_format_version": obj.document_format_version,
+        "authoring_kind": obj.authoring_kind,
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
     }
@@ -434,6 +521,17 @@ def relation_out(relation: ObjectRelation) -> dict[str, Any]:
 
 def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
     relations = list_relations(db, obj.id)
+    relation_snapshots = []
+    for relation in relations:
+        snapshot = relation_out(relation)
+        target_revision_id = db.scalar(
+            select(ObjectRevision.id)
+            .where(ObjectRevision.object_id == relation.target_object_id)
+            .order_by(desc(ObjectRevision.revision_number))
+            .limit(1)
+        )
+        snapshot["target_revision_id"] = target_revision_id
+        relation_snapshots.append(snapshot)
     links = db.scalars(select(ObjectAssetLink).where(ObjectAssetLink.object_id == obj.id)).all()
     representations = (
         db.scalars(
@@ -443,11 +541,65 @@ def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
         else []
     )
     data_record = db.get(DataRecord, obj.id) if obj.kind == "data" else None
+    subject_assignments = (
+        db.scalars(
+            select(DataSubjectAssignment)
+            .where(DataSubjectAssignment.data_id == obj.id)
+            .order_by(DataSubjectAssignment.created_at, DataSubjectAssignment.id)
+        ).all()
+        if obj.kind == "data"
+        else []
+    )
+    authored_executions = list(
+        db.scalars(
+            select(ProcessExecution).where(
+                ProcessExecution.authoring_record_id == obj.id,
+                ProcessExecution.record_validity == "active",
+            )
+        ).all()
+    )
+    execution_manifest = []
+    for execution in authored_executions:
+        revision_id = db.scalar(
+            select(ProcessExecutionRevision.id)
+            .where(ProcessExecutionRevision.execution_id == execution.id)
+            .order_by(desc(ProcessExecutionRevision.revision_number))
+            .limit(1)
+        )
+        execution_manifest.append(
+            {
+                "execution_id": str(execution.id),
+                "execution_revision_id": str(revision_id) if revision_id else None,
+                "occurrence_id": (
+                    str(execution.authoring_occurrence_id)
+                    if execution.authoring_occurrence_id
+                    else None
+                ),
+            }
+        )
+    occurrences = list(
+        db.scalars(
+            select(DocumentOccurrence)
+            .where(DocumentOccurrence.owner_id == obj.id)
+            .order_by(DocumentOccurrence.ordinal)
+        ).all()
+    )
+    target_ids = {item.target_id for item in occurrences}
+    target_titles = (
+        {
+            item.id: item.title
+            for item in db.scalars(
+                select(ResearchObject).where(ResearchObject.id.in_(target_ids))
+            ).all()
+        }
+        if target_ids
+        else {}
+    )
     return jsonable_encoder(
         {
             "schema_version": 2,
             "object": jsonable_encoder(object_out(obj)),
-            "direct_relations": [relation_out(item) for item in relations],
+            "direct_relations": relation_snapshots,
             "assets": [
                 {"asset_id": str(item.asset_id), "role": item.role, "order_index": item.order_index}
                 for item in links
@@ -470,9 +622,43 @@ def _revision_snapshot(db: Session, obj: ResearchObject) -> dict[str, Any]:
                     if data_record and data_record.origin_representation_id
                     else None
                 ),
+                "subject_assignments": [
+                    {
+                        "subject_id": str(item.subject_id),
+                        "subject_revision_id": (
+                            str(item.subject_revision_id) if item.subject_revision_id else None
+                        ),
+                        "source_kind": item.source_kind,
+                        "source_ref_id": str(item.source_ref_id) if item.source_ref_id else None,
+                    }
+                    for item in subject_assignments
+                ],
             }
             if data_record
             else None,
+            "scientific_manifest": {
+                "document_format_version": obj.document_format_version,
+                "execution_manifest": execution_manifest,
+                "occurrences": [
+                    {
+                        "occurrence_id": str(item.occurrence_id),
+                        "kind": item.kind,
+                        "target_id": str(item.target_id),
+                        "label_snapshot": target_titles.get(item.target_id),
+                        "target_revision_id": (
+                            str(item.target_revision_id) if item.target_revision_id else None
+                        ),
+                        "execution_id": str(item.execution_id) if item.execution_id else None,
+                        "binding_id": str(item.binding_id) if item.binding_id else None,
+                        "ordinal": item.ordinal,
+                        "field_definition_snapshot": copy.deepcopy(
+                            item.field_definition_snapshot_jsonb or {}
+                        ),
+                        "values": copy.deepcopy(item.values_jsonb or {}),
+                    }
+                    for item in occurrences
+                ],
+            },
         }
     )
 

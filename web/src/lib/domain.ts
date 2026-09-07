@@ -63,6 +63,7 @@ export interface ResearchObject {
   properties_jsonb: JsonObject;
   process_field_definitions: JsonObject;
   content_document: JsonObject[];
+  document_format_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -121,9 +122,12 @@ export interface ProcessDefinition {
 
 export interface ProcessExecutionObjectBinding {
   id: string;
+  authoring_occurrence_id: string | null;
   research_object_id: string;
+  research_object_revision_id: string | null;
   direction: BindingDirection;
   role: string | null;
+  is_active: boolean;
   field_definition_snapshot: JsonObject;
   values: Record<string, { value: unknown; unit?: string | null }>;
   order_index: number;
@@ -133,6 +137,7 @@ export interface ProcessExecutionObjectBinding {
 export interface ProcessExecutionDataBinding {
   id: string;
   data_id: string;
+  data_revision_id: string | null;
   direction: 'input' | 'output';
   role: string | null;
   values: JsonObject;
@@ -143,11 +148,14 @@ export interface ProcessExecutionDataBinding {
 export interface ProcessExecution {
   record_sha256: string;
   id: string;
+  authoring_record_id: string | null;
+  authoring_occurrence_id: string | null;
   project_scope_id: string | null;
   process_definition_id: string;
   process_definition_version_id: string;
   title_snapshot: string | null;
   status: string;
+  record_validity: 'active' | 'retracted';
   execution_field_definitions: JsonObject;
   values: JsonObject;
   note: string | null;
@@ -164,7 +172,10 @@ export interface ProcessExecution {
 }
 
 export interface ProcessExecutionObjectBindingDraft {
+  binding_id?: string | null;
+  authoring_occurrence_id?: string | null;
   research_object_id: string;
+  research_object_revision_id?: string | null;
   direction: BindingDirection;
   role?: string | null;
   values?: Record<string, { value: unknown; unit?: string | null }>;
@@ -172,7 +183,9 @@ export interface ProcessExecutionObjectBindingDraft {
 }
 
 export interface ProcessExecutionDataBindingDraft {
+  binding_id?: string | null;
   data_id: string;
+  data_revision_id?: string | null;
   direction: 'input' | 'output';
   role?: string | null;
   values?: JsonObject;
@@ -185,7 +198,7 @@ export interface ProcessExecutionDraft {
   process_definition_version_id?: string | null;
   project_scope_id?: string | null;
   title_snapshot?: string | null;
-  status?: 'draft' | 'running' | 'completed' | 'cancelled';
+  status?: 'draft' | 'recorded' | 'running' | 'completed' | 'cancelled';
   values?: JsonObject;
   note?: string | null;
   object_bindings: ProcessExecutionObjectBindingDraft[];
@@ -195,14 +208,42 @@ export interface ProcessExecutionDraft {
   source_view_revision_id?: string | null;
 }
 
-export interface SampleRecordStep {
-  execution: ProcessExecution;
-  ordinal: number;
+export interface ScientificDocumentV1 {
+  schema_version: 1;
+  blocks: JsonObject[];
 }
+
+export interface ScientificBindingDraft {
+  process_occurrence_id: string;
+  binding_id?: string | null;
+  direction: BindingDirection;
+  role?: string | null;
+}
+
+export interface ScientificOccurrenceDraft {
+  occurrence_id: string;
+  kind: 'process' | 'object';
+  target_id: string;
+  target_revision_id?: string | null;
+  execution_id?: string | null;
+  process_definition_version_id?: string | null;
+  label_snapshot?: string | null;
+  field_definitions: JsonObject;
+  values: JsonObject;
+  status?: 'recorded' | 'running' | 'completed';
+  binding?: ScientificBindingDraft | null;
+}
+
+export interface ScientificOccurrence extends ScientificOccurrenceDraft {
+  execution?: ProcessExecution | null;
+  object?: ResearchObject | null;
+}
+
 export interface SampleRecord {
   record_sha256: string;
   sample: ResearchObject;
-  steps: SampleRecordStep[];
+  document: ScientificDocumentV1;
+  occurrences: ScientificOccurrence[];
   data: ResearchObject[];
   editable: boolean;
   edit_blockers: string[];
@@ -217,14 +258,16 @@ export interface SampleRecordCreatePayload {
     tags?: string[];
     properties_jsonb?: JsonObject;
     process_field_definitions?: JsonObject;
-    content_document?: JsonObject[];
   };
-  steps: ProcessExecutionDraft[];
+  document: ScientificDocumentV1;
+  occurrences: ScientificOccurrenceDraft[];
   change_note?: string | null;
 }
 export interface SampleRecordPutPayload {
   sample?: JsonObject;
-  steps: ProcessExecutionDraft[];
+  document: ScientificDocumentV1;
+  occurrences: ScientificOccurrenceDraft[];
+  base_record_sha256: string;
   change_note?: string | null;
 }
 
@@ -271,13 +314,82 @@ export interface DataRepresentation {
 export interface DataRecord {
   record_sha256: string;
   data: ResearchObject;
+  document: ScientificDocumentV1;
+  occurrences: ScientificOccurrenceDraft[];
+  editable: boolean;
+  edit_blockers: string[];
   scientific_type: string | null;
   description: string | null;
   origin_representation_id: string | null;
   representations: DataRepresentation[];
   subjects: ResearchObject[];
+  subject_assignments: Array<{
+    id: string;
+    subject_id: string;
+    subject_revision_id: string | null;
+    source_kind: 'manual' | 'acquisition_document' | 'producer';
+    source_ref_id: string | null;
+  }>;
   derived_from: ResearchObject[];
   imports: DataImport[];
+}
+
+export interface RecordTableFieldRef {
+  target_id: string;
+  field_key: string;
+  label?: string | null;
+  value_type?: 'number' | 'text' | 'boolean' | 'select' | null;
+}
+export interface RecordTableValue extends RecordTableFieldRef {
+  occurrence_id: string;
+  value_type: 'number' | 'text' | 'boolean' | 'select';
+  value: string | number | boolean | null;
+  unit: string | null;
+  ordinal: number;
+}
+export interface RecordTableRow {
+  record: ResearchObject;
+  referenced_target_ids: string[];
+  values: Record<string, RecordTableValue[]>;
+}
+export interface RecordTableResult {
+  rows: RecordTableRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  columns: RecordTableFieldRef[];
+}
+
+export interface DataDraftContent {
+  title: string;
+  tags: string[];
+  scientific_type: string | null;
+  description: string | null;
+  document: ScientificDocumentV1;
+  occurrences: ScientificOccurrenceDraft[];
+  subject_ids: string[];
+  source_sample_id: string | null;
+  origin_client_attachment_id: string | null;
+}
+export interface DataDraftAttachment {
+  client_attachment_id: string;
+  asset_id: string;
+  name: string;
+  mime_type: string | null;
+  size_bytes: number;
+  sha256: string;
+}
+export interface DataDraft {
+  id: string;
+  data_id: string;
+  project_scope_id: string;
+  status: 'editing' | 'finalized';
+  content: DataDraftContent;
+  attachments: DataDraftAttachment[];
+  record_sha256: string;
+  finalized_result: DataRecord | null;
+  created_at: string;
+  updated_at: string;
 }
 export interface Asset {
   id: string;
@@ -328,6 +440,14 @@ export interface ViewRecord {
   description: string | null;
   config: JsonObject;
   data: ResearchObject[];
+  data_refs: Array<{
+    data_id: string;
+    data_revision_id: string;
+    representation_ids: string[];
+    order_index: number;
+  }>;
+  artifact_asset_id: string | null;
+  artifact_sha256: string | null;
   current_revision_id: string | null;
   revisions: ViewRevision[];
 }
@@ -345,8 +465,14 @@ export interface ClaimRecord {
   record_sha256: string;
   claim: ResearchObject;
   statement: string;
-  source_type: string;
-  source_ref: string | null;
+  author_provenance: JsonObject;
+  primary_source: {
+    kind: 'experiment' | 'data' | 'view';
+    object_id: string;
+    revision_id: string;
+  };
+  primary_source_object: ResearchObject;
+  context_snapshot: JsonObject;
   confidence: string | null;
   metadata_jsonb: JsonObject;
   evidence: ClaimEvidence[];

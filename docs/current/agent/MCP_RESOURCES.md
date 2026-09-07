@@ -1,4 +1,4 @@
-# MCP Resources and Transports v0.3
+# MCP Resources and Transports v1.5
 
 Static resource: `workspace://capabilities`.
 

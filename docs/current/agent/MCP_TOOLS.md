@@ -1,4 +1,4 @@
-# MCP Tools v0.3
+# MCP Tools v1.5
 
 The official adapter is `api/app/agent/mcp_server.py`. It calls canonical services and does not contain a second domain model.
 
@@ -9,8 +9,10 @@ Read tools:
 - `research_object_record`, `object_type_schema`
 - `process_definition`, `process_execution`
 - `sample_record`, `sample_lineage`
+- `sample_record_revision`
 - `experiment_record`, `data_record`
 - `view_record`, `claim_record`
+- `record_table_query`, `claims_referencing`
 
 Proposal tools:
 
@@ -18,6 +20,7 @@ Proposal tools:
 - `propose_update_research_object`
 - `propose_create_process_definition`
 - `propose_create_process_execution`
+- `propose_create_sample_record`, `propose_update_sample_record`
 - `propose_create_data_record`
 - `propose_create_experiment_record`
 - `propose_create_view`

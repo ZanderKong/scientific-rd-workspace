@@ -6,6 +6,12 @@
 
 `current/` 保存当前产品、数据模型、UI、API、Agent、MCP 和依赖契约。
 
+## Next Design
+
+下一阶段核心工作流设计以 [v1.5 冻结基线](<科研工作台核心工作流产品与技术设计冻结基线 v1.5.md>) 为唯一入口。它合并 v1.3、v1.4 与用户回应，固定产品语义及领域边界；Inline PropertySlot 的实现仍须通过原型门禁。
+
+该设计尚未实现，不替代 `current/` 和 CURRENT_STATE 中的运行事实。v1.3/v1.4 保留为设计历史，其中与 v1.5 冲突的建议不继续执行。
+
 ## History
 
 `history/` 保存当前 Research Object Graph 架构的已完成执行计划、交接及审计证据。文件中的 commit、验证结果和时间是历史事实，不等于今天的运行状态。

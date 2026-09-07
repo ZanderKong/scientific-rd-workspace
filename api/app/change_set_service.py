@@ -22,6 +22,7 @@ from app.process_execution_service import (
     get_process_execution,
     update_process_execution,
 )
+from app.sample_record_service import create_sample_record, get_sample_record, update_sample_record
 from app.schemas import (
     ChangeSetProposal,
     ChangeSetReview,
@@ -36,6 +37,8 @@ from app.schemas import (
     ProcessDefinitionCreate,
     ProcessExecutionCreate,
     ProcessExecutionPut,
+    SampleRecordCreate,
+    SampleRecordPut,
     ViewCreate,
     ViewPut,
 )
@@ -60,6 +63,8 @@ def _record_for_operation(db: Session, proposal: ChangeSetProposal) -> dict[str,
         return get_process_definition(db, proposal.target_id)
     if "process_execution" in operation:
         return get_process_execution(db, proposal.target_id)
+    if "sample_record" in operation:
+        return get_sample_record(db, proposal.target_id)
     if "data_record" in operation:
         return get_data_record(db, proposal.target_id)
     if "experiment_record" in operation:
@@ -80,6 +85,8 @@ def _validate_payload(db: Session, proposal: ChangeSetProposal) -> dict[str, Any
         "create_process_definition": ProcessDefinitionCreate,
         "create_process_execution": ProcessExecutionCreate,
         "update_process_execution": ProcessExecutionPut,
+        "create_sample_record": SampleRecordCreate,
+        "update_sample_record": SampleRecordPut,
         "create_data_record": DataRecordCreate,
         "update_data_record": DataRecordPut,
         "create_experiment_record": ExperimentRecordCreate,
@@ -98,7 +105,15 @@ def _validate_payload(db: Session, proposal: ChangeSetProposal) -> dict[str, Any
         proposal.target_id is None or proposal.base_record_sha256 is None
     ):
         raise ValueError("update proposals require target_id and base_record_sha256")
-    parsed = model.model_validate(body)
+    validation_body = dict(body)
+    if (
+        operation.startswith("update_")
+        and proposal.base_record_sha256 is not None
+        and "base_record_sha256" in model.model_fields
+        and "base_record_sha256" not in validation_body
+    ):
+        validation_body["base_record_sha256"] = proposal.base_record_sha256
+    parsed = model.model_validate(validation_body)
     return parsed.model_dump(mode="json", exclude_none=True)
 
 
@@ -121,12 +136,17 @@ def change_set_out(item: ChangeSet) -> dict[str, Any]:
         "created_at": item.created_at,
         "reviewed_at": item.reviewed_at,
         "applied_at": item.applied_at,
+        "applied_result_jsonb": item.applied_result_jsonb,
         "failure_jsonb": item.failure_jsonb,
     }
 
 
 def propose_change_set(
-    db: Session, proposal: ChangeSetProposal, *, idempotency_key: str | None = None
+    db: Session,
+    proposal: ChangeSetProposal,
+    *,
+    idempotency_key: str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     parsed = _validate_payload(db, proposal)
     current = _record_for_operation(db, proposal)
@@ -153,7 +173,10 @@ def propose_change_set(
         idempotency_key=idempotency_key,
     )
     db.add(item)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(item)
     return change_set_out(item)
 
@@ -162,7 +185,7 @@ def _apply_operation(db: Session, item: ChangeSet) -> dict[str, Any]:
     body = item.request_payload_jsonb
     operation = item.operation_kind
     if operation == "create_research_object":
-        created = create_object(db, ObjectCreate.model_validate(body))
+        created = create_object(db, ObjectCreate.model_validate(body), commit=False)
         output = object_out(created)
         return {"object": output, "record_sha256": sha256_json(output)}
     if operation == "update_research_object":
@@ -170,36 +193,84 @@ def _apply_operation(db: Session, item: ChangeSet) -> dict[str, Any]:
         if obj is None:
             raise LookupError("Research Object not found")
         updated = update_object(
-            db, obj, ObjectPatch.model_validate(body).model_dump(exclude_unset=True)
+            db,
+            obj,
+            ObjectPatch.model_validate(body).model_dump(exclude_unset=True),
+            expected_record_sha256=item.base_record_sha256,
+            commit=False,
         )
         output = object_out(updated)
         return {"object": output, "record_sha256": sha256_json(output)}
     if operation == "create_process_definition":
-        return create_process_definition(db, ProcessDefinitionCreate.model_validate(body))
+        return create_process_definition(
+            db, ProcessDefinitionCreate.model_validate(body), commit=False
+        )
     if operation == "create_process_execution":
-        return create_process_execution(db, ProcessExecutionCreate.model_validate(body))
+        return create_process_execution(
+            db, ProcessExecutionCreate.model_validate(body), commit=False
+        )
     if operation == "update_process_execution":
         return update_process_execution(
-            db, item.target_id, ProcessExecutionPut.model_validate(body)
+            db,
+            item.target_id,
+            ProcessExecutionPut.model_validate(body).model_copy(
+                update={"base_record_sha256": item.base_record_sha256}
+            ),
+            commit=False,
+        )
+    if operation == "create_sample_record":
+        return create_sample_record(db, SampleRecordCreate.model_validate(body), commit=False)
+    if operation == "update_sample_record":
+        return update_sample_record(
+            db,
+            item.target_id,
+            SampleRecordPut.model_validate(body).model_copy(
+                update={"base_record_sha256": item.base_record_sha256}
+            ),
+            commit=False,
         )
     if operation == "create_data_record":
-        return create_data_record(db, DataRecordCreate.model_validate(body))
+        return create_data_record(db, DataRecordCreate.model_validate(body), commit=False)
     if operation == "update_data_record":
-        return update_data_record(db, item.target_id, DataRecordPut.model_validate(body))
+        return update_data_record(
+            db,
+            item.target_id,
+            DataRecordPut.model_validate(body),
+            expected_record_sha256=item.base_record_sha256,
+            commit=False,
+        )
     if operation == "create_experiment_record":
-        return create_experiment_record(db, ExperimentRecordCreate.model_validate(body))
+        return create_experiment_record(
+            db, ExperimentRecordCreate.model_validate(body), commit=False
+        )
     if operation == "update_experiment_record":
         return update_experiment_record(
-            db, item.target_id, ExperimentRecordPut.model_validate(body)
+            db,
+            item.target_id,
+            ExperimentRecordPut.model_validate(body),
+            expected_record_sha256=item.base_record_sha256,
+            commit=False,
         )
     if operation == "create_view":
-        return create_view(db, ViewCreate.model_validate(body))
+        return create_view(db, ViewCreate.model_validate(body), commit=False)
     if operation == "update_view":
-        return update_view(db, item.target_id, ViewPut.model_validate(body))
+        return update_view(
+            db,
+            item.target_id,
+            ViewPut.model_validate(body),
+            expected_record_sha256=item.base_record_sha256,
+            commit=False,
+        )
     if operation == "create_claim":
-        return create_claim(db, ClaimCreate.model_validate(body))
+        return create_claim(db, ClaimCreate.model_validate(body), commit=False)
     if operation == "update_claim":
-        return update_claim(db, item.target_id, ClaimPut.model_validate(body))
+        return update_claim(
+            db,
+            item.target_id,
+            ClaimPut.model_validate(body),
+            expected_record_sha256=item.base_record_sha256,
+            commit=False,
+        )
     raise ValueError("unsupported ChangeSet operation")
 
 
@@ -207,6 +278,10 @@ def apply_change_set(db: Session, change_set_id: uuid.UUID) -> dict[str, Any]:
     item = db.scalar(select(ChangeSet).where(ChangeSet.id == change_set_id).with_for_update())
     if item is None:
         raise LookupError("ChangeSet not found")
+    if item.status == "applied":
+        if item.applied_result_jsonb is None:
+            raise ValueError("ChangeSet applied result is unavailable")
+        return item.applied_result_jsonb
     if item.status not in {"proposed", "approved"}:
         raise ValueError(f"ChangeSet cannot be applied from {item.status}")
     if item.base_record_sha256 and item.target_id:
@@ -227,7 +302,15 @@ def apply_change_set(db: Session, change_set_id: uuid.UUID) -> dict[str, Any]:
     try:
         result = _apply_operation(db, item)
         if item.target_id is None and isinstance(result, dict):
-            for key in ("object", "data", "experiment", "view", "claim", "process_definition"):
+            for key in (
+                "object",
+                "sample",
+                "data",
+                "experiment",
+                "view",
+                "claim",
+                "process_definition",
+            ):
                 value = result.get(key)
                 if isinstance(value, dict) and value.get("id"):
                     item.target_id = uuid.UUID(str(value["id"]))
@@ -237,6 +320,7 @@ def apply_change_set(db: Session, change_set_id: uuid.UUID) -> dict[str, Any]:
         item.status = "applied"
         item.applied_at = datetime.now(UTC)
         item.reviewed_at = item.reviewed_at or datetime.now(UTC)
+        item.applied_result_jsonb = jsonable_encoder(result)
         db.commit()
         return result
     except Exception as exc:

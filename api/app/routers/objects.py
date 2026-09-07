@@ -22,19 +22,38 @@ from app.change_set_service import (
     propose_change_set,
     review_change_set,
 )
-from app.claim_service import create_claim, get_claim, update_claim
+from app.claim_service import (
+    create_claim,
+    get_claim,
+    get_claim_revision,
+    list_claims_referencing,
+    update_claim,
+)
 from app.core.config import get_settings
+from app.data_draft_service import (
+    attach_data_draft_asset,
+    begin_data_draft,
+    finalize_data_draft,
+    get_data_draft,
+    remove_data_draft_asset,
+    update_data_draft,
+)
 from app.data_service import (
     create_data_record,
     create_representation,
     get_data_record,
+    get_data_record_revision,
     representation_out,
     update_data_record,
 )
 from app.db import get_db
 from app.experiment_record_service import (
+    add_experiment_reference,
     create_experiment_record,
     get_experiment_record,
+    patch_experiment_metadata,
+    remove_experiment_reference,
+    reorder_experiment_references,
     update_experiment_record,
 )
 from app.graph_query_service import DEFAULT_DEPTH, MAX_DEPTH, graph_query_service
@@ -43,12 +62,19 @@ from app.import_service import ImportValidationError, commit_import, create_prev
 from app.models import (
     Asset,
     ChangeSet,
+    ClaimContextReference,
+    ClaimEvidence,
     DataImport,
     DataRepresentation,
+    DocumentOccurrence,
     ObjectAssetLink,
+    ObjectRelation,
     ObjectRevision,
     ObjectType,
+    ProcessExecution,
+    ProcessExecutionObjectBinding,
     ResearchObject,
+    RevisionReference,
 )
 from app.process_definition_service import (
     create_process_definition,
@@ -60,6 +86,7 @@ from app.process_execution_service import (
     create_process_execution,
     execution_out,
     get_process_execution,
+    get_process_execution_revision,
     list_process_executions_for_data,
     list_process_executions_for_object,
     update_process_execution,
@@ -71,8 +98,15 @@ from app.project_context_service import (
     search_project,
     update_project_record,
 )
+from app.record_table_service import query_record_table
 from app.relation_semantics import SemanticConflict
-from app.sample_record_service import create_sample_record, get_sample_record, update_sample_record
+from app.sample_record_service import (
+    create_sample_batch,
+    create_sample_record,
+    get_sample_record,
+    get_sample_record_revision,
+    update_sample_record,
+)
 from app.schemas import (
     AssetOut,
     ChangeSetOut,
@@ -81,15 +115,24 @@ from app.schemas import (
     ClaimCreate,
     ClaimOut,
     ClaimPut,
+    ClaimRevisionOut,
+    DataDraftAttachmentCreate,
+    DataDraftBegin,
+    DataDraftFinalize,
+    DataDraftOut,
+    DataDraftUpdate,
     DataImportOut,
     DataRecordCreate,
     DataRecordOut,
     DataRecordPut,
     DataRepresentationCreate,
     DataRepresentationOut,
+    ExperimentMetadataPatch,
     ExperimentRecordCreate,
     ExperimentRecordOut,
     ExperimentRecordPut,
+    ExperimentReferenceCreate,
+    ExperimentReferenceOrder,
     ImportCommitMapping,
     ImportPreviewOut,
     ImportPreviewRequest,
@@ -106,15 +149,20 @@ from app.schemas import (
     ProcessExecutionCreate,
     ProcessExecutionOut,
     ProcessExecutionPut,
+    ProcessExecutionRevisionOut,
     ProjectContextOut,
     ProjectRecordCreate,
     ProjectRecordOut,
     ProjectRecordPut,
     ProjectSearchOut,
+    RecordTableQuery,
+    RecordTableResultOut,
     RelationCreate,
     RelationPatch,
     ResearchObjectOut,
     RevisionCreate,
+    SampleBatchCreate,
+    SampleBatchOut,
     SampleContextOut,
     SampleRecordCreate,
     SampleRecordOut,
@@ -122,6 +170,7 @@ from app.schemas import (
     ViewCreate,
     ViewOut,
     ViewPut,
+    ViewRevisionOut,
     WorkspaceSummaryOut,
 )
 from app.services import (
@@ -148,7 +197,13 @@ from app.storage import (
     StorageRouter,
     sanitise_filename,
 )
-from app.view_service import create_view, get_view, list_view_revisions, update_view
+from app.view_service import (
+    create_view,
+    get_view,
+    get_view_revision,
+    list_view_revisions,
+    update_view,
+)
 
 router = APIRouter(tags=["research-object-graph"])
 logger = logging.getLogger(__name__)
@@ -195,7 +250,9 @@ def _error(exc: Exception) -> HTTPException:
             pass
     code = getattr(exc, "code", None) or parsed.get("code")
     if not code:
-        if isinstance(exc, LookupError):
+        if raw in {"idempotency_conflict", "idempotency_in_progress"}:
+            code = raw
+        elif isinstance(exc, LookupError):
             code = "not_found"
         elif isinstance(exc, IntegrityError):
             code = "semantic_conflict"
@@ -213,7 +270,9 @@ def _error(exc: Exception) -> HTTPException:
         status_code = 422
     else:
         status_code = 500
-    if code in {"stale_record", "idempotency_conflict", "change_set_stale"}:
+    if code == "stale_record":
+        status_code = 412
+    elif code in {"idempotency_conflict", "idempotency_in_progress", "change_set_stale"}:
         status_code = 409
     return HTTPException(
         status_code=status_code,
@@ -241,6 +300,65 @@ def _if_match(current_hash: str, provided: str | None) -> None:
                 }
             },
         )
+
+
+def _require_if_match(current_hash: str, provided: str | None) -> None:
+    if provided is None or not provided.strip():
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "error": {
+                    "code": "revision_required",
+                    "message": "An If-Match revision token is required for updates.",
+                    "details": {},
+                }
+            },
+        )
+    _if_match(current_hash, provided)
+
+
+def _require_revision_header(provided: str | None) -> None:
+    if provided is None or not provided.strip():
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "error": {
+                    "code": "revision_required",
+                    "message": "An If-Match revision token is required for updates.",
+                    "details": {},
+                }
+            },
+        )
+
+
+def _normalized_revision(header: str | None, body: str | None) -> str:
+    """Normalize If-Match and body revision fields without choosing silently."""
+    if header is None or not header.strip():
+        if body is None or not body.strip():
+            raise HTTPException(
+                status_code=428,
+                detail={
+                    "error": {
+                        "code": "revision_required",
+                        "message": "An If-Match revision token is required for updates.",
+                        "details": {},
+                    }
+                },
+            )
+        return body.strip('"')
+    normalized_header = header.strip('"')
+    if body is not None and body.strip('"') != normalized_header:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "revision_mismatch",
+                    "message": "If-Match and body revision tokens must match.",
+                    "details": {},
+                }
+            },
+        )
+    return normalized_header
 
 
 def _run_idempotent(
@@ -352,11 +470,15 @@ def post_object(payload: ObjectCreate, db: Session = Depends(get_db)) -> Researc
 
 
 @router.get("/objects/{object_id}", response_model=ResearchObjectOut)
-def get_object_route(object_id: uuid.UUID, db: Session = Depends(get_db)) -> ResearchObjectOut:
+def get_object_route(
+    object_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
+) -> ResearchObjectOut:
     item = get_object(db, object_id)
     if item is None:
         raise HTTPException(status_code=404, detail="research object not found")
-    return ResearchObjectOut.model_validate(object_out(item))
+    body = object_out(item)
+    response.headers["ETag"] = f'"{sha256_json(body)}"'
+    return ResearchObjectOut.model_validate(body)
 
 
 @router.patch("/objects/{object_id}", response_model=ResearchObjectOut)
@@ -371,8 +493,39 @@ def patch_object(
     if item is None:
         raise HTTPException(status_code=404, detail="research object not found")
     try:
-        _if_match(sha256_json(object_out(item)), if_match)
-        updated = update_object(db, item, payload.model_dump(exclude_unset=True))
+        managed = (
+            item.authoring_kind in {"sample", "data"}
+            or (
+                db.scalar(
+                    select(func.count())
+                    .select_from(DocumentOccurrence)
+                    .where(DocumentOccurrence.owner_id == item.id)
+                )
+                or 0
+            )
+            > 0
+            or (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ProcessExecution)
+                    .where(ProcessExecution.authoring_record_id == item.id)
+                )
+                or 0
+            )
+            > 0
+        )
+        if managed and payload.model_fields_set:
+            raise SemanticConflict(
+                "Scientific record metadata and content must be changed through its record command",
+                code="managed_record",
+            )
+        _require_if_match(sha256_json(object_out(item)), if_match)
+        updated = update_object(
+            db,
+            item,
+            payload.model_dump(exclude_unset=True),
+            expected_record_sha256=if_match.strip('"') if if_match else None,
+        )
         response.headers["ETag"] = f'"{sha256_json(object_out(updated))}"'
         return ResearchObjectOut.model_validate(object_out(updated))
     except HTTPException:
@@ -384,14 +537,92 @@ def patch_object(
 
 @router.delete("/objects/{object_id}", status_code=204)
 def delete_object_route(object_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
-    """Delete one object and its owned records; shared reference targets remain intact."""
+    """Delete an unreferenced object while preserving scientific history."""
     item = get_object(db, object_id)
     if item is None:
         raise HTTPException(status_code=404, detail="research object not found")
     try:
+        managed = (
+            item.authoring_kind in {"sample", "data"}
+            or (
+                db.scalar(
+                    select(func.count())
+                    .select_from(DocumentOccurrence)
+                    .where(DocumentOccurrence.owner_id == item.id)
+                )
+                or 0
+            )
+            > 0
+            or (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ProcessExecution)
+                    .where(ProcessExecution.authoring_record_id == item.id)
+                )
+                or 0
+            )
+            > 0
+        )
+        if managed:
+            raise SemanticConflict(
+                "Scientific records must be retracted through their record command",
+                code="managed_record",
+            )
+        revision_ids = select(ObjectRevision.id).where(ObjectRevision.object_id == item.id)
+        protected = (
+            (
+                db.scalar(
+                    select(func.count())
+                    .select_from(RevisionReference)
+                    .where(
+                        (RevisionReference.target_object_id == item.id)
+                        | RevisionReference.target_object_revision_id.in_(revision_ids)
+                        | RevisionReference.source_object_revision_id.in_(revision_ids)
+                    )
+                )
+                or 0
+            )
+            + (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ObjectRelation)
+                    .where(ObjectRelation.target_object_id == item.id)
+                )
+                or 0
+            )
+            + (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ProcessExecutionObjectBinding)
+                    .where(ProcessExecutionObjectBinding.research_object_id == item.id)
+                )
+                or 0
+            )
+            + (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ClaimEvidence)
+                    .where(ClaimEvidence.evidence_id == item.id)
+                )
+                or 0
+            )
+            + (
+                db.scalar(
+                    select(func.count())
+                    .select_from(ClaimContextReference)
+                    .where(ClaimContextReference.object_id == item.id)
+                )
+                or 0
+            )
+        )
+        if protected:
+            raise SemanticConflict(
+                "Object is still referenced by scientific history or active relations",
+                code="object_in_use",
+            )
         db.delete(item)
         db.commit()
-    except IntegrityError as exc:
+    except (IntegrityError, SemanticConflict) as exc:
         db.rollback()
         raise _error(exc) from exc
 
@@ -545,7 +776,7 @@ def post_process_execution(
             db,
             idempotency_key,
             payload.model_dump(mode="json"),
-            lambda: create_process_execution(db, payload),
+            lambda: create_process_execution(db, payload, commit=not bool(idempotency_key)),
             201,
         )
         if isinstance(result, JSONResponse):
@@ -568,6 +799,22 @@ def process_execution(
         raise _error(exc) from exc
 
 
+@router.get(
+    "/process-executions/{execution_id}/revisions/{revision_number}",
+    response_model=ProcessExecutionRevisionOut,
+)
+def process_execution_revision(
+    execution_id: uuid.UUID, revision_number: int, db: Session = Depends(get_db)
+) -> ProcessExecutionRevisionOut:
+    try:
+        return ProcessExecutionRevisionOut.model_validate(
+            get_process_execution_revision(db, execution_id, revision_number),
+            from_attributes=True,
+        )
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
 @router.put("/process-executions/{execution_id}", response_model=ProcessExecutionOut)
 def put_process_execution(
     execution_id: uuid.UUID,
@@ -578,15 +825,12 @@ def put_process_execution(
 ) -> ProcessExecutionOut:
     try:
         current = get_process_execution(db, execution_id)
-        _if_match(current["record_sha256"], if_match)
+        _require_if_match(current["record_sha256"], if_match)
+        expected = _normalized_revision(if_match, payload.base_record_sha256)
         result = update_process_execution(
             db,
             execution_id,
-            payload.model_copy(
-                update={
-                    "base_record_sha256": payload.base_record_sha256 or current["record_sha256"]
-                }
-            ),
+            payload.model_copy(update={"base_record_sha256": expected}),
         )
         response.headers["ETag"] = f'"{result["record_sha256"]}"'
         return ProcessExecutionOut.model_validate(result)
@@ -633,14 +877,14 @@ def sample_record(
 def post_sample_record(
     payload: SampleRecordCreate,
     db: Session = Depends(get_db),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> SampleRecordOut | JSONResponse:
     try:
         result = _run_idempotent(
             db,
             idempotency_key,
             payload.model_dump(mode="json"),
-            lambda: create_sample_record(db, payload),
+            lambda: create_sample_record(db, payload, commit=False),
             201,
         )
         if isinstance(result, JSONResponse):
@@ -651,23 +895,76 @@ def post_sample_record(
         raise _error(exc) from exc
 
 
+@router.post("/sample-records/batch", response_model=SampleBatchOut, status_code=201)
+def post_sample_batch(
+    payload: SampleBatchCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> SampleBatchOut | JSONResponse:
+    try:
+        result = _run_idempotent(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_sample_batch(db, payload, commit=False),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return SampleBatchOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get(
+    "/samples/{sample_id}/record/revisions/{revision_number}",
+    response_model=SampleRecordOut,
+)
+def sample_record_revision(
+    sample_id: uuid.UUID,
+    revision_number: int,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SampleRecordOut:
+    try:
+        result = get_sample_record_revision(db, sample_id, revision_number)
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return SampleRecordOut.model_validate(result)
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/record-tables/query", response_model=RecordTableResultOut)
+def record_table_query(
+    payload: RecordTableQuery, db: Session = Depends(get_db)
+) -> RecordTableResultOut:
+    try:
+        return RecordTableResultOut.model_validate(query_record_table(db, payload))
+    except (LookupError, ValueError, IntegrityError) as exc:
+        raise _error(exc) from exc
+
+
 @router.put("/samples/{sample_id}/record", response_model=SampleRecordOut)
 def put_sample_record(
     sample_id: uuid.UUID,
     payload: SampleRecordPut,
     response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
+    if_match: str = Header(alias="If-Match"),
     db: Session = Depends(get_db),
 ) -> SampleRecordOut:
     try:
         current = get_sample_record(db, sample_id)
-        _if_match(current["record_sha256"], if_match)
-        result = update_sample_record(db, sample_id, payload)
+        _require_if_match(current["record_sha256"], if_match)
+        expected = _normalized_revision(if_match, payload.base_record_sha256)
+        result = update_sample_record(
+            db, sample_id, payload.model_copy(update={"base_record_sha256": expected})
+        )
         response.headers["ETag"] = f'"{result["record_sha256"]}"'
         return SampleRecordOut.model_validate(result)
     except HTTPException:
         raise
-    except (LookupError, ValueError, IntegrityError) as exc:
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
         db.rollback()
         raise _error(exc) from exc
 
@@ -709,7 +1006,7 @@ def post_experiment_record(
             db,
             idempotency_key,
             payload.model_dump(mode="json"),
-            lambda: create_experiment_record(db, payload),
+            lambda: create_experiment_record(db, payload, commit=not bool(idempotency_key)),
             201,
         )
         if isinstance(result, JSONResponse):
@@ -742,10 +1039,110 @@ def put_experiment_record(
 ) -> ExperimentRecordOut:
     try:
         current = get_experiment_record(db, experiment_id)
-        _if_match(current["record_sha256"], if_match)
-        result = update_experiment_record(db, experiment_id, payload)
+        _require_if_match(current["record_sha256"], if_match)
+        expected = _normalized_revision(if_match, payload.base_record_sha256)
+        result = update_experiment_record(
+            db,
+            experiment_id,
+            payload.model_copy(update={"base_record_sha256": expected}),
+            expected_record_sha256=expected,
+        )
         response.headers["ETag"] = f'"{result["record_sha256"]}"'
         return ExperimentRecordOut.model_validate(result)
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.patch("/experiments/{experiment_id}/metadata", response_model=ExperimentRecordOut)
+def patch_experiment(
+    experiment_id: uuid.UUID,
+    payload: ExperimentMetadataPatch,
+    response: Response,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ExperimentRecordOut:
+    try:
+        _require_if_match(get_experiment_record(db, experiment_id)["record_sha256"], if_match)
+        result = patch_experiment_metadata(
+            db, experiment_id, payload, expected_record_sha256=if_match.strip('"')
+        )
+        response.headers["ETag"] = f'"{result["record_sha256"]}"'
+        return ExperimentRecordOut.model_validate(result)
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/experiments/{experiment_id}/references", response_model=ExperimentRecordOut)
+def add_experiment_ref(
+    experiment_id: uuid.UUID,
+    payload: ExperimentReferenceCreate,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ExperimentRecordOut:
+    try:
+        _require_if_match(get_experiment_record(db, experiment_id)["record_sha256"], if_match)
+        return ExperimentRecordOut.model_validate(
+            add_experiment_reference(
+                db, experiment_id, payload, expected_record_sha256=if_match.strip('"')
+            )
+        )
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.delete(
+    "/experiments/{experiment_id}/references/{relation_id}",
+    response_model=ExperimentRecordOut,
+)
+def remove_experiment_ref(
+    experiment_id: uuid.UUID,
+    relation_id: uuid.UUID,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ExperimentRecordOut:
+    try:
+        _require_if_match(get_experiment_record(db, experiment_id)["record_sha256"], if_match)
+        return ExperimentRecordOut.model_validate(
+            remove_experiment_reference(
+                db,
+                experiment_id,
+                relation_id,
+                expected_record_sha256=if_match.strip('"'),
+            )
+        )
+    except HTTPException:
+        raise
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.put("/experiments/{experiment_id}/reference-order", response_model=ExperimentRecordOut)
+def reorder_experiment_refs(
+    experiment_id: uuid.UUID,
+    payload: ExperimentReferenceOrder,
+    if_match: str = Header(alias="If-Match"),
+    db: Session = Depends(get_db),
+) -> ExperimentRecordOut:
+    try:
+        _require_if_match(get_experiment_record(db, experiment_id)["record_sha256"], if_match)
+        return ExperimentRecordOut.model_validate(
+            reorder_experiment_references(
+                db,
+                experiment_id,
+                payload,
+                expected_record_sha256=if_match.strip('"'),
+            )
+        )
     except HTTPException:
         raise
     except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
@@ -771,12 +1168,105 @@ def post_data_record(
             db,
             idempotency_key,
             payload.model_dump(mode="json"),
-            lambda: create_data_record(db, payload),
+            lambda: create_data_record(db, payload, commit=not bool(idempotency_key)),
             201,
         )
         if isinstance(result, JSONResponse):
             return result
         return DataRecordOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/data-drafts", response_model=DataDraftOut, status_code=201)
+def post_data_draft(
+    payload: DataDraftBegin,
+    db: Session = Depends(get_db),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> DataDraftOut | JSONResponse:
+    try:
+        result = _run_idempotent(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: begin_data_draft(db, payload, commit=False),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return DataDraftOut.model_validate(result)
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/data-drafts/{draft_id}", response_model=DataDraftOut)
+def data_draft(draft_id: uuid.UUID, db: Session = Depends(get_db)) -> DataDraftOut:
+    try:
+        return DataDraftOut.model_validate(get_data_draft(db, draft_id))
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
+@router.put("/data-drafts/{draft_id}", response_model=DataDraftOut)
+def put_data_draft(
+    draft_id: uuid.UUID, payload: DataDraftUpdate, db: Session = Depends(get_db)
+) -> DataDraftOut:
+    try:
+        return DataDraftOut.model_validate(update_data_draft(db, draft_id, payload))
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/data-drafts/{draft_id}/attachments", response_model=DataDraftOut)
+def attach_data_draft(
+    draft_id: uuid.UUID,
+    payload: DataDraftAttachmentCreate,
+    db: Session = Depends(get_db),
+) -> DataDraftOut:
+    try:
+        return DataDraftOut.model_validate(attach_data_draft_asset(db, draft_id, payload))
+    except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.delete(
+    "/data-drafts/{draft_id}/attachments/{client_attachment_id}",
+    response_model=DataDraftOut,
+)
+def detach_data_draft(
+    draft_id: uuid.UUID,
+    client_attachment_id: str,
+    db: Session = Depends(get_db),
+) -> DataDraftOut:
+    try:
+        return DataDraftOut.model_validate(
+            remove_data_draft_asset(db, draft_id, client_attachment_id)
+        )
+    except (LookupError, ValueError, IntegrityError) as exc:
+        db.rollback()
+        raise _error(exc) from exc
+
+
+@router.post("/data-drafts/{draft_id}/finalize", response_model=DataRecordOut)
+def finalize_draft(
+    draft_id: uuid.UUID,
+    payload: DataDraftFinalize,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> DataRecordOut:
+    try:
+        return DataRecordOut.model_validate(
+            finalize_data_draft(
+                db,
+                draft_id,
+                payload,
+                idempotency_key=idempotency_key,
+            )
+        )
     except (LookupError, ValueError, IntegrityError, SemanticConflict) as exc:
         db.rollback()
         raise _error(exc) from exc
@@ -794,6 +1284,18 @@ def data_record(
         raise _error(exc) from exc
 
 
+@router.get("/data/{data_id}/record/revisions/{revision_number}", response_model=ObjectRevisionOut)
+def data_record_revision(
+    data_id: uuid.UUID, revision_number: int, db: Session = Depends(get_db)
+) -> ObjectRevisionOut:
+    try:
+        return ObjectRevisionOut.model_validate(
+            get_data_record_revision(db, data_id, revision_number), from_attributes=True
+        )
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
 @router.put("/data/{data_id}/record", response_model=DataRecordOut)
 def put_data_record(
     data_id: uuid.UUID,
@@ -803,9 +1305,13 @@ def put_data_record(
     db: Session = Depends(get_db),
 ) -> DataRecordOut:
     try:
-        current = get_data_record(db, data_id)
-        _if_match(current["record_sha256"], if_match)
-        result = update_data_record(db, data_id, payload)
+        expected = _normalized_revision(if_match, payload.base_record_sha256)
+        result = update_data_record(
+            db,
+            data_id,
+            payload,
+            expected_record_sha256=expected,
+        )
         response.headers["ETag"] = f'"{result["record_sha256"]}"'
         return DataRecordOut.model_validate(result)
     except HTTPException:
@@ -897,9 +1403,13 @@ def put_view(
     db: Session = Depends(get_db),
 ) -> ViewOut:
     try:
-        current = get_view(db, view_id)
-        _if_match(current["record_sha256"], if_match or payload.base_record_sha256)
-        result = update_view(db, view_id, payload)
+        expected = _normalized_revision(if_match, payload.base_record_sha256)
+        result = update_view(
+            db,
+            view_id,
+            payload,
+            expected_record_sha256=expected.strip('"') if expected else None,
+        )
         response.headers["ETag"] = f'"{result["record_sha256"]}"'
         return ViewOut.model_validate(result)
     except HTTPException:
@@ -917,12 +1427,32 @@ def view_revisions(view_id: uuid.UUID, db: Session = Depends(get_db)) -> list[di
         raise _error(exc) from exc
 
 
+@router.get("/views/{view_id}/revisions/{revision_number}", response_model=ViewRevisionOut)
+def view_revision(
+    view_id: uuid.UUID, revision_number: int, db: Session = Depends(get_db)
+) -> ViewRevisionOut:
+    try:
+        return ViewRevisionOut.model_validate(
+            get_view_revision(db, view_id, revision_number), from_attributes=True
+        )
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
 @router.post("/claims", response_model=ClaimOut, status_code=201)
 def post_claim(payload: ClaimCreate, db: Session = Depends(get_db)) -> ClaimOut:
     try:
         return ClaimOut.model_validate(create_claim(db, payload))
     except (LookupError, ValueError, IntegrityError) as exc:
         db.rollback()
+        raise _error(exc) from exc
+
+
+@router.get("/claims/by-reference/{object_id}", response_model=list[ClaimOut])
+def claims_by_reference(object_id: uuid.UUID, db: Session = Depends(get_db)) -> list[ClaimOut]:
+    try:
+        return [ClaimOut.model_validate(item) for item in list_claims_referencing(db, object_id)]
+    except (LookupError, ValueError) as exc:
         raise _error(exc) from exc
 
 
@@ -936,6 +1466,18 @@ def claim(claim_id: uuid.UUID, response: Response, db: Session = Depends(get_db)
         raise _error(exc) from exc
 
 
+@router.get("/claims/{claim_id}/revisions/{revision_number}", response_model=ClaimRevisionOut)
+def claim_revision(
+    claim_id: uuid.UUID, revision_number: int, db: Session = Depends(get_db)
+) -> ClaimRevisionOut:
+    try:
+        return ClaimRevisionOut.model_validate(
+            get_claim_revision(db, claim_id, revision_number), from_attributes=True
+        )
+    except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+
+
 @router.put("/claims/{claim_id}", response_model=ClaimOut)
 def put_claim(
     claim_id: uuid.UUID,
@@ -945,9 +1487,13 @@ def put_claim(
     db: Session = Depends(get_db),
 ) -> ClaimOut:
     try:
-        current = get_claim(db, claim_id)
-        _if_match(current["record_sha256"], if_match or payload.base_record_sha256)
-        result = update_claim(db, claim_id, payload)
+        expected = _normalized_revision(if_match, payload.base_record_sha256)
+        result = update_claim(
+            db,
+            claim_id,
+            payload,
+            expected_record_sha256=expected.strip('"') if expected else None,
+        )
         response.headers["ETag"] = f'"{result["record_sha256"]}"'
         return ClaimOut.model_validate(result)
     except HTTPException:
@@ -1085,7 +1631,15 @@ def delete_asset(asset_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
             )
             or 0
         )
-        if object_link_count or representation_count or import_count:
+        revision_reference_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(RevisionReference)
+                .where(RevisionReference.target_asset_id == asset.id)
+            )
+            or 0
+        )
+        if object_link_count or representation_count or import_count or revision_reference_count:
             raise SemanticConflict(
                 "Asset is still referenced by scientific records", code="asset_in_use"
             )
@@ -1331,7 +1885,12 @@ def propose(
             db,
             idempotency_key,
             payload.model_dump(mode="json"),
-            lambda: propose_change_set(db, payload, idempotency_key=idempotency_key),
+            lambda: propose_change_set(
+                db,
+                payload,
+                idempotency_key=idempotency_key,
+                commit=not bool(idempotency_key),
+            ),
             201,
         )
         if isinstance(result, JSONResponse):

@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import ObjectRelation, ResearchObject
@@ -63,6 +63,13 @@ def validate_relation_scope(
     if target.kind == "research_object" and target_scope is None:
         return
     raise SemanticConflict("relation crosses project scopes", code="scope_conflict")
+
+
+def lock_project_graph(db: Session, project_scope_id: uuid.UUID | None) -> None:
+    """Serialize graph mutations for one project for the transaction lifetime."""
+    if project_scope_id is None:
+        return
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtext(str(project_scope_id)))))
 
 
 def validate_relation_kinds(

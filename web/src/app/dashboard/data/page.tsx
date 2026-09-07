@@ -1,5 +1,5 @@
-import { DataLanding } from '@/features/data/data-landing';
+import { RecordTableList } from '@/features/workspace/sample-record/sample-list';
 
 export default function DataPage() {
-  return <DataLanding />;
+  return <RecordTableList recordKind='data' />;
 }

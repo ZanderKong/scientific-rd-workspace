@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Database, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -85,6 +86,12 @@ export function DataLanding() {
             <h2 className='mt-2 text-xl font-semibold'>{activeProject.title}</h2>
             <p className='mt-1 font-mono text-xs text-muted-foreground'>{activeProject.code}</p>
             <p className='mt-8 text-sm text-muted-foreground'>{t('deferred')}</p>
+            <Link
+              href='/dashboard/data/new'
+              className='mt-4 inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground'
+            >
+              <Plus className='size-4' /> 记录 Data
+            </Link>
           </section>
           <section className='rounded-2xl border bg-card/80 p-6'>
             <p className='text-xs text-muted-foreground'>{t('recordCount')}</p>

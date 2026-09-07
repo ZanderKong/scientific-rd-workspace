@@ -44,7 +44,7 @@ def test_data_record_has_multiple_representations(client):
     assert record.json()["representations"][0]["table_rows_count"] == 2
 
 
-def test_process_definition_execution_and_sample_projection(client):
+def test_independent_execution_does_not_enter_sample_document_implicitly(client):
     project_id = _project()
     definition = client.post(
         "/api/v1/process-definitions",
@@ -80,7 +80,7 @@ def test_process_definition_execution_and_sample_projection(client):
     assert execution.status_code == 201, execution.text
     projection = client.get(f"/api/v1/samples/{sample['id']}/record")
     assert projection.status_code == 200, projection.text
-    assert projection.json()["steps"][0]["execution"]["id"] == execution.json()["id"]
+    assert projection.json()["occurrences"] == []
 
 
 def test_removed_v02_routes_are_not_active(client):

@@ -91,18 +91,10 @@ function CreateObject({
                   project_scope_id: projectId,
                   title: title.trim(),
                   config: {},
-                  data_ids: []
+                  data_refs: []
                 })
               ).view
-            : kind === 'claim'
-              ? (
-                  await api.createClaim({
-                    project_scope_id: projectId,
-                    title: title.trim(),
-                    statement: `Draft claim: ${title.trim()}`
-                  })
-                ).claim
-              : await api.createObject(payload);
+            : await api.createObject(payload);
       onCreated(object);
       setTitle('');
     } catch (cause) {
@@ -159,6 +151,7 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
       .finally(() => setLoading(false));
   }, [kind, projectId, query, tag]);
   const label = meta[kind].en;
+  const canCreateHere = !['claim', 'view'].includes(kind);
   return (
     <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
       <div className='mb-6 flex flex-wrap items-start justify-between gap-3'>
@@ -169,9 +162,11 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
           <h1 className='mt-2 text-3xl font-semibold'>{label}</h1>
           <p className='mt-2 text-sm text-muted-foreground'>Canonical objects and typed records.</p>
         </div>
-        <Button onClick={() => setCreating((value) => !value)}>
-          {creating ? 'Close' : 'Create'}
-        </Button>
+        {canCreateHere && (
+          <Button onClick={() => setCreating((value) => !value)}>
+            {creating ? 'Close' : 'Create'}
+          </Button>
+        )}
       </div>
       {creating && (
         <div className='mb-5'>
@@ -185,6 +180,13 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
             }}
           />
         </div>
+      )}
+      {!canCreateHere && (
+        <p className='mb-5 rounded-xl border border-dashed p-4 text-sm text-muted-foreground'>
+          {kind === 'claim'
+            ? 'Create a Claim from an Experiment, Data, or View so its primary source revision is fixed.'
+            : 'Create a View from Data so its Data revision and Representations are fixed.'}
+        </p>
       )}
       <input
         className={`${input} mb-5`}

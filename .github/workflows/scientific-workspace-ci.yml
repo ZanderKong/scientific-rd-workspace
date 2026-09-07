@@ -290,9 +290,15 @@ jobs:
       - name: Install Playwright Chromium
         working-directory: web
         run: npm run e2e:install
-      - name: Run composer and golden scientific browser acceptance
+      - name: Run complete scientific browser acceptance
         working-directory: web
-        run: npm run e2e -- e2e/sample-composer.spec.ts e2e/golden-scientific-workflow.spec.ts
+        run: >-
+          npm run e2e -- e2e/sample-composer.spec.ts
+          e2e/golden-scientific-workflow.spec.ts
+          e2e/data-composer.spec.ts
+          e2e/sample-table.spec.ts
+          e2e/workflow-v15.spec.ts
+          e2e/sample-save-race.spec.ts
       - name: Upload golden browser evidence
         if: always()
         uses: actions/upload-artifact@v4

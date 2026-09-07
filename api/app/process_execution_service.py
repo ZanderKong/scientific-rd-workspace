@@ -9,8 +9,9 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.data_service import sync_system_relations_for_data
+from app.data_service import sync_data_subject_assignments, sync_system_relations_for_data
 from app.models import (
+    ObjectRevision,
     ProcessDefinitionVersion,
     ProcessExecution,
     ProcessExecutionDataBinding,
@@ -18,15 +19,17 @@ from app.models import (
     ProcessExecutionRelation,
     ProcessExecutionRevision,
     ResearchObject,
+    RevisionReference,
+    ViewRevision,
 )
 from app.process_definition_service import get_current_version
-from app.relation_semantics import SemanticConflict
+from app.relation_semantics import SemanticConflict, lock_project_graph
 from app.schemas import ProcessExecutionCreate, ProcessExecutionPut
-from app.services import get_object, object_out, sha256_json
+from app.services import _create_revision_in_session, get_object, object_out, sha256_json
 
 
-def _execution(db: Session, execution_id: uuid.UUID) -> ProcessExecution:
-    item = db.scalar(
+def _execution(db: Session, execution_id: uuid.UUID, *, lock: bool = False) -> ProcessExecution:
+    statement = (
         select(ProcessExecution)
         .where(ProcessExecution.id == execution_id)
         .options(
@@ -39,6 +42,9 @@ def _execution(db: Session, execution_id: uuid.UUID) -> ProcessExecution:
             ),
         )
     )
+    if lock:
+        statement = statement.with_for_update()
+    item = db.scalar(statement)
     if item is None:
         raise LookupError("process execution not found")
     return item
@@ -54,9 +60,12 @@ def _definition(db: Session, definition_id: uuid.UUID) -> ResearchObject:
 def _binding_object_out(item: ProcessExecutionObjectBinding) -> dict[str, Any]:
     return {
         "id": item.id,
+        "authoring_occurrence_id": item.authoring_occurrence_id,
         "research_object_id": item.research_object_id,
+        "research_object_revision_id": item.research_object_revision_id,
         "direction": item.direction,
         "role": item.role,
+        "is_active": item.is_active,
         "field_definition_snapshot": item.field_definition_snapshot_jsonb or {},
         "values": item.values_jsonb or {},
         "order_index": item.order_index,
@@ -68,6 +77,7 @@ def _binding_data_out(item: ProcessExecutionDataBinding) -> dict[str, Any]:
     return {
         "id": item.id,
         "data_id": item.data_id,
+        "data_revision_id": item.data_revision_id,
         "direction": item.direction,
         "role": item.role,
         "values": item.values_jsonb or {},
@@ -76,15 +86,26 @@ def _binding_data_out(item: ProcessExecutionDataBinding) -> dict[str, Any]:
     }
 
 
-def execution_out(db: Session, item: ProcessExecution) -> dict[str, Any]:
-    precedes = db.scalars(
-        select(ProcessExecutionRelation.target_execution_id).where(
-            ProcessExecutionRelation.source_execution_id == item.id,
-            ProcessExecutionRelation.relation_type == "precedes",
-        )
-    ).all()
+def execution_out(
+    db: Session,
+    item: ProcessExecution,
+    *,
+    precedes_ids: list[uuid.UUID] | None = None,
+) -> dict[str, Any]:
+    precedes = (
+        precedes_ids
+        if precedes_ids is not None
+        else db.scalars(
+            select(ProcessExecutionRelation.target_execution_id).where(
+                ProcessExecutionRelation.source_execution_id == item.id,
+                ProcessExecutionRelation.relation_type == "precedes",
+            )
+        ).all()
+    )
     body = {
         "id": item.id,
+        "authoring_record_id": item.authoring_record_id,
+        "authoring_occurrence_id": item.authoring_occurrence_id,
         "project_scope_id": item.project_scope_id,
         "process_definition_id": item.process_definition_id,
         "process_definition_version_id": item.process_definition_version_id,
@@ -92,6 +113,7 @@ def execution_out(db: Session, item: ProcessExecution) -> dict[str, Any]:
         "source_view_revision_id": item.source_view_revision_id,
         "title_snapshot": item.title_snapshot,
         "status": item.status,
+        "record_validity": item.record_validity,
         "execution_field_definitions": item.execution_field_definition_snapshot_jsonb or {},
         "values": item.values_jsonb or {},
         "note": item.note,
@@ -100,11 +122,33 @@ def execution_out(db: Session, item: ProcessExecution) -> dict[str, Any]:
         "completed_at": item.completed_at,
         "created_at": item.created_at,
         "updated_at": item.updated_at,
-        "object_bindings": [_binding_object_out(binding) for binding in item.object_bindings],
+        "object_bindings": [
+            _binding_object_out(binding) for binding in item.object_bindings if binding.is_active
+        ],
         "data_bindings": [_binding_data_out(binding) for binding in item.data_bindings],
         "precedes_execution_ids": precedes,
     }
-    return {"record_sha256": sha256_json(body), **body}
+    # The current execution token is its own immutable revision identity.  Do
+    # not hash enriched object/Data summaries here: renaming a referenced
+    # target must not turn an otherwise unchanged execution into a stale write.
+    own_revision_sha = db.scalar(
+        select(ProcessExecutionRevision.snapshot_sha256)
+        .where(ProcessExecutionRevision.execution_id == item.id)
+        .order_by(ProcessExecutionRevision.revision_number.desc())
+        .limit(1)
+    )
+    stable_token = {
+        key: value for key, value in body.items() if key not in {"object_bindings", "data_bindings"}
+    }
+    stable_token["object_bindings"] = [
+        {key: value for key, value in binding.items() if key not in {"object"}}
+        for binding in body["object_bindings"]
+    ]
+    stable_token["data_bindings"] = [
+        {key: value for key, value in binding.items() if key not in {"data"}}
+        for binding in body["data_bindings"]
+    ]
+    return {"record_sha256": own_revision_sha or sha256_json(stable_token), **body}
 
 
 def _revision(
@@ -128,6 +172,36 @@ def _revision(
         change_note=change_note,
     )
     db.add(revision)
+    db.flush()
+    references: list[RevisionReference] = []
+    if item.source_view_revision_id is not None:
+        source_view_revision = db.get(ViewRevision, item.source_view_revision_id)
+        if source_view_revision is not None:
+            references.append(
+                RevisionReference(
+                    source_execution_revision_id=revision.id,
+                    target_view_revision_id=source_view_revision.id,
+                )
+            )
+    for binding in item.object_bindings:
+        if not binding.is_active:
+            continue
+        if binding.research_object_revision_id is not None:
+            references.append(
+                RevisionReference(
+                    source_execution_revision_id=revision.id,
+                    target_object_revision_id=binding.research_object_revision_id,
+                )
+            )
+    for binding in item.data_bindings:
+        if binding.data_revision_id is not None:
+            references.append(
+                RevisionReference(
+                    source_execution_revision_id=revision.id,
+                    target_object_revision_id=binding.data_revision_id,
+                )
+            )
+    db.add_all(references)
     db.flush()
     return revision
 
@@ -232,6 +306,7 @@ def _replace_bindings(
                 ProcessExecutionObjectBinding.execution_id == item.id,
                 ProcessExecutionObjectBinding.direction == "context",
                 ProcessExecutionObjectBinding.role == "sample_record",
+                ProcessExecutionObjectBinding.is_active.is_(True),
             )
         ).all()
     )
@@ -245,12 +320,10 @@ def _replace_bindings(
             "a ProcessExecution may belong to only one Sample Record",
             code="semantic_conflict",
         )
-    db.query(ProcessExecutionObjectBinding).filter(
-        ProcessExecutionObjectBinding.execution_id == item.id
-    ).delete(synchronize_session=False)
-    db.query(ProcessExecutionDataBinding).filter(
-        ProcessExecutionDataBinding.execution_id == item.id
-    ).delete(synchronize_session=False)
+    existing_objects = {binding.id: binding for binding in item.object_bindings}
+    existing_data = {binding.id: binding for binding in item.data_bindings}
+    used_object_ids: set[uuid.UUID] = set()
+    used_data_ids: set[uuid.UUID] = set()
     subject_ids: list[uuid.UUID] = []
     output_data_ids: list[uuid.UUID] = []
     input_data_ids: list[uuid.UUID] = []
@@ -273,17 +346,68 @@ def _replace_bindings(
         snapshot = copy.deepcopy(
             binding.field_definition_snapshot or target.process_field_definitions_jsonb or {}
         )
-        db.add(
-            ProcessExecutionObjectBinding(
-                execution_id=item.id,
-                research_object_id=target.id,
-                direction=binding.direction,
-                role=binding.role.strip() if binding.role else None,
-                field_definition_snapshot_jsonb=snapshot,
-                values_jsonb=_resolve_values(binding.values),
-                order_index=binding.order_index if binding.order_index is not None else index,
+        if binding.research_object_revision_id is not None:
+            target_revision = db.get(ObjectRevision, binding.research_object_revision_id)
+            if target_revision is None or target_revision.object_id != target.id:
+                raise SemanticConflict(
+                    "research_object_revision_id must belong to the bound object",
+                    code="validation_failed",
+                )
+        explicit_current = existing_objects.get(binding.binding_id) if binding.binding_id else None
+        current = explicit_current
+        if current is not None and current.research_object_id != target.id:
+            # A binding identity represents the occurrence usage. Replace keeps
+            # that identity while changing the referenced object and its pinned
+            # revision/value snapshot atomically.
+            current.research_object_id = target.id
+        if current is None:
+            current = next(
+                (
+                    candidate
+                    for candidate in existing_objects.values()
+                    if candidate.id not in used_object_ids
+                    and binding.authoring_occurrence_id is not None
+                    and candidate.authoring_occurrence_id == binding.authoring_occurrence_id
+                ),
+                None,
             )
-        )
+        if current is not None and current.research_object_id != target.id:
+            current.research_object_id = target.id
+        if current is None:
+            current = next(
+                (
+                    candidate
+                    for candidate in existing_objects.values()
+                    if candidate.id not in used_object_ids
+                    and candidate.research_object_id == target.id
+                    and candidate.direction == binding.direction
+                    and candidate.role == (binding.role.strip() if binding.role else None)
+                ),
+                None,
+            )
+        if current is None:
+            current = ProcessExecutionObjectBinding(
+                execution_id=item.id, research_object_id=target.id
+            )
+            db.add(current)
+        if (
+            current.authoring_occurrence_id is not None
+            and binding.authoring_occurrence_id is not None
+            and current.authoring_occurrence_id != binding.authoring_occurrence_id
+        ):
+            raise SemanticConflict(
+                "binding occurrence identity cannot change", code="validation_failed"
+            )
+        current.authoring_occurrence_id = binding.authoring_occurrence_id
+        current.is_active = True
+        current.research_object_revision_id = binding.research_object_revision_id
+        current.direction = binding.direction
+        current.role = binding.role.strip() if binding.role else None
+        current.field_definition_snapshot_jsonb = snapshot
+        current.values_jsonb = _resolve_values(binding.values)
+        current.order_index = binding.order_index if binding.order_index is not None else index
+        db.flush()
+        used_object_ids.add(current.id)
         if binding.direction == "input" and binding.role == "subject":
             subject_ids.append(target.id)
     for index, binding in enumerate(payload.data_bindings):
@@ -309,20 +433,52 @@ def _replace_bindings(
                     "Data already has a canonical output producer",
                     code="data_already_has_producer",
                 )
-        db.add(
-            ProcessExecutionDataBinding(
-                execution_id=item.id,
-                data_id=target.id,
-                direction=binding.direction,
-                role=binding.role,
-                values_jsonb=copy.deepcopy(binding.values),
-                order_index=binding.order_index if binding.order_index is not None else index,
+        current_data = existing_data.get(binding.binding_id) if binding.binding_id else None
+        if current_data is not None and current_data.data_id != target.id:
+            raise SemanticConflict("binding_id target cannot change", code="validation_failed")
+        if current_data is None:
+            current_data = next(
+                (
+                    candidate
+                    for candidate in existing_data.values()
+                    if candidate.id not in used_data_ids
+                    and candidate.data_id == target.id
+                    and candidate.direction == binding.direction
+                    and candidate.role == binding.role
+                ),
+                None,
             )
-        )
+        if current_data is None:
+            current_data = ProcessExecutionDataBinding(execution_id=item.id, data_id=target.id)
+            db.add(current_data)
+        if binding.data_revision_id is not None:
+            data_revision = db.get(ObjectRevision, binding.data_revision_id)
+            if data_revision is None or data_revision.object_id != target.id:
+                raise SemanticConflict(
+                    "data_revision_id must belong to the bound Data object",
+                    code="validation_failed",
+                )
+        current_data.data_revision_id = binding.data_revision_id
+        current_data.direction = binding.direction
+        current_data.role = binding.role
+        current_data.values_jsonb = copy.deepcopy(binding.values)
+        current_data.order_index = binding.order_index if binding.order_index is not None else index
+        db.flush()
+        used_data_ids.add(current_data.id)
         if binding.direction == "input":
             input_data_ids.append(target.id)
         else:
             output_data_ids.append(target.id)
+    for binding_id, binding in existing_objects.items():
+        if binding_id not in used_object_ids:
+            # Keep the row and its identity so an occurrence can be restored
+            # without allocating a different binding or violating the
+            # DocumentOccurrence foreign key.  It is excluded from current
+            # execution output while inactive.
+            binding.is_active = False
+    for binding_id, binding in existing_data.items():
+        if binding_id not in used_data_ids:
+            db.delete(binding)
     db.flush()
     return subject_ids, input_data_ids + output_data_ids
 
@@ -340,7 +496,7 @@ def _sync_provenance(
     current_output_data_ids = {
         binding.data_id for binding in current_bindings if binding.direction == "output"
     }
-    for data_id in set(affected_data_ids) | current_output_data_ids:
+    for data_id in sorted(set(affected_data_ids) | current_output_data_ids, key=str):
         producer = db.scalar(
             select(ProcessExecutionDataBinding)
             .where(
@@ -350,14 +506,23 @@ def _sync_provenance(
             .order_by(ProcessExecutionDataBinding.created_at)
         )
         if producer is None:
-            sync_system_relations_for_data(db, data_id, subject_ids=[], derived_from_ids=[])
+            sync_data_subject_assignments(
+                db,
+                data_id,
+                subject_ids=[],
+                source_kind="producer",
+                source_ref_id=item.id,
+            )
+            sync_system_relations_for_data(db, data_id, derived_from_ids=[])
+            _create_revision_in_session(db, data_id, "update producer and Data provenance")
             continue
         producer_execution = db.get(ProcessExecution, producer.execution_id)
         if producer_execution is None:
             continue
         producer_object_bindings = db.scalars(
             select(ProcessExecutionObjectBinding).where(
-                ProcessExecutionObjectBinding.execution_id == producer_execution.id
+                ProcessExecutionObjectBinding.execution_id == producer_execution.id,
+                ProcessExecutionObjectBinding.is_active.is_(True),
             )
         ).all()
         producer_data_bindings = db.scalars(
@@ -373,10 +538,19 @@ def _sync_provenance(
         inputs = [
             binding.data_id for binding in producer_data_bindings if binding.direction == "input"
         ]
-        sync_system_relations_for_data(db, data_id, subject_ids=subjects, derived_from_ids=inputs)
+        sync_data_subject_assignments(
+            db,
+            data_id,
+            subject_ids=subjects,
+            source_kind="producer",
+            source_ref_id=producer_execution.id,
+        )
+        sync_system_relations_for_data(db, data_id, derived_from_ids=inputs)
+        _create_revision_in_session(db, data_id, "update producer and Data provenance")
 
 
 def _replace_precedes(db: Session, item: ProcessExecution, target_ids: list[uuid.UUID]) -> None:
+    lock_project_graph(db, item.project_scope_id)
     targets = []
     for target_id in target_ids:
         target = db.get(ProcessExecution, target_id)
@@ -424,6 +598,7 @@ def _create_process_execution_in_session(
     )
     _validate_execution_scope(db, scope_id)
     _validate_definition_scope(definition, scope_id)
+    lock_project_graph(db, scope_id)
     _validate_view_source(db, scope_id, payload.source_view_id, payload.source_view_revision_id)
     item = ProcessExecution(
         project_scope_id=scope_id,
@@ -449,14 +624,21 @@ def _create_process_execution_in_session(
     db.flush()
     _sync_provenance(db, item, [])
     if create_revision:
+        db.expire(item, ["object_bindings", "data_bindings"])
         _revision(db, item, "create process execution")
     return item
 
 
-def create_process_execution(db: Session, payload: ProcessExecutionCreate) -> dict[str, Any]:
+def create_process_execution(
+    db: Session, payload: ProcessExecutionCreate, *, commit: bool = True
+) -> dict[str, Any]:
     try:
         item = _create_process_execution_in_session(db, payload)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        db.expire(item)
         return execution_out(db, _execution(db, item.id))
     except Exception:
         db.rollback()
@@ -467,6 +649,21 @@ def get_process_execution(db: Session, execution_id: uuid.UUID) -> dict[str, Any
     return execution_out(db, _execution(db, execution_id))
 
 
+def get_process_execution_revision(
+    db: Session, execution_id: uuid.UUID, revision_number: int
+) -> ProcessExecutionRevision:
+    _execution(db, execution_id)
+    revision = db.scalar(
+        select(ProcessExecutionRevision).where(
+            ProcessExecutionRevision.execution_id == execution_id,
+            ProcessExecutionRevision.revision_number == revision_number,
+        )
+    )
+    if revision is None:
+        raise LookupError("process execution revision not found")
+    return revision
+
+
 def _update_process_execution_in_session(
     db: Session,
     execution_id: uuid.UUID,
@@ -475,6 +672,8 @@ def _update_process_execution_in_session(
     create_revision: bool = True,
 ) -> ProcessExecution:
     item = _execution(db, execution_id)
+    lock_project_graph(db, item.project_scope_id)
+    item = _execution(db, execution_id, lock=True)
     old_output_ids = {
         binding.data_id for binding in item.data_bindings if binding.direction == "output"
     }
@@ -528,16 +727,35 @@ def _update_process_execution_in_session(
     db.flush()
     _sync_provenance(db, item, list(old_output_ids))
     if create_revision:
+        db.expire(item, ["object_bindings", "data_bindings"])
         _revision(db, item, payload.change_note)
     return item
 
 
 def update_process_execution(
-    db: Session, execution_id: uuid.UUID, payload: ProcessExecutionPut
+    db: Session,
+    execution_id: uuid.UUID,
+    payload: ProcessExecutionPut,
+    *,
+    commit: bool = True,
 ) -> dict[str, Any]:
     try:
+        existing = _execution(db, execution_id)
+        lock_project_graph(db, existing.project_scope_id)
+        existing = _execution(db, execution_id, lock=True)
+        if existing.authoring_record_id is not None:
+            raise SemanticConflict(
+                "Document-managed executions must be changed through their authoring record",
+                code="managed_execution",
+            )
+        if not payload.base_record_sha256:
+            raise ValueError("revision_required")
         item = _update_process_execution_in_session(db, execution_id, payload)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        db.expire(item)
         return execution_out(db, _execution(db, item.id))
     except Exception:
         db.rollback()
@@ -549,7 +767,10 @@ def list_process_executions_for_object(db: Session, object_id: uuid.UUID) -> lis
         db.scalars(
             select(ProcessExecution)
             .join(ProcessExecutionObjectBinding)
-            .where(ProcessExecutionObjectBinding.research_object_id == object_id)
+            .where(
+                ProcessExecutionObjectBinding.research_object_id == object_id,
+                ProcessExecutionObjectBinding.is_active.is_(True),
+            )
             .options(
                 selectinload(ProcessExecution.definition_version),
                 selectinload(ProcessExecution.object_bindings).selectinload(

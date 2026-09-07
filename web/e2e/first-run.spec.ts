@@ -31,10 +31,11 @@ test('fresh database supports project creation and no-seed navigation', async ({
   const project = (await projectResponse.json()).project as { id: string };
 
   await page.goto(`/dashboard/samples/new?project=${project.id}`);
-  await expect(page.getByTestId('sample-definition-prerequisite')).toBeVisible();
-  await expect(page.getByTestId('add-sample-step')).toBeDisabled();
+  await expect(page.getByTestId('scientific-composer')).toBeVisible();
+  await page.getByTestId('sample-title').fill('Observation-only sample');
+  await expect(page.getByTestId('save-sample-record')).toBeEnabled();
   await page.reload();
-  await expect(page.getByTestId('sample-definition-prerequisite')).toBeVisible();
+  await expect(page.getByTestId('scientific-composer')).toBeVisible();
 
   for (const path of [
     `/dashboard/samples?project=${project.id}`,

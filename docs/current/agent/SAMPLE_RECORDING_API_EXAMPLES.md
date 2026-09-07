@@ -1,21 +1,26 @@
-# Sample Recording API Examples v0.3
+# Sample Recording API Example v1.5
 
 ```json
 {
   "project_scope_id": "<project-id>",
   "sample": {"title": "Sample A", "tags": ["样品", "原料"]},
-  "steps": [{
-    "process_definition_id": "<definition-id>",
+  "document": {
+    "schema_version": 1,
+    "blocks": [{
+      "type": "paragraph",
+      "content": [{"type": "processRef", "props": {"occurrenceId": "<occurrence-id>"}}]
+    }]
+  },
+  "occurrences": [{
+    "occurrence_id": "<occurrence-id>",
+    "kind": "process",
+    "target_id": "<definition-id>",
     "process_definition_version_id": "<version-id>",
-    "object_bindings": [{
-      "research_object_id": "<object-id>",
-      "direction": "input",
-      "role": "source",
-      "values": {"amount": {"value": 10, "unit": "g"}}
-    }],
-    "data_bindings": []
+    "field_definitions": {"fields": [{"key": "temperature", "value_type": "number"}]},
+    "values": {"temperature": {"value": 23.5, "unit": "°C"}},
+    "status": "recorded"
   }]
 }
 ```
 
-Submit this once to `POST /api/v1/sample-records`. The response contains Process Execution projections, pinned versions and binding snapshots. Historical binding values remain stable when the Research Object or Definition changes.
+Send this to `POST /api/v1/sample-records` with an `Idempotency-Key` header. The response returns the canonical document and occurrences, assigned Execution/binding IDs, `record_sha256`, Data links and edit blockers. Reuse the same key and payload to replay a lost successful response.

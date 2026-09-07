@@ -3,6 +3,7 @@ import type {
   ChangeSet,
   ClaimRecord,
   DataImport,
+  DataDraft,
   DataRecord,
   DataRepresentation,
   ExperimentRecord,
@@ -18,6 +19,7 @@ import type {
   ProjectRecord,
   ProjectSearch,
   ProjectSummary,
+  RecordTableResult,
   RelationType,
   ResearchObject,
   ResearchObjectKind,
@@ -144,8 +146,13 @@ export const api = {
         | 'process_field_definitions'
         | 'content_document'
       >
-    >
-  ) => request<ResearchObject>(`/objects/${id}`, { ...json(payload), method: 'PATCH' }),
+    >,
+    etag: string
+  ) =>
+    request<ResearchObject>(`/objects/${id}`, {
+      ...json(payload, { 'If-Match': etag }),
+      method: 'PATCH'
+    }),
   listRelations: (id: string) => request<ObjectRelation[]>(`/objects/${id}/relations`),
   createRelation: (payload: {
     source_object_id: string;
@@ -185,8 +192,9 @@ export const api = {
   ) => request<ProjectSearch>(`/projects/${id}/search${queryString(params)}`),
   getWorkspaceSummary: () => request<WorkspaceSummary>('/workspace/summary'),
 
-  listProcessDefinitions: (params: { project_scope_id?: string; q?: string } = {}) =>
-    request<ProcessDefinition[]>(`/process-definitions${queryString(params)}`),
+  listProcessDefinitions: (
+    params: { project_scope_id?: string; q?: string; limit?: number; offset?: number } = {}
+  ) => request<ProcessDefinition[]>(`/process-definitions${queryString(params)}`),
   getProcessDefinition: (id: string) => request<ProcessDefinition>(`/process-definitions/${id}`),
   createProcessDefinition: (payload: unknown) =>
     request<ProcessDefinition>('/process-definitions', json(payload)),
@@ -211,10 +219,23 @@ export const api = {
     request<ProcessExecution[]>(`/objects/${id}/process-executions`),
 
   getSampleRecord: (id: string) => request<SampleRecord>(`/samples/${id}/record`),
+  getSampleRecordRevision: (id: string, revision: number) =>
+    request<SampleRecord>(`/samples/${id}/record/revisions/${revision}`),
   createSampleRecord: (payload: SampleRecordCreatePayload, idempotencyKey?: string) =>
     request<SampleRecord>(
       '/sample-records',
       json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
+  createSampleBatch: (
+    payload: {
+      project_scope_id: string;
+      rows: Array<{ client_row_id: string; record: SampleRecordCreatePayload }>;
+    },
+    idempotencyKey: string
+  ) =>
+    request<{ rows: Array<{ client_row_id: string; record: SampleRecord }> }>(
+      '/sample-records/batch',
+      json(payload, { 'Idempotency-Key': idempotencyKey })
     ),
   updateSampleRecord: (id: string, payload: SampleRecordPutPayload, etag?: string) =>
     request<SampleRecord>(`/samples/${id}/record`, {
@@ -233,6 +254,25 @@ export const api = {
       ...json(payload, etag ? { 'If-Match': etag } : {}),
       method: 'PUT'
     }),
+  patchExperimentMetadata: (id: string, payload: unknown, etag: string) =>
+    request<ExperimentRecord>(`/experiments/${id}/metadata`, {
+      ...json(payload, { 'If-Match': etag }),
+      method: 'PATCH'
+    }),
+  addExperimentReference: (id: string, payload: unknown, etag: string) =>
+    request<ExperimentRecord>(`/experiments/${id}/references`, {
+      ...json(payload, { 'If-Match': etag })
+    }),
+  removeExperimentReference: (id: string, relationId: string, etag: string) =>
+    request<ExperimentRecord>(`/experiments/${id}/references/${relationId}`, {
+      method: 'DELETE',
+      headers: { 'If-Match': etag }
+    }),
+  reorderExperimentReferences: (id: string, relationIds: string[], etag: string) =>
+    request<ExperimentRecord>(`/experiments/${id}/reference-order`, {
+      ...json({ relation_ids: relationIds }, { 'If-Match': etag }),
+      method: 'PUT'
+    }),
   experimentReferencePayload: (
     target_id: string,
     role?: string,
@@ -245,6 +285,27 @@ export const api = {
       json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
     ),
   getDataRecord: (id: string) => request<DataRecord>(`/data/${id}/record`),
+  queryRecordTable: (payload: unknown) =>
+    request<RecordTableResult>('/record-tables/query', json(payload)),
+  beginDataDraft: (payload: unknown, idempotencyKey: string) =>
+    request<DataDraft>('/data-drafts', json(payload, { 'Idempotency-Key': idempotencyKey })),
+  getDataDraft: (id: string) => request<DataDraft>(`/data-drafts/${id}`),
+  updateDataDraft: (id: string, payload: unknown) =>
+    request<DataDraft>(`/data-drafts/${id}`, { ...json(payload), method: 'PUT' }),
+  attachDataDraftAsset: (id: string, clientAttachmentId: string, assetId: string) =>
+    request<DataDraft>(
+      `/data-drafts/${id}/attachments`,
+      json({ client_attachment_id: clientAttachmentId, asset_id: assetId })
+    ),
+  removeDataDraftAsset: (id: string, clientAttachmentId: string) =>
+    request<DataDraft>(`/data-drafts/${id}/attachments/${encodeURIComponent(clientAttachmentId)}`, {
+      method: 'DELETE'
+    }),
+  finalizeDataDraft: (id: string, recordSha256: string, idempotencyKey: string) =>
+    request<DataRecord>(
+      `/data-drafts/${id}/finalize`,
+      json({ base_record_sha256: recordSha256 }, { 'Idempotency-Key': idempotencyKey })
+    ),
   updateDataRecord: (id: string, payload: unknown, etag?: string) =>
     request<DataRecord>(`/data/${id}/record`, {
       ...json(payload, etag ? { 'If-Match': etag } : {}),
@@ -281,6 +342,7 @@ export const api = {
     }),
   listViewRevisions: (id: string) => request<unknown[]>(`/views/${id}/revisions`),
   createClaim: (payload: unknown) => request<ClaimRecord>('/claims', json(payload)),
+  listClaimsByReference: (id: string) => request<ClaimRecord[]>(`/claims/by-reference/${id}`),
   getClaim: (id: string) => request<ClaimRecord>(`/claims/${id}`),
   updateClaim: (id: string, payload: unknown, etag?: string) =>
     request<ClaimRecord>(`/claims/${id}`, {

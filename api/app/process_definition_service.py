@@ -70,7 +70,9 @@ def _definition_out(db: Session, definition: ResearchObject) -> dict[str, Any]:
     }
 
 
-def create_process_definition(db: Session, payload: ProcessDefinitionCreate) -> dict[str, Any]:
+def create_process_definition(
+    db: Session, payload: ProcessDefinitionCreate, *, commit: bool = True
+) -> dict[str, Any]:
     try:
         definition = _create_object_in_session(
             db,
@@ -100,7 +102,10 @@ def create_process_definition(db: Session, payload: ProcessDefinitionCreate) -> 
             )
         )
         _create_revision_in_session(db, definition.id, "create process definition")
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return _definition_out(db, get_object(db, definition.id) or definition)
     except Exception:
         db.rollback()

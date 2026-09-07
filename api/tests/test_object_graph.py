@@ -43,7 +43,8 @@ def _object(project_id: str, title: str, code: str, tags: list[str]) -> dict:
 
 def test_capabilities_and_research_object_tags(client):
     body = client.get("/api/v1/capabilities").json()
-    assert body["api_contract_version"] == "0.3"
+    assert body["api_contract_version"] == "1.5"
+    assert body["features"]["scientific_document_v1"] is True
     assert set(body["object_kinds"]) == {
         "research_object",
         "process_definition",
