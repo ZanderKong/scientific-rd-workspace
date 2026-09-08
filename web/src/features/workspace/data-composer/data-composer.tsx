@@ -47,17 +47,29 @@ export function DataComposer() {
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const beginKey = useRef(crypto.randomUUID());
   const finalizeKey = useRef(crypto.randomUUID());
+  const generation = useRef(0);
+  const dirtyRef = useRef(false);
+
+  const markDirty = useCallback(() => {
+    generation.current += 1;
+    dirtyRef.current = true;
+  }, []);
 
   const loadDraft = useCallback((loaded: DataDraft) => {
+    const preserveLocalEdits = dirtyRef.current;
     setDraft(loaded);
-    setTitle(loaded.content.title);
-    setDescription(loaded.content.description ?? '');
-    setScientificType(loaded.content.scientific_type ?? 'table');
-    setTags(loaded.content.tags.join(','));
     setOriginId(loaded.content.origin_client_attachment_id);
     setSourceId(loaded.content.source_sample_id);
-    setBlocks(enrichScientificDocument(loaded.content.document, loaded.content.occurrences));
-    setEditorGeneration((value) => value + 1);
+    if (!preserveLocalEdits) {
+      setTitle(loaded.content.title);
+      setDescription(loaded.content.description ?? '');
+      setScientificType(loaded.content.scientific_type ?? 'table');
+      setTags(loaded.content.tags.join(','));
+      setBlocks(enrichScientificDocument(loaded.content.document, loaded.content.occurrences));
+      setEditorGeneration((value) => value + 1);
+      generation.current = 0;
+      dirtyRef.current = false;
+    }
   }, []);
 
   useEffect(() => {
@@ -99,11 +111,14 @@ export function DataComposer() {
   async function saveDraft() {
     if (!draft) return begin();
     if (draft.status === 'finalized') return draft;
+    const submittedGeneration = generation.current;
+    const payload = content();
     const saved = await api.updateDataDraft(draft.id, {
       base_record_sha256: draft.record_sha256,
-      content: content()
+      content: payload
     });
     setDraft(saved);
+    if (submittedGeneration === generation.current) dirtyRef.current = false;
     return saved;
   }
 
@@ -160,13 +175,17 @@ export function DataComposer() {
         router.push(`/dashboard/data/${fresh.finalized_result.data.id}`);
         return;
       }
+      const submittedGeneration = generation.current;
       const saved = fresh
         ? await api.updateDataDraft(fresh.id, {
             base_record_sha256: fresh.record_sha256,
             content: content()
           })
         : await begin();
-      if (fresh) setDraft(saved);
+      if (fresh) {
+        setDraft(saved);
+        if (submittedGeneration === generation.current) dirtyRef.current = false;
+      }
       if (!saved) return;
       if (saved.status === 'finalized' && saved.finalized_result) {
         router.push(`/dashboard/data/${saved.finalized_result.data.id}`);
@@ -213,7 +232,10 @@ export function DataComposer() {
           <input
             className='h-9 w-full rounded border bg-background px-3'
             value={title}
-            onChange={(event) => setTitle(event.target.value)}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              markDirty();
+            }}
           />
         </label>
         <label className='space-y-1 text-sm'>
@@ -221,7 +243,10 @@ export function DataComposer() {
           <input
             className='h-9 w-full rounded border bg-background px-3'
             value={scientificType}
-            onChange={(event) => setScientificType(event.target.value)}
+            onChange={(event) => {
+              setScientificType(event.target.value);
+              markDirty();
+            }}
           />
         </label>
         <label className='space-y-1 text-sm md:col-span-3'>
@@ -229,7 +254,10 @@ export function DataComposer() {
           <input
             className='h-9 w-full rounded border bg-background px-3'
             value={tags}
-            onChange={(event) => setTags(event.target.value)}
+            onChange={(event) => {
+              setTags(event.target.value);
+              markDirty();
+            }}
           />
         </label>
       </section>
@@ -238,36 +266,49 @@ export function DataComposer() {
         <ScientificComposer
           key={editorGeneration}
           initialBlocks={blocks}
-          searchProcesses={(query) =>
+          searchProcesses={(query, options) =>
             api.listProcessDefinitions({
               project_scope_id: activeProjectId ?? draft?.project_scope_id,
               q: query || undefined,
-              limit: 200
+              limit: options?.limit ?? 21,
+              offset: options?.offset ?? 0,
+              signal: options?.signal
             })
           }
-          searchObjects={(query) =>
+          searchObjects={(query, options) =>
             api.listObjects({
               kind: 'research_object',
               project_scope_id: activeProjectId ?? draft?.project_scope_id,
               include_global: true,
               q: query || undefined,
-              limit: 200
+              limit: options?.limit ?? 21,
+              offset: options?.offset ?? 0,
+              signal: options?.signal
             })
           }
-          createProcess={(value) =>
-            api.createProcessDefinition({
-              ...value,
-              project_scope_id: activeProjectId ?? draft?.project_scope_id
-            })
+          createProcess={(value, commandId) =>
+            api.createProcessDefinition(
+              {
+                ...value,
+                project_scope_id: activeProjectId ?? draft?.project_scope_id
+              },
+              commandId
+            )
           }
-          createObject={(value) =>
-            api.createObject({
-              ...value,
-              kind: 'research_object',
-              project_scope_id: activeProjectId ?? draft?.project_scope_id
-            })
+          createObject={(value, commandId) =>
+            api.createObject(
+              {
+                ...value,
+                kind: 'research_object',
+                project_scope_id: activeProjectId ?? draft?.project_scope_id
+              },
+              commandId
+            )
           }
-          onChange={setBlocks}
+          onChange={(next) => {
+            setBlocks(next);
+            markDirty();
+          }}
         />
       </section>
       <label className='block space-y-2'>
@@ -275,7 +316,10 @@ export function DataComposer() {
         <textarea
           className='min-h-28 w-full rounded-xl border bg-background p-3 text-sm'
           value={description}
-          onChange={(event) => setDescription(event.target.value)}
+          onChange={(event) => {
+            setDescription(event.target.value);
+            markDirty();
+          }}
           placeholder='观察将保存为 description Representation'
         />
       </label>
@@ -295,7 +339,10 @@ export function DataComposer() {
               name='origin'
               aria-label={`${attachment.name} 设为主 origin`}
               checked={originId === attachment.client_attachment_id}
-              onChange={() => setOriginId(attachment.client_attachment_id)}
+              onChange={() => {
+                setOriginId(attachment.client_attachment_id);
+                markDirty();
+              }}
             />
             <span className='min-w-0 flex-1 truncate'>{attachment.name}</span>
             <span className='font-mono text-xs text-muted-foreground'>

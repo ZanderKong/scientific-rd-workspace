@@ -118,21 +118,32 @@ export const api = {
       include_global?: boolean;
       limit?: number;
       offset?: number;
+      signal?: AbortSignal;
     } = {}
-  ) => request<ResearchObject[]>(`/objects${queryString(params)}`),
+  ) => {
+    const { signal, ...query } = params;
+    return request<ResearchObject[]>(`/objects${queryString(query)}`, { signal });
+  },
   getObject: (id: string) => request<ResearchObject>(`/objects/${id}`),
   deleteObject: (id: string) => request<void>(`/objects/${id}`, { method: 'DELETE' }),
-  createObject: (payload: {
-    kind: ResearchObjectKind;
-    title: string;
-    code?: string | null;
-    project_scope_id?: string | null;
-    status?: string;
-    tags?: string[];
-    properties_jsonb?: JsonObject;
-    process_field_definitions?: JsonObject;
-    content_document?: JsonObject[];
-  }) => request<ResearchObject>('/objects', json(payload)),
+  createObject: (
+    payload: {
+      kind: ResearchObjectKind;
+      title: string;
+      code?: string | null;
+      project_scope_id?: string | null;
+      status?: string;
+      tags?: string[];
+      properties_jsonb?: JsonObject;
+      process_field_definitions?: JsonObject;
+      content_document?: JsonObject[];
+    },
+    idempotencyKey?: string
+  ) =>
+    request<ResearchObject>(
+      '/objects',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
   updateObject: (
     id: string,
     payload: Partial<
@@ -193,11 +204,23 @@ export const api = {
   getWorkspaceSummary: () => request<WorkspaceSummary>('/workspace/summary'),
 
   listProcessDefinitions: (
-    params: { project_scope_id?: string; q?: string; limit?: number; offset?: number } = {}
-  ) => request<ProcessDefinition[]>(`/process-definitions${queryString(params)}`),
+    params: {
+      project_scope_id?: string;
+      q?: string;
+      limit?: number;
+      offset?: number;
+      signal?: AbortSignal;
+    } = {}
+  ) => {
+    const { signal, ...query } = params;
+    return request<ProcessDefinition[]>(`/process-definitions${queryString(query)}`, { signal });
+  },
   getProcessDefinition: (id: string) => request<ProcessDefinition>(`/process-definitions/${id}`),
-  createProcessDefinition: (payload: unknown) =>
-    request<ProcessDefinition>('/process-definitions', json(payload)),
+  createProcessDefinition: (payload: unknown, idempotencyKey?: string) =>
+    request<ProcessDefinition>(
+      '/process-definitions',
+      json(payload, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    ),
   createProcessDefinitionVersion: (id: string, payload: unknown) =>
     request<unknown>(`/process-definitions/${id}/versions`, json(payload)),
   createProcessExecution: (payload: ProcessExecutionDraft, idempotencyKey?: string) =>

@@ -461,9 +461,22 @@ def objects(
 
 
 @router.post("/objects", response_model=ResearchObjectOut, status_code=201)
-def post_object(payload: ObjectCreate, db: Session = Depends(get_db)) -> ResearchObjectOut:
+def post_object(
+    payload: ObjectCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> ResearchObjectOut | JSONResponse:
     try:
-        return ResearchObjectOut.model_validate(object_out(create_object(db, payload)))
+        result = _run_idempotent(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: object_out(create_object(db, payload, commit=False)),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return ResearchObjectOut.model_validate(result)
     except (LookupError, ValueError, IntegrityError) as exc:
         db.rollback()
         raise _error(exc) from exc
@@ -719,10 +732,21 @@ def object_revision(
 
 @router.post("/process-definitions", response_model=ProcessDefinitionOut, status_code=201)
 def post_process_definition(
-    payload: ProcessDefinitionCreate, db: Session = Depends(get_db)
-) -> ProcessDefinitionOut:
+    payload: ProcessDefinitionCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> ProcessDefinitionOut | JSONResponse:
     try:
-        return ProcessDefinitionOut.model_validate(create_process_definition(db, payload))
+        result = _run_idempotent(
+            db,
+            idempotency_key,
+            payload.model_dump(mode="json"),
+            lambda: create_process_definition(db, payload, commit=False),
+            201,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return ProcessDefinitionOut.model_validate(result)
     except (LookupError, ValueError, IntegrityError) as exc:
         db.rollback()
         raise _error(exc) from exc
@@ -733,12 +757,13 @@ def process_definitions(
     project_scope_id: uuid.UUID | None = None,
     q: str | None = None,
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[ProcessDefinitionOut]:
     return [
         ProcessDefinitionOut.model_validate(item)
         for item in list_process_definitions(
-            db, project_scope_id=project_scope_id, q=q, limit=limit
+            db, project_scope_id=project_scope_id, q=q, limit=limit, offset=offset
         )
     ]
 

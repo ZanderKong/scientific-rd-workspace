@@ -323,6 +323,7 @@
       "required": "Required",
       "invalidRef": "Invalid Ref",
       "rename": "Rename {label}",
+      "fieldMenu": "Field menu for {label}",
       "delete": "Delete {label}",
       "deleteConfirm": "Delete field “{label}” and its value?",
       "localName": "New field name",
@@ -366,7 +367,8 @@
       "cancel": "Cancel",
       "creating": "Creating…",
       "createAndInsert": "Create and insert",
-      "createFailed": "Creation failed"
+      "createFailed": "Creation failed",
+      "replaceImpactConfirm": "Replacement removes filled fields:\n{values}\n\nContinue?"
     }
   },
   "Metadata": {

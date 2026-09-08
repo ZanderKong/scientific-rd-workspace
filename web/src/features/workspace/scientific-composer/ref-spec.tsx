@@ -1,8 +1,9 @@
 'use client';
 
 import { createExtension, type DefaultStyleSchema } from '@blocknote/core';
-import { Plugin, NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { EditorState, Plugin, NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import {
   createReactInlineContentSpec,
   type ReactCustomInlineContentRenderProps
@@ -12,6 +13,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent
 } from 'react';
 import { useTranslations } from 'next-intl';
@@ -93,7 +95,8 @@ function PropertySlot({
   label,
   commit,
   editor,
-  getPos
+  getPos,
+  onLeave
 }: {
   occurrence: ScientificOccurrenceDraft;
   field: UsageFieldDefinition;
@@ -101,6 +104,7 @@ function PropertySlot({
   commit: (value: unknown) => void;
   editor: RefRenderProps['editor'];
   getPos: () => number | undefined;
+  onLeave?: (event: ReactFocusEvent<HTMLElement>) => void;
 }) {
   const t = useTranslations('ProductCompletion.composer');
   const committed = displayValue(occurrence, field);
@@ -116,8 +120,9 @@ function PropertySlot({
     'aria-label': `${label} ${field.label}`,
     disabled: !editor.isEditable,
     className:
-      'h-6 min-w-12 max-w-28 rounded border bg-background px-1 text-sm outline-none focus:ring-2 focus:ring-ring',
+      'h-7 min-w-16 max-w-[22rem] rounded border border-transparent bg-transparent px-1 text-sm outline-none focus:border-ring focus:bg-background focus:ring-2 focus:ring-ring',
     onFocus: () => editor.transact((tr) => closeHistory(tr)),
+    onBlur: onLeave,
     onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
       if ((event.nativeEvent as KeyboardEvent).isComposing) return;
       if (event.key === 'Tab') {
@@ -188,7 +193,7 @@ function PropertySlot({
         data-field-key={field.key}
         aria-label={`${label} ${field.label}`}
         disabled={!editor.isEditable}
-        className='h-6 min-w-12 max-w-28 rounded border bg-background px-1 text-sm outline-none focus:ring-2 focus:ring-ring'
+        className='h-7 min-w-16 max-w-[22rem] rounded border border-transparent bg-transparent px-1 text-sm outline-none focus:border-ring focus:bg-background focus:ring-2 focus:ring-ring'
         value={draft}
         inputMode={field.value_type === 'number' ? 'decimal' : undefined}
         placeholder={field.required ? t('required') : '—'}
@@ -205,6 +210,7 @@ function PropertySlot({
             commit(event.currentTarget.value);
           }
         }}
+        onBlur={onLeave}
         onKeyDown={(event) => {
           if ((event.nativeEvent as KeyboardEvent).isComposing) return;
           if (event.key === 'Tab') {
@@ -268,6 +274,7 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
   const activeField = useRef<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [fieldMenuKey, setFieldMenuKey] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [newType, setNewType] = useState<UsageFieldDefinition['value_type']>('text');
   const [newUnit, setNewUnit] = useState('');
@@ -284,6 +291,19 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
     const element = scope.querySelector<HTMLInputElement>(selector);
     if (element && document.activeElement !== element) element.focus({ preventScroll: true });
   }, [editor.prosemirrorView, inlineContent.props.occurrenceId]);
+  useEffect(() => {
+    const root = editor.prosemirrorView.dom;
+    const closeWhenAnotherRefActivates = (event: Event) => {
+      const occurrenceId = (event as CustomEvent<{ occurrenceId: string }>).detail?.occurrenceId;
+      if (occurrenceId && occurrenceId !== inlineContent.props.occurrenceId) {
+        setEditing(false);
+        setAdding(false);
+        setFieldMenuKey(null);
+      }
+    };
+    root.addEventListener('scientific-ref-focus', closeWhenAnotherRefActivates);
+    return () => root.removeEventListener('scientific-ref-focus', closeWhenAnotherRefActivates);
+  }, [editor.prosemirrorView, inlineContent.props.occurrenceId]);
   if (!occurrence) {
     return (
       <span className='rounded bg-destructive/10 px-1 text-destructive'>{t('invalidRef')}</span>
@@ -293,18 +313,31 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
   const visibleDefinitions = editing
     ? definitions
     : definitions.filter((field) => displayValue(occurrence, field) !== '');
-  const updateOccurrence = (next: ScientificOccurrenceDraft) =>
-    updateInlineContent({
-      type: inlineContent.type,
-      props: { ...inlineContent.props, payload: JSON.stringify(next) }
-    });
+  const updateOccurrence = (next: ScientificOccurrenceDraft) => {
+    const pos = getPos();
+    const props = { ...inlineContent.props, payload: JSON.stringify(next) };
+    if (typeof pos === 'number') {
+      // Updating attrs in place keeps the atomic Ref node and its mapped
+      // selection stable while a Slot is being edited.  Falling back to the
+      // public helper is only needed during initial NodeView mounting.
+      editor.transact((transaction) => {
+        transaction.setNodeMarkup(pos, undefined, props);
+      });
+      return;
+    }
+    updateInlineContent({ type: inlineContent.type, props });
+  };
   const updateField = (field: UsageFieldDefinition, value: unknown) => {
     const next = writeValue(occurrence, field, value);
     updateOccurrence(next);
   };
   const selectOccurrence = () => {
-    document.dispatchEvent(
+    // Bubble through the editor root so two composers on the same page never
+    // steal each other's active Ref.  The old document-level event made a Peek
+    // editor and the main editor race each other for focus state.
+    editor.prosemirrorView.dom.dispatchEvent(
       new CustomEvent('scientific-ref-focus', {
+        bubbles: true,
         detail: { occurrenceId: occurrence.occurrence_id }
       })
     );
@@ -377,18 +410,23 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
     setNewOptions('');
     setAdding(false);
   };
+  const handleLeave = (event: ReactFocusEvent<HTMLElement>) => {
+    if (
+      !event.currentTarget.closest('.scientific-ref')?.contains(event.relatedTarget as Node | null)
+    ) {
+      setEditing(false);
+      setAdding(false);
+      setFieldMenuKey(null);
+    }
+  };
   return (
     <span
       contentEditable={false}
       data-scientific-ref={occurrence.kind}
       data-occurrence-id={occurrence.occurrence_id}
-      className='mx-0.5 inline-flex max-w-full flex-wrap items-baseline gap-1 rounded-md border border-primary/25 bg-primary/5 px-1.5 py-0.5 align-baseline'
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          setEditing(false);
-          setAdding(false);
-        }
-      }}
+      role='group'
+      tabIndex={-1}
+      className={`scientific-ref relative mx-0.5 inline-flex max-w-full flex-wrap items-baseline gap-1 rounded-md px-1 py-0.5 align-baseline transition-colors motion-reduce:transition-none ${editing ? 'bg-primary/5 ring-1 ring-primary/35' : 'hover:bg-muted/50'}`}
     >
       <button
         type='button'
@@ -415,17 +453,26 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
             commit={(value) => updateField(field, value)}
             editor={editor}
             getPos={getPos}
+            onLeave={handleLeave}
           />
-          {editing && field.source === 'local' && (
-            <span className='inline-flex items-center gap-0.5'>
+          {editing && field.source === 'local' && fieldMenuKey === field.key && (
+            <span
+              className='absolute z-20 mt-7 inline-flex items-center gap-1 rounded-lg border bg-popover p-1 text-xs shadow-lg'
+              data-ref-menu='true'
+              role='menu'
+              tabIndex={-1}
+              onMouseDown={(event) => event.preventDefault()}
+              onBlur={handleLeave}
+            >
               <input
                 aria-label={t('rename', { label: field.label })}
-                className='h-6 w-20 rounded border bg-background px-1 text-xs'
+                className='h-7 w-28 rounded border bg-background px-1.5'
                 value={field.label}
                 onChange={(event) => updateLocalField(field, { label: event.target.value })}
               />
               <button
                 type='button'
+                className='rounded px-1.5 py-1 hover:bg-accent disabled:opacity-40'
                 disabled={localFields[0]?.key === field.key}
                 onClick={() => moveLocalField(field, -1)}
               >
@@ -433,6 +480,7 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
               </button>
               <button
                 type='button'
+                className='rounded px-1.5 py-1 hover:bg-accent disabled:opacity-40'
                 disabled={localFields.at(-1)?.key === field.key}
                 onClick={() => moveLocalField(field, 1)}
               >
@@ -440,6 +488,7 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
               </button>
               <button
                 type='button'
+                className='rounded px-1.5 py-1 text-destructive hover:bg-destructive/10'
                 aria-label={t('delete', { label: field.label })}
                 onClick={() => removeLocalField(field)}
               >
@@ -447,12 +496,32 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
               </button>
             </span>
           )}
+          {editing && field.source === 'local' && (
+            <button
+              type='button'
+              className='rounded px-1 text-muted-foreground hover:bg-accent'
+              aria-label={t('fieldMenu', { label: field.label })}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() =>
+                setFieldMenuKey((current) => (current === field.key ? null : field.key))
+              }
+            >
+              ···
+            </button>
+          )}
         </span>
       ))}
       {editing &&
         editor.isEditable &&
         (adding ? (
-          <span className='inline-flex flex-wrap items-center gap-1 rounded border bg-background p-1'>
+          <span
+            className='absolute z-20 mt-7 inline-flex max-w-[min(24rem,90vw)] flex-wrap items-center gap-1 rounded-lg border bg-popover p-2 shadow-lg'
+            data-ref-menu='true'
+            role='menu'
+            tabIndex={-1}
+            onBlur={handleLeave}
+            onMouseDown={(event) => event.preventDefault()}
+          >
             <input
               ref={newLabelRef}
               aria-label={t('localName')}
@@ -507,7 +576,11 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
             </button>
           </span>
         ) : (
-          <button type='button' className='text-xs text-primary' onClick={() => setAdding(true)}>
+          <button
+            type='button'
+            className='rounded px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10'
+            onClick={() => setAdding(true)}
+          >
             {t('addLocal')}
           </button>
         ))}
@@ -543,11 +616,45 @@ export const ObjectRef = createReactInlineContentSpec(
   { render: RefView, toExternalHTML: externalRef }
 );
 
+function ghostDecorations(state: EditorState) {
+  const { $from, empty } = state.selection;
+  if (!empty || !$from.parent.isTextblock) return DecorationSet.empty;
+  const before = $from.parent.textBetween(0, $from.parentOffset, '\0', '\0');
+  const match = before.match(/(?:^|\s)([@/])([^\s]*)$/);
+  if (!match) return DecorationSet.empty;
+  const node = document.createElement('span');
+  node.className = 'scientific-composer-ghost';
+  node.setAttribute('aria-hidden', 'true');
+  node.textContent = match[1] === '@' ? '  对象 · 选择或新建' : '  过程 · 选择或新建';
+  return DecorationSet.create(state.doc, [
+    Decoration.widget($from.pos, node, { side: 1, ignoreSelection: true })
+  ]);
+}
+
 export const createRefIdentityExtension = createExtension(() => ({
   key: 'scientificRefIdentity',
   prosemirrorPlugins: [
     new Plugin({
+      state: {
+        init: (_config, state) => ghostDecorations(state),
+        apply(transaction, value, _oldState, newState) {
+          return transaction.docChanged || transaction.selectionSet
+            ? ghostDecorations(newState)
+            : value;
+        }
+      },
       props: {
+        decorations(state) {
+          return this.getState(state) ?? DecorationSet.empty;
+        },
+        handleClickOn(view, pos, node, nodePos) {
+          if (!isRefNode(node.type.name)) return false;
+          view.dispatch(
+            closeHistory(view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos)))
+          );
+          view.focus();
+          return true;
+        },
         handleKeyDown(view, event) {
           if (event.key !== 'Backspace' && event.key !== 'Delete') return false;
           const { selection } = view.state;

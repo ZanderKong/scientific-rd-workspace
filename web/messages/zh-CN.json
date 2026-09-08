@@ -323,6 +323,7 @@
       "required": "必填",
       "invalidRef": "无效 Ref",
       "rename": "重命名 {label}",
+      "fieldMenu": "属性 {label} 菜单",
       "delete": "删除 {label}",
       "deleteConfirm": "删除属性“{label}”及其值？",
       "localName": "新属性名称",
@@ -366,7 +367,8 @@
       "cancel": "取消",
       "creating": "创建中…",
       "createAndInsert": "创建并插入",
-      "createFailed": "创建失败"
+      "createFailed": "创建失败",
+      "replaceImpactConfirm": "替换后将移除已填写属性：\n{values}\n\n继续替换？"
     }
   },
   "Metadata": {

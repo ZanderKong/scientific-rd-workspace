@@ -1,7 +1,6 @@
 'use client';
 
 import { BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core';
-import { filterSuggestionItems } from '@blocknote/core/extensions';
 import { BlockNoteView } from '@blocknote/shadcn';
 import {
   SuggestionMenuController,
@@ -70,8 +69,19 @@ function retainedForReplacement(occurrence: ScientificOccurrenceDraft, definitio
           identities.has(`${field?.owner_id ?? ''}:${field?.key ?? ''}`)
         );
       })
-    )
+    ),
+    removed: previous
+      .filter((field) => field.source !== 'local')
+      .filter((field) => displayOccurrenceValue(occurrence, field) !== '')
+      .filter((field) => !identities.has(`${field.owner_id ?? ''}:${field.key}`))
+      .map((field) => `${field.label}: ${displayOccurrenceValue(occurrence, field)}`)
   };
+}
+
+function displayOccurrenceValue(occurrence: ScientificOccurrenceDraft, field: { key: string }) {
+  const value = occurrence.values[field.key];
+  if (value && typeof value === 'object' && 'value' in value) return String(value.value ?? '');
+  return value == null ? '' : String(value);
 }
 
 function previewFieldLabels(definitions: JsonObject): string[] {
@@ -95,6 +105,14 @@ function ghostPreview(definitions: JsonObject, emptyLabel: string) {
 }
 
 type ComposerSuggestionItem = DefaultReactSuggestionItem & { ghost?: string };
+
+export type ComposerSearchOptions = {
+  offset?: number;
+  limit?: number;
+  signal?: AbortSignal;
+};
+
+type SearchPage<T> = T[] | { items: T[]; nextOffset?: number | null };
 
 function ComposerSuggestionMenu(props: SuggestionMenuProps<ComposerSuggestionItem>) {
   const t = useTranslations('ProductCompletion.menu');
@@ -154,20 +172,32 @@ export function ScientificComposer({
   editable = true
 }: {
   initialBlocks: JsonObject[];
-  searchProcesses: (query: string) => Promise<ProcessDefinition[]>;
-  searchObjects: (query: string) => Promise<ResearchObject[]>;
-  createProcess?: (draft: {
-    title: string;
-    tags: string[];
-    properties_jsonb: JsonObject;
-    execution_field_definitions: JsonObject;
-  }) => Promise<ProcessDefinition>;
-  createObject?: (draft: {
-    title: string;
-    tags: string[];
-    properties_jsonb: JsonObject;
-    process_field_definitions: JsonObject;
-  }) => Promise<ResearchObject>;
+  searchProcesses: (
+    query: string,
+    options?: ComposerSearchOptions
+  ) => Promise<SearchPage<ProcessDefinition>>;
+  searchObjects: (
+    query: string,
+    options?: ComposerSearchOptions
+  ) => Promise<SearchPage<ResearchObject>>;
+  createProcess?: (
+    draft: {
+      title: string;
+      tags: string[];
+      properties_jsonb: JsonObject;
+      execution_field_definitions: JsonObject;
+    },
+    commandId?: string
+  ) => Promise<ProcessDefinition>;
+  createObject?: (
+    draft: {
+      title: string;
+      tags: string[];
+      properties_jsonb: JsonObject;
+      process_field_definitions: JsonObject;
+    },
+    commandId?: string
+  ) => Promise<ResearchObject>;
   onChange: (blocks: JsonObject[]) => void;
   editable?: boolean;
 }) {
@@ -194,6 +224,9 @@ export function ScientificComposer({
   } | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const composerRootRef = useRef<HTMLDivElement>(null);
+  const searchSequence = useRef(0);
+  const searchAbort = useRef<AbortController | null>(null);
   const createTitleRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (createDraft) createTitleRef.current?.focus();
@@ -235,13 +268,45 @@ export function ScientificComposer({
     onChange(next);
   }, editor);
   useEffect(() => {
+    const root = composerRootRef.current;
+    if (!root) return;
     const handle = (event: Event) => {
       const occurrenceId = (event as CustomEvent<{ occurrenceId: string }>).detail?.occurrenceId;
       if (occurrenceId) setSelectedId(occurrenceId);
     };
-    document.addEventListener('scientific-ref-focus', handle);
-    return () => document.removeEventListener('scientific-ref-focus', handle);
+    root.addEventListener('scientific-ref-focus', handle);
+    return () => root.removeEventListener('scientific-ref-focus', handle);
   }, []);
+
+  const searchPage = async <T,>(
+    search: (query: string, options?: ComposerSearchOptions) => Promise<SearchPage<T>>,
+    query: string
+  ) => {
+    searchAbort.current?.abort();
+    const controller = new AbortController();
+    searchAbort.current = controller;
+    const sequence = ++searchSequence.current;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(resolve, 150);
+        controller.signal.addEventListener(
+          'abort',
+          () => {
+            window.clearTimeout(timer);
+            reject(new DOMException('Search superseded', 'AbortError'));
+          },
+          { once: true }
+        );
+      });
+      const result = await search(query, { offset: 0, limit: 21, signal: controller.signal });
+      if (controller.signal.aborted || sequence !== searchSequence.current) return [];
+      const items = Array.isArray(result) ? result : result.items;
+      return items.slice(0, 20);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return [];
+      throw error;
+    }
+  };
 
   const occurrences = useMemo(() => currentOccurrences(blocks), [blocks]);
   const selected = occurrences.find((item) => item.occurrence_id === selectedId) ?? null;
@@ -256,6 +321,11 @@ export function ScientificComposer({
         selected,
         identifiedFields(version.execution_field_definitions, definition.id)
       );
+      if (
+        retained.removed.length > 0 &&
+        !window.confirm(t('replaceImpactConfirm', { values: retained.removed.join('\n') }))
+      )
+        return;
       setOccurrence({
         ...selected,
         target_id: definition.id,
@@ -270,6 +340,11 @@ export function ScientificComposer({
         selected,
         identifiedFields(replacement.process_field_definitions, replacement.id)
       );
+      if (
+        retained.removed.length > 0 &&
+        !window.confirm(t('replaceImpactConfirm', { values: retained.removed.join('\n') }))
+      )
+        return;
       setOccurrence({
         ...selected,
         target_id: replacement.id,
@@ -289,13 +364,13 @@ export function ScientificComposer({
     if (!selected) return;
     setReplaceResults(
       selected.kind === 'process'
-        ? await searchProcesses(replaceQuery)
-        : await searchObjects(replaceQuery)
+        ? await searchPage(searchProcesses, replaceQuery)
+        : await searchPage(searchObjects, replaceQuery)
     );
   };
 
   const processItems = async (query: string): Promise<ComposerSuggestionItem[]> => {
-    const definitions = await searchProcesses(query);
+    const definitions = await searchPage(searchProcesses, query);
     const items: ComposerSuggestionItem[] = definitions.map((definition) => {
       const target = definition.process_definition;
       const version = definition.current_version;
@@ -338,11 +413,11 @@ export function ScientificComposer({
           })
       });
     }
-    return filterSuggestionItems(items, query);
+    return items;
   };
 
   const objectItems = async (query: string): Promise<ComposerSuggestionItem[]> => {
-    const objects = await searchObjects(query);
+    const objects = await searchPage(searchObjects, query);
     const items: ComposerSuggestionItem[] = objects.map((object) => ({
       title: object.title,
       subtext: objectIdentity(object),
@@ -380,7 +455,7 @@ export function ScientificComposer({
           })
       });
     }
-    return filterSuggestionItems(items, query);
+    return items;
   };
 
   const submitCreate = async () => {
@@ -393,12 +468,15 @@ export function ScientificComposer({
         .map((item) => item.trim())
         .filter(Boolean);
       if (createDraft.kind === 'process' && createProcess) {
-        const created = await createProcess({
-          title: createDraft.title.trim(),
-          tags,
-          properties_jsonb: createDraft.properties,
-          execution_field_definitions: createDraft.fields
-        });
+        const created = await createProcess(
+          {
+            title: createDraft.title.trim(),
+            tags,
+            properties_jsonb: createDraft.properties,
+            execution_field_definitions: createDraft.fields
+          },
+          crypto.randomUUID()
+        );
         const target = created.process_definition;
         const occurrence: ScientificOccurrenceDraft = {
           occurrence_id: crypto.randomUUID(),
@@ -416,12 +494,15 @@ export function ScientificComposer({
         editor.insertInlineContent([occurrenceRef(occurrence, target.title) as never]);
         focusOccurrence(occurrence.occurrence_id);
       } else if (createDraft.kind === 'object' && createObject) {
-        const target = await createObject({
-          title: createDraft.title.trim(),
-          tags,
-          properties_jsonb: createDraft.properties,
-          process_field_definitions: createDraft.fields
-        });
+        const target = await createObject(
+          {
+            title: createDraft.title.trim(),
+            tags,
+            properties_jsonb: createDraft.properties,
+            process_field_definitions: createDraft.fields
+          },
+          crypto.randomUUID()
+        );
         const occurrence: ScientificOccurrenceDraft = {
           occurrence_id: crypto.randomUUID(),
           kind: 'object',
@@ -466,8 +547,13 @@ export function ScientificComposer({
   };
 
   return (
-    <div className='space-y-3' data-testid='scientific-composer' data-scientific-composer='true'>
-      <div className='overflow-hidden rounded-xl border bg-background'>
+    <div
+      ref={composerRootRef}
+      className='relative space-y-3'
+      data-testid='scientific-composer'
+      data-scientific-composer='true'
+    >
+      <div className='scientific-composer-surface overflow-visible rounded-xl bg-background'>
         <BlockNoteView editor={editor} editable={editable} slashMenu={false}>
           {editable && (
             <>
@@ -538,7 +624,7 @@ export function ScientificComposer({
         </div>
       )}
       {editable && selected?.kind === 'object' && (
-        <section className='flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm'>
+        <section className='absolute right-2 top-2 z-30 flex max-w-[min(28rem,calc(100vw-2rem))] flex-wrap items-center gap-2 rounded-xl border bg-popover/95 p-3 text-sm shadow-lg backdrop-blur'>
           <span className='font-medium'>关联过程</span>
           <select
             className='h-8 rounded border bg-background px-2'
@@ -594,7 +680,7 @@ export function ScientificComposer({
         </section>
       )}
       {editable && selected && (
-        <section className='rounded-lg border bg-muted/30 p-3 text-sm'>
+        <section className='absolute right-2 top-16 z-20 max-w-[min(28rem,calc(100vw-2rem))] rounded-xl border bg-popover/95 p-3 text-sm shadow-lg backdrop-blur'>
           <div className='flex flex-wrap items-center gap-2'>
             <span className='font-medium'>替换 Ref</span>
             <input

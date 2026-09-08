@@ -218,7 +218,7 @@ export function SampleComposer({
   }
 
   return (
-    <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
+    <main className='mx-auto w-full max-w-[960px] px-4 py-7 md:px-8 md:py-10'>
       <form onSubmit={save} className='space-y-5'>
         {recoverableDraft && (
           <section className='space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm'>
@@ -294,19 +294,25 @@ export function SampleComposer({
           </section>
         )}
         <header className='flex flex-wrap items-start justify-between gap-4'>
-          <div>
-            <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-              Scientific Composer
-            </p>
-            <h1 className='mt-2 text-2xl font-semibold'>
-              {readOnly ? 'Sample 历史版本' : editing ? '编辑 Sample 记录' : '新建 Sample 记录'}
-            </h1>
+          <div className='min-w-0 flex-1'>
+            <input
+              data-testid='sample-title'
+              className='h-12 w-full rounded-md border-transparent bg-transparent px-0 text-3xl font-semibold tracking-tight outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-border focus:bg-background focus:px-2'
+              required
+              disabled={readOnly}
+              value={title}
+              placeholder={readOnly ? 'Sample 历史版本' : '未命名 Sample'}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                markDirty();
+              }}
+            />
             <p className='mt-1 text-sm text-muted-foreground'>
-              输入 / 添加实际过程，输入 @ 添加独立对象使用记录。
+              {readOnly ? 'Sample 历史版本' : '在正文中输入 / 添加过程，输入 @ 添加对象。'}
             </p>
           </div>
           {!readOnly && (
-            <div className='flex flex-wrap gap-2'>
+            <div className='flex items-center gap-2'>
               <Button
                 type='submit'
                 data-testid='save-sample-record'
@@ -317,48 +323,41 @@ export function SampleComposer({
               >
                 {saving ? '保存中…' : '保存实际记录'}
               </Button>
-              <Button
-                type='submit'
-                variant='outline'
-                data-testid='save-and-new-sample-record'
-                disabled={saving || !title.trim() || !projectId}
-                onClick={() => {
-                  saveIntent.current = 'save-and-new';
-                }}
-              >
-                保存并再建一份
-              </Button>
-              <Button
-                type='submit'
-                variant='outline'
-                data-testid='save-and-batch-sample-record'
-                disabled={saving || !title.trim() || !projectId}
-                onClick={() => {
-                  saveIntent.current = 'save-and-batch';
-                }}
-              >
-                保存并批量创建类似样品
-              </Button>
+              <details className='relative'>
+                <summary className='cursor-pointer list-none rounded-md border px-3 py-2 text-sm hover:bg-accent'>
+                  更多
+                </summary>
+                <div className='absolute right-0 top-11 z-20 grid min-w-48 gap-1 rounded-lg border bg-popover p-1 shadow-lg'>
+                  <button
+                    type='submit'
+                    className='rounded px-3 py-2 text-left text-sm hover:bg-accent'
+                    data-testid='save-and-new-sample-record'
+                    disabled={saving || !title.trim() || !projectId}
+                    onClick={() => {
+                      saveIntent.current = 'save-and-new';
+                    }}
+                  >
+                    保存并再建一份
+                  </button>
+                  <button
+                    type='submit'
+                    className='rounded px-3 py-2 text-left text-sm hover:bg-accent'
+                    data-testid='save-and-batch-sample-record'
+                    disabled={saving || !title.trim() || !projectId}
+                    onClick={() => {
+                      saveIntent.current = 'save-and-batch';
+                    }}
+                  >
+                    保存并批量创建类似样品
+                  </button>
+                </div>
+              </details>
             </div>
           )}
         </header>
 
-        <section className='grid gap-3 rounded-xl border bg-card/70 p-4 md:grid-cols-2 lg:grid-cols-4'>
-          <label className='space-y-1 text-sm'>
-            <span>名称</span>
-            <input
-              data-testid='sample-title'
-              className='h-9 w-full rounded border bg-background px-3'
-              required
-              disabled={readOnly}
-              value={title}
-              onChange={(event) => {
-                setTitle(event.target.value);
-                markDirty();
-              }}
-            />
-          </label>
-          <label className='space-y-1 text-sm'>
+        <section className='flex flex-wrap items-center gap-x-4 gap-y-2 border-y py-2 text-sm'>
+          <label className='flex items-center gap-2 text-sm'>
             <span>记录状态</span>
             <select
               className='h-9 w-full rounded border bg-background px-2'
@@ -374,7 +373,7 @@ export function SampleComposer({
               <option value='archived'>归档</option>
             </select>
           </label>
-          <label className='space-y-1 text-sm'>
+          <label className='flex items-center gap-2 text-sm'>
             <span>标签</span>
             <input
               className='h-9 w-full rounded border bg-background px-3'
@@ -386,7 +385,7 @@ export function SampleComposer({
               }}
             />
           </label>
-          <label className='space-y-1 text-sm'>
+          <label className='flex items-center gap-2 text-sm'>
             <span>产出当前 Sample</span>
             <select
               className='h-9 w-full rounded border bg-background px-2'
@@ -410,27 +409,34 @@ export function SampleComposer({
         <ScientificComposer
           key={composerGeneration}
           initialBlocks={blocks}
-          searchProcesses={(query) =>
+          searchProcesses={(query, options) =>
             api.listProcessDefinitions({
               project_scope_id: projectId,
               q: query || undefined,
-              limit: 200
+              limit: options?.limit ?? 21,
+              offset: options?.offset ?? 0,
+              signal: options?.signal
             })
           }
-          searchObjects={(query) =>
+          searchObjects={(query, options) =>
             api.listObjects({
               kind: 'research_object',
               project_scope_id: projectId,
               include_global: true,
               q: query || undefined,
-              limit: 200
+              limit: options?.limit ?? 21,
+              offset: options?.offset ?? 0,
+              signal: options?.signal
             })
           }
-          createProcess={(draft) =>
-            api.createProcessDefinition({ ...draft, project_scope_id: projectId })
+          createProcess={(draft, commandId) =>
+            api.createProcessDefinition({ ...draft, project_scope_id: projectId }, commandId)
           }
-          createObject={(draft) =>
-            api.createObject({ ...draft, kind: 'research_object', project_scope_id: projectId })
+          createObject={(draft, commandId) =>
+            api.createObject(
+              { ...draft, kind: 'research_object', project_scope_id: projectId },
+              commandId
+            )
           }
           onChange={(next) => {
             generation.current += 1;

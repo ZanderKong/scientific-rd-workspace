@@ -115,12 +115,18 @@ def create_process_definition(
 
 
 def list_process_definitions(
-    db: Session, *, project_scope_id: uuid.UUID | None = None, q: str | None = None, limit: int = 50
+    db: Session,
+    *,
+    project_scope_id: uuid.UUID | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     statement = (
         select(ResearchObject)
         .where(ResearchObject.kind == "process_definition")
-        .order_by(ResearchObject.updated_at.desc())
+        .order_by(ResearchObject.updated_at.desc(), ResearchObject.id.asc())
+        .offset(offset)
         .limit(limit)
     )
     if project_scope_id is not None:
