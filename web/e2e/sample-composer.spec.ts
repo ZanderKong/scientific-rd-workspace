@@ -72,11 +72,15 @@ test('continuous composer saves inline slots and stable Ref identities', async (
   await page.keyboard.press('Backspace');
   await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveCount(0);
   await page.keyboard.press('ControlOrMeta+z');
+  await page.getByRole('button', { name: '选择过程 Exposure' }).click();
   await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveValue('15');
   await expect(page.getByRole('textbox', { name: 'Exposure Note' })).toHaveValue('中文记录');
+  await page.getByRole('textbox', { name: 'Exposure Duration' }).focus();
   await page.keyboard.press('ControlOrMeta+Shift+z');
   await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveCount(0);
+  await editor.focus();
   await page.keyboard.press('ControlOrMeta+z');
+  await page.getByRole('button', { name: '选择过程 Exposure' }).click();
   await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveValue('15');
   await page.getByRole('textbox', { name: 'Exposure Duration' }).press('Escape');
   await page.keyboard.press('ControlOrMeta+c');
@@ -111,6 +115,12 @@ test('continuous composer saves inline slots and stable Ref identities', async (
     .first()
     .selectOption({ index: 1 });
   await page.getByRole('textbox', { name: 'Resolver material Quantity' }).fill('5');
+  await page.getByRole('button', { name: '＋新增属性' }).click();
+  await page.getByLabel('新属性名称').fill('Yield');
+  await page.getByLabel('新属性类型').selectOption('number');
+  await page.getByLabel('新属性单位').fill('%');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Resolver material Yield' }).fill('92');
 
   const createResponse = page.waitForResponse(
     (response) =>
@@ -131,6 +141,11 @@ test('continuous composer saves inline slots and stable Ref identities', async (
   });
   expect(processOccurrences[0].execution_id).not.toBe(processOccurrences[1].execution_id);
   expect(objectOccurrence.values.quantity).toMatchObject({ value: '5', unit: 'g' });
+  const localField = objectOccurrence.field_definitions.fields.find(
+    (field: { source?: string }) => field.source === 'local'
+  );
+  expect(localField).toMatchObject({ label: 'Yield', value_type: 'number', default_unit: '%' });
+  expect(objectOccurrence.values[localField.key]).toMatchObject({ value: '92', unit: '%' });
   const executionId = processOccurrences[0].execution_id as string;
   const bindingId = objectOccurrence.binding.binding_id as string;
 

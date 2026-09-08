@@ -17,6 +17,9 @@ export interface UsageFieldDefinition {
   key: string;
   label: string;
   value_type: ValueType;
+  source?: 'template' | 'local';
+  owner_id?: string | null;
+  field_id?: string | null;
   default_value?: unknown;
   default_unit?: string | null;
   required?: boolean;
@@ -51,6 +54,7 @@ export interface ResearchObject {
   id: string;
   code: string;
   kind: ResearchObjectKind;
+  authoring_kind?: 'sample' | 'data' | null;
   title: string;
   status: string;
   project_scope_id: string | null;
@@ -64,6 +68,7 @@ export interface ResearchObject {
   process_field_definitions: JsonObject;
   content_document: JsonObject[];
   document_format_version: number;
+  record_sha256?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -244,6 +249,7 @@ export interface SampleRecord {
   sample: ResearchObject;
   document: ScientificDocumentV1;
   occurrences: ScientificOccurrence[];
+  producer_process_occurrence_id?: string | null;
   data: ResearchObject[];
   editable: boolean;
   edit_blockers: string[];
@@ -261,12 +267,14 @@ export interface SampleRecordCreatePayload {
   };
   document: ScientificDocumentV1;
   occurrences: ScientificOccurrenceDraft[];
+  producer_process_occurrence_id?: string | null;
   change_note?: string | null;
 }
 export interface SampleRecordPutPayload {
   sample?: JsonObject;
   document: ScientificDocumentV1;
   occurrences: ScientificOccurrenceDraft[];
+  producer_process_occurrence_id?: string | null;
   base_record_sha256: string;
   change_note?: string | null;
 }
@@ -358,6 +366,7 @@ export interface RecordTableResult {
   limit: number;
   offset: number;
   columns: RecordTableFieldRef[];
+  available_refs: ResearchObject[];
 }
 
 export interface DataDraftContent {

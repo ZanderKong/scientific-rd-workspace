@@ -4,8 +4,14 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api-client';
-import type { ResearchObject, ResearchObjectKind } from '@/lib/domain';
+import type {
+  JsonObject,
+  ProcessDefinition,
+  ResearchObject,
+  ResearchObjectKind
+} from '@/lib/domain';
 import { Button } from '@/components/ui/button';
+import { ScientificFieldEditor, StructuredPropertiesEditor } from './scientific-field-editor';
 
 const meta: Record<ResearchObjectKind, { zh: string; en: string; path: string }> = {
   research_object: { zh: 'Research Object', en: 'Research Object', path: 'research-objects' },
@@ -64,6 +70,8 @@ function CreateObject({
 }) {
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState(tag ?? '');
+  const [properties, setProperties] = useState<Record<string, unknown>>({});
+  const [fields, setFields] = useState<Record<string, unknown>>({ fields: [] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function submit(event: React.FormEvent) {
@@ -79,12 +87,21 @@ function CreateObject({
         tags: tags
           .split(',')
           .map((item) => item.trim())
-          .filter(Boolean)
+          .filter(Boolean),
+        properties_jsonb: properties,
+        process_field_definitions: fields
       };
       const object =
         kind === 'process_definition'
-          ? (await api.createProcessDefinition({ ...payload, execution_field_definitions: {} }))
-              .process_definition
+          ? (
+              await api.createProcessDefinition({
+                project_scope_id: projectId ?? null,
+                title: title.trim(),
+                tags: payload.tags,
+                properties_jsonb: properties,
+                execution_field_definitions: fields
+              })
+            ).process_definition
           : kind === 'view'
             ? (
                 await api.createView({
@@ -104,24 +121,36 @@ function CreateObject({
     }
   }
   return (
-    <form onSubmit={submit} className={`${card} grid gap-3 md:grid-cols-[1fr_1fr_auto]`}>
-      <input
-        required
-        className={input}
-        value={title}
-        onChange={(event) => setTitle(event.target.value)}
-        placeholder='Title'
-      />
-      <input
-        className={input}
-        value={tags}
-        onChange={(event) => setTags(event.target.value)}
-        placeholder='Tags, comma separated'
-      />
-      <Button type='submit' disabled={saving || !title.trim()}>
-        {saving ? 'Saving…' : 'Create'}
-      </Button>
-      {error && <p className='text-sm text-destructive md:col-span-full'>{error}</p>}
+    <form onSubmit={submit} className={`${card} space-y-5`}>
+      <div className='grid gap-3 md:grid-cols-[1fr_1fr_auto]'>
+        <input
+          required
+          className={input}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder='Title'
+        />
+        <input
+          className={input}
+          value={tags}
+          onChange={(event) => setTags(event.target.value)}
+          placeholder='Tags, comma separated'
+        />
+        <Button type='submit' disabled={saving || !title.trim()}>
+          {saving ? 'Saving…' : 'Create'}
+        </Button>
+      </div>
+      <section className='space-y-2'>
+        <h3 className='text-sm font-semibold'>自身属性</h3>
+        <StructuredPropertiesEditor value={properties} onChange={setProperties} />
+      </section>
+      {(kind === 'research_object' || kind === 'process_definition') && (
+        <section className='space-y-2'>
+          <h3 className='text-sm font-semibold'>默认使用属性</h3>
+          <ScientificFieldEditor value={fields} onChange={setFields} />
+        </section>
+      )}
+      {error && <p className='text-sm text-destructive'>{error}</p>}
     </form>
   );
 }
@@ -162,10 +191,19 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
           <h1 className='mt-2 text-3xl font-semibold'>{label}</h1>
           <p className='mt-2 text-sm text-muted-foreground'>Canonical objects and typed records.</p>
         </div>
-        {canCreateHere && (
-          <Button onClick={() => setCreating((value) => !value)}>
-            {creating ? 'Close' : 'Create'}
-          </Button>
+        {kind === 'view' ? (
+          <Link
+            href='/dashboard/views/new'
+            className='rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground'
+          >
+            Create
+          </Link>
+        ) : (
+          canCreateHere && (
+            <Button onClick={() => setCreating((value) => !value)}>
+              {creating ? 'Close' : 'Create'}
+            </Button>
+          )
         )}
       </div>
       {creating && (
@@ -181,11 +219,9 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
           />
         </div>
       )}
-      {!canCreateHere && (
+      {kind === 'claim' && (
         <p className='mb-5 rounded-xl border border-dashed p-4 text-sm text-muted-foreground'>
-          {kind === 'claim'
-            ? 'Create a Claim from an Experiment, Data, or View so its primary source revision is fixed.'
-            : 'Create a View from Data so its Data revision and Representations are fixed.'}
+          Create a Claim from an Experiment, Data, or View so its primary source revision is fixed.
         </p>
       )}
       <input
@@ -217,13 +253,76 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
 
 function ObjectDetail({ objectId }: { objectId: string }) {
   const [object, setObject] = useState<ResearchObject | null>(null);
+  const [definition, setDefinition] = useState<ProcessDefinition | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [title, setTitle] = useState('');
+  const [tags, setTags] = useState('');
+  const [properties, setProperties] = useState<JsonObject>({});
+  const [fields, setFields] = useState<JsonObject>({ fields: [] });
+  const load = () =>
     api
       .getObject(objectId)
-      .then(setObject)
+      .then(async (loaded) => {
+        setObject(loaded);
+        setTitle(loaded.title);
+        setTags(loaded.tags.join(','));
+        setProperties(loaded.properties_jsonb);
+        if (loaded.kind === 'process_definition') {
+          const process = await api.getProcessDefinition(objectId);
+          setDefinition(process);
+          setFields(process.current_version.execution_field_definitions);
+        } else {
+          setFields(loaded.process_field_definitions);
+        }
+      })
       .catch((cause) => setError(errorText(cause)));
+  useEffect(() => {
+    load();
+    // load is intentionally scoped to the current route identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectId]);
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!object?.record_sha256 || !title.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const nextTags = tags
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (object.kind === 'process_definition') {
+        await api.createProcessDefinitionVersion(object.id, {
+          description: definition?.current_version.description ?? null,
+          execution_field_definitions: fields,
+          ui_schema: definition?.current_version.ui_schema ?? null,
+          title: title.trim(),
+          tags: nextTags,
+          properties_jsonb: properties,
+          base_record_sha256: object.record_sha256
+        });
+      } else {
+        await api.updateObject(
+          object.id,
+          {
+            title: title.trim(),
+            tags: nextTags,
+            properties_jsonb: properties,
+            process_field_definitions: fields
+          },
+          object.record_sha256
+        );
+      }
+      await load();
+      setEditing(false);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
   if (error) return <main className='mx-auto max-w-[1320px] p-8 text-destructive'>{error}</main>;
   if (!object)
     return <main className='mx-auto max-w-[1320px] p-8 text-muted-foreground'>Loading…</main>;
@@ -234,6 +333,46 @@ function ObjectDetail({ objectId }: { objectId: string }) {
       <p className='mt-2 font-mono text-xs text-muted-foreground'>
         {object.code} · {object.status}
       </p>
+      <Button className='mt-4' variant='outline' onClick={() => setEditing((value) => !value)}>
+        {editing ? '取消编辑' : '编辑对象与属性'}
+      </Button>
+      {editing && (
+        <form className={`${card} mt-5 space-y-5`} onSubmit={save}>
+          <div className='grid gap-3 md:grid-cols-2'>
+            <label className='grid gap-1 text-xs'>
+              名称
+              <input
+                className={input}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+            </label>
+            <label className='grid gap-1 text-xs'>
+              Tags
+              <input
+                className={input}
+                value={tags}
+                onChange={(event) => setTags(event.target.value)}
+              />
+            </label>
+          </div>
+          <section className='space-y-2'>
+            <h2 className='font-semibold'>自身属性</h2>
+            <StructuredPropertiesEditor value={properties} onChange={setProperties} />
+          </section>
+          <section className='space-y-2'>
+            <h2 className='font-semibold'>默认使用属性</h2>
+            <ScientificFieldEditor value={fields} onChange={setFields} ownerId={object.id} />
+          </section>
+          <Button type='submit' disabled={saving}>
+            {saving
+              ? '保存中…'
+              : object.kind === 'process_definition'
+                ? '保存并发布新版本'
+                : '保存更改'}
+          </Button>
+        </form>
+      )}
       <section className={`${card} mt-6 grid gap-5 md:grid-cols-2`}>
         <div>
           <h2 className='font-semibold'>Tags</h2>

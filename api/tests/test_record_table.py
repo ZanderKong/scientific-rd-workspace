@@ -173,9 +173,68 @@ def test_record_table_exposes_referenced_but_unfilled_field(client):
         {
             "target_id": target_id,
             "field_key": "reading",
-            "label": "Empty process · reading",
+            "label": "Empty process · Reading",
             "value_type": "number",
         }
     ]
     values = body["rows"][0]["values"][f"{target_id}:reading"]
     assert values[0]["value"] is None
+
+
+def test_record_table_catalog_includes_fieldless_refs_and_honors_record_ids(client):
+    project = client.post(
+        "/api/v1/project-records",
+        json={"project": {"code": "PRJ-TABLE-REF", "title": "Table refs"}},
+    ).json()["project"]
+    target = client.post(
+        "/api/v1/objects",
+        json={
+            "kind": "research_object",
+            "code": "ROO-FIELDLESS",
+            "title": "Fieldless reference",
+            "project_scope_id": project["id"],
+        },
+    ).json()
+    occurrence_id = str(uuid.uuid4())
+    included = client.post(
+        "/api/v1/sample-records",
+        headers={"Idempotency-Key": "record-table-fieldless-included"},
+        json={
+            "project_scope_id": project["id"],
+            "sample": {"code": "ROO-INCLUDED", "title": "Included", "tags": ["sample"]},
+            "document": {
+                "schema_version": 1,
+                "blocks": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {"type": "objectRef", "props": {"occurrenceId": occurrence_id}}
+                        ],
+                    }
+                ],
+            },
+            "occurrences": [
+                {
+                    "occurrence_id": occurrence_id,
+                    "kind": "object",
+                    "target_id": target["id"],
+                    "field_definitions": {},
+                    "values": {},
+                }
+            ],
+        },
+    ).json()
+    response = client.post(
+        "/api/v1/record-tables/query",
+        json={
+            "project_scope_id": project["id"],
+            "record_kind": "sample",
+            "record_ids": [included["sample"]["id"]],
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [row["record"]["id"] for row in body["rows"]] == [included["sample"]["id"]]
+    assert [(item["id"], item["title"]) for item in body["available_refs"]] == [
+        (target["id"], "Fieldless reference")
+    ]

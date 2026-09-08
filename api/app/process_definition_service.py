@@ -16,8 +16,10 @@ from app.schemas import ObjectCreate, ProcessDefinitionCreate, ProcessDefinition
 from app.services import (
     _create_object_in_session,
     _create_revision_in_session,
+    _update_object_in_session,
     get_object,
     object_out,
+    sha256_json,
 )
 
 
@@ -139,7 +141,34 @@ def create_process_definition_version(
     db: Session, definition_id: uuid.UUID, payload: ProcessDefinitionVersionCreate
 ) -> dict[str, Any]:
     try:
-        definition = _definition(db, definition_id)
+        definition = db.scalar(
+            select(ResearchObject)
+            .where(
+                ResearchObject.id == definition_id,
+                ResearchObject.kind == "process_definition",
+            )
+            .with_for_update()
+        )
+        if definition is None:
+            raise LookupError("process definition not found")
+        # The public object endpoint exposes the object editing token derived
+        # from its current representation.  Publish must compare against the
+        # same token rather than the immutable revision snapshot hash, which
+        # is a different contract and would reject every valid metadata edit.
+        current_sha = sha256_json(object_out(definition))
+        if payload.base_record_sha256 and payload.base_record_sha256 != current_sha:
+            raise ValueError("stale_record")
+        metadata = {
+            key: value
+            for key, value in {
+                "title": payload.title,
+                "tags": payload.tags,
+                "properties_jsonb": payload.properties_jsonb,
+            }.items()
+            if value is not None
+        }
+        if metadata:
+            _update_object_in_session(db, definition, metadata)
         latest = int(
             db.scalar(
                 select(func.max(ProcessDefinitionVersion.version)).where(

@@ -93,6 +93,41 @@ def test_sample_record_persists_document_order_without_implicit_product_bindings
     assert conflict.status_code == 409, conflict.text
 
 
+def test_sample_record_can_explicitly_select_its_producer_process(client):
+    project = client.post(
+        "/api/v1/project-records",
+        json={"project": {"code": "PRJ-PRODUCER", "title": "producer scope"}},
+    ).json()["project"]["id"]
+    definition = client.post(
+        "/api/v1/process-definitions",
+        json={
+            "code": "PFD-PRODUCER",
+            "title": "make sample",
+            "project_scope_id": project,
+            "execution_field_definitions": {},
+        },
+    ).json()
+    occurrence_id = str(uuid.uuid4())
+    created = client.post(
+        "/api/v1/sample-records",
+        json={
+            "project_scope_id": project,
+            "sample": {"code": "ROO-PRODUCED", "title": "produced sample"},
+            "document": _document(occurrence_id),
+            "occurrences": [_process(definition, occurrence_id, {})],
+            "producer_process_occurrence_id": occurrence_id,
+        },
+        headers={"Idempotency-Key": "sample-explicit-producer"},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["producer_process_occurrence_id"] == occurrence_id
+    bindings = body["occurrences"][0]["execution"]["object_bindings"]
+    assert [(item["research_object_id"], item["direction"]) for item in bindings] == [
+        (body["sample"]["id"], "output")
+    ]
+
+
 def test_sample_record_update_preserves_execution_and_binding_identity(client):
     project = client.post(
         "/api/v1/project-records",

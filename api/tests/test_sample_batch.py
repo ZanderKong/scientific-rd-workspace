@@ -19,8 +19,18 @@ def test_sample_batch_is_atomic_and_idempotent(client):
         "/api/v1/project-records",
         json={"project": {"code": "PRJ-BATCH-OTHER", "title": "Other project"}},
     ).json()["project"]["id"]
+    source = client.post(
+        "/api/v1/sample-records",
+        json=_record(project_id, "BAT-SOURCE", "Batch source"),
+        headers={"Idempotency-Key": "batch-source"},
+    ).json()
+    source_revision_id = client.get(f"/api/v1/objects/{source['sample']['id']}/revisions").json()[
+        -1
+    ]["id"]
     invalid = {
         "project_scope_id": project_id,
+        "source_sample_id": source["sample"]["id"],
+        "source_revision_id": source_revision_id,
         "rows": [
             {"client_row_id": "row-1", "record": _record(project_id, "BAT-1", "Batch 1")},
             {
@@ -44,6 +54,8 @@ def test_sample_batch_is_atomic_and_idempotent(client):
 
     valid = {
         "project_scope_id": project_id,
+        "source_sample_id": source["sample"]["id"],
+        "source_revision_id": source_revision_id,
         "rows": [
             {"client_row_id": "row-1", "record": _record(project_id, "BAT-1", "Batch 1")},
             {"client_row_id": "row-2", "record": _record(project_id, "BAT-2", "Batch 2")},

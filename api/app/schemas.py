@@ -21,6 +21,9 @@ class UsageFieldDefinition(BaseModel):
     key: str = Field(min_length=1, max_length=120)
     label: str = Field(min_length=1, max_length=120)
     value_type: ValueType
+    source: Literal["template", "local"] = "template"
+    owner_id: uuid.UUID | None = None
+    field_id: uuid.UUID | None = None
     default_value: Any = None
     default_unit: str | None = Field(default=None, max_length=64)
     required: bool = False
@@ -43,6 +46,8 @@ class UsageFieldDefinition(BaseModel):
             raise ValueError("options are only valid for select fields")
         if len(set(self.options)) != len(self.options):
             raise ValueError("field options must be unique")
+        if self.source == "local" and self.field_id is None:
+            raise ValueError("local fields require field_id")
         return self
 
 
@@ -110,6 +115,7 @@ class ObjectSummary(BaseModel):
 
 
 class ResearchObjectOut(ObjectSummary):
+    record_sha256: str | None = None
     type_version_id: uuid.UUID | None = None
     type_version: int | None = None
     tags: list[str] = Field(default_factory=list)
@@ -226,6 +232,10 @@ class ProcessDefinitionVersionCreate(BaseModel):
     description: str | None = None
     execution_field_definitions: dict[str, Any] = Field(default_factory=dict)
     ui_schema: dict[str, Any] | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    tags: list[str] | None = None
+    properties_jsonb: dict[str, Any] | None = None
+    base_record_sha256: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class ProcessDefinitionVersionOut(BaseModel):
@@ -434,6 +444,7 @@ class SampleRecordCreate(BaseModel):
     sample: SampleRecordObjectCreate
     document: ScientificDocumentV1 = Field(default_factory=ScientificDocumentV1)
     occurrences: list[ScientificOccurrenceDraft] = Field(default_factory=list)
+    producer_process_occurrence_id: uuid.UUID | None = None
     change_note: str | None = None
 
 
@@ -442,6 +453,7 @@ class SampleRecordPut(BaseModel):
     sample: dict[str, Any] = Field(default_factory=dict)
     document: ScientificDocumentV1
     occurrences: list[ScientificOccurrenceDraft] = Field(default_factory=list)
+    producer_process_occurrence_id: uuid.UUID | None = None
     base_record_sha256: str
     change_note: str | None = None
 
@@ -456,6 +468,7 @@ class SampleRecordOut(BaseModel):
     sample: ResearchObjectOut
     document: ScientificDocumentV1
     occurrences: list[ScientificOccurrenceOut]
+    producer_process_occurrence_id: uuid.UUID | None = None
     data: list[ResearchObjectOut]
     editable: bool = True
     edit_blockers: list[str] = Field(default_factory=list)
@@ -470,6 +483,8 @@ class SampleBatchRow(BaseModel):
 class SampleBatchCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project_scope_id: uuid.UUID
+    source_sample_id: uuid.UUID
+    source_revision_id: uuid.UUID
     rows: list[SampleBatchRow] = Field(min_length=1, max_length=100)
 
 
@@ -539,6 +554,7 @@ class RecordTableResultOut(BaseModel):
     limit: int
     offset: int
     columns: list[RecordTableFieldRef]
+    available_refs: list[ResearchObjectOut] = Field(default_factory=list)
 
 
 class ExperimentObjectCreate(BaseModel):

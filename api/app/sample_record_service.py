@@ -137,6 +137,7 @@ def _project_field_values(
                     occurrence_id=row.occurrence_id,
                     target_id=row.target_id,
                     field_key=field_key,
+                    field_label=str(definition.get("label") or field_key),
                     value_type=value_type,
                     unit=str(unit) if unit else None,
                     ordinal=ordinal,
@@ -170,6 +171,7 @@ def _project_field_values(
                 occurrence_id=row.occurrence_id,
                 target_id=row.target_id,
                 field_key=field_key,
+                field_label=str(definition.get("label") or field_key),
                 value_type=value_type,
                 text_value=text_value,
                 number_value=number_value,
@@ -308,6 +310,21 @@ def _record_body(db: Session, sample: ResearchObject) -> dict[str, Any]:
             "blocks": sample.content_document,
         },
         "occurrences": occurrences,
+        "producer_process_occurrence_id": next(
+            (
+                row.occurrence_id
+                for row in rows
+                if row.kind == "process"
+                and row.execution_id is not None
+                and any(
+                    binding.is_active
+                    and binding.direction == "output"
+                    and binding.research_object_id == sample.id
+                    for binding in executions[row.execution_id].object_bindings
+                )
+            ),
+            None,
+        ),
         "data": [object_out(item) for item in data],
         "editable": True,
         "edit_blockers": [],
@@ -449,6 +466,7 @@ def _sync_record(
     document: ScientificDocumentV1,
     occurrences: list[ScientificOccurrenceDraft],
     change_note: str | None,
+    producer_process_occurrence_id: uuid.UUID | None = None,
 ) -> None:
     _validate_document(document, occurrences)
     lock_project_graph(db, sample.project_scope_id)
@@ -493,6 +511,13 @@ def _sync_record(
     }
     process_occurrences = [item for item in occurrences if item.kind == "process"]
     object_occurrences = [item for item in occurrences if item.kind == "object"]
+    if producer_process_occurrence_id is not None and all(
+        item.occurrence_id != producer_process_occurrence_id for item in process_occurrences
+    ):
+        raise SemanticConflict(
+            "producer Process occurrence is not present in the document",
+            code="validation_failed",
+        )
     process_by_occurrence: dict[uuid.UUID, ProcessExecution] = {}
     bound_by_process: dict[uuid.UUID, list[ScientificOccurrenceDraft]] = defaultdict(list)
     for occurrence in object_occurrences:
@@ -514,6 +539,18 @@ def _sync_record(
             )
             for index, item in enumerate(bound_by_process.get(occurrence.occurrence_id, []))
         ]
+        if occurrence.occurrence_id == producer_process_occurrence_id:
+            binding_payloads.append(
+                ProcessExecutionObjectBindingCreate(
+                    authoring_occurrence_id=sample.id,
+                    research_object_id=sample.id,
+                    direction="output",
+                    role="sample",
+                    field_definition_snapshot={},
+                    values={},
+                    order_index=len(binding_payloads),
+                )
+            )
         current = current_rows.get(occurrence.occurrence_id)
         execution = (
             db.get(ProcessExecution, current.execution_id)
@@ -671,7 +708,14 @@ def create_sample_record(
         )
         sample.authoring_kind = "sample"
         db.flush()
-        _sync_record(db, sample, payload.document, payload.occurrences, payload.change_note)
+        _sync_record(
+            db,
+            sample,
+            payload.document,
+            payload.occurrences,
+            payload.change_note,
+            payload.producer_process_occurrence_id,
+        )
         _create_revision_in_session(
             db, sample.id, payload.change_note or "create scientific record"
         )
@@ -692,16 +736,29 @@ def create_sample_batch(
     if len(client_row_ids) != len(set(client_row_ids)):
         raise ValueError("Batch client_row_id values must be unique")
     try:
+        source = _sample(db, payload.source_sample_id, lock=True)
+        source_revision = db.get(ObjectRevision, payload.source_revision_id)
+        if source_revision is None or source_revision.object_id != source.id:
+            raise SemanticConflict(
+                "source revision does not belong to the source Sample",
+                code="validation_failed",
+            )
+        if source.project_scope_id != payload.project_scope_id:
+            raise SemanticConflict(
+                "source Sample is outside the batch project scope",
+                code="scope_conflict",
+            )
         rows = []
         for row in payload.rows:
             if row.record.project_scope_id != payload.project_scope_id:
-                raise ValueError("Batch row project scope does not match the batch")
-            rows.append(
-                {
-                    "client_row_id": row.client_row_id,
-                    "record": create_sample_record(db, row.record, commit=False),
-                }
-            )
+                raise ValueError(
+                    f"batch row {row.client_row_id}: project scope does not match the batch"
+                )
+            try:
+                record = create_sample_record(db, row.record, commit=False)
+            except (LookupError, ValueError, SemanticConflict) as exc:
+                raise ValueError(f"batch row {row.client_row_id}: {exc}") from exc
+            rows.append({"client_row_id": row.client_row_id, "record": record})
         if commit:
             db.commit()
         else:
@@ -727,7 +784,14 @@ def update_sample_record(
         }
         if changes:
             _update_object_in_session(db, sample, changes, managed_write=True)
-        _sync_record(db, sample, payload.document, payload.occurrences, payload.change_note)
+        _sync_record(
+            db,
+            sample,
+            payload.document,
+            payload.occurrences,
+            payload.change_note,
+            payload.producer_process_occurrence_id,
+        )
         _create_revision_in_session(
             db, sample.id, payload.change_note or "update scientific record"
         )

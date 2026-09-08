@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   createColumnHelper,
@@ -12,6 +12,22 @@ import {
   useReactTable
 } from '@tanstack/react-table';
 import { parseAsInteger, parseAsString, useQueryState } from 'nuqs';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -29,6 +45,7 @@ import type {
   SampleRecord
 } from '@/lib/domain';
 import { useProjectScope } from '../project-scope/project-scope-context';
+import { DataDetailBody } from '../components/scientific-detail-body';
 
 const pageSize = 50;
 const column = createColumnHelper<RecordTableRow>();
@@ -130,6 +147,57 @@ function fieldKey(field: RecordTableFieldRef) {
   return `${field.target_id}:${field.field_key}`;
 }
 
+function SortableColumnChip({
+  field,
+  index,
+  count,
+  move
+}: {
+  field: RecordTableFieldRef;
+  index: number;
+  count: number;
+  move: (key: string, delta: -1 | 1) => void;
+}) {
+  const key = fieldKey(field);
+  const sortable = useSortable({ id: key });
+  return (
+    <span
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(sortable.transform),
+        transition: sortable.transition
+      }}
+      className='inline-flex items-center gap-1 rounded border bg-background px-2 py-1'
+    >
+      <button
+        type='button'
+        aria-label={`拖动 ${field.field_key}`}
+        {...sortable.attributes}
+        {...sortable.listeners}
+      >
+        ⋮⋮
+      </button>
+      {field.label ?? field.field_key}
+      <button
+        type='button'
+        aria-label={`上移 ${field.field_key}`}
+        disabled={index === 0}
+        onClick={() => move(key, -1)}
+      >
+        ↑
+      </button>
+      <button
+        type='button'
+        aria-label={`下移 ${field.field_key}`}
+        disabled={index === count - 1}
+        onClick={() => move(key, 1)}
+      >
+        ↓
+      </button>
+    </span>
+  );
+}
+
 function renderValue(value: RecordTableValue) {
   if (value.value == null) return '未填';
   const display = typeof value.value === 'boolean' ? (value.value ? '是' : '否') : value.value;
@@ -205,7 +273,17 @@ function baseColumns(recordKind: 'sample' | 'data') {
   ];
 }
 
-export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sample' | 'data' }) {
+export function RecordTableList({
+  recordKind = 'sample',
+  recordIds,
+  embedded = false,
+  onSelectionChange
+}: {
+  recordKind?: 'sample' | 'data';
+  recordIds?: string[];
+  embedded?: boolean;
+  onSelectionChange?: (ids: string[]) => void;
+}) {
   const { activeProjectId } = useProjectScope();
   const [query, setQuery] = useQueryState('q', parseAsString.withDefault(''));
   const [page, setPage] = useQueryState('page', parseAsInteger.withDefault(1));
@@ -226,7 +304,17 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
   const requiredRefs = useMemo(() => parseList(requiredParam), [requiredParam]);
   const filters = useMemo(() => parseFilters(filterParam), [filterParam]);
   const sort = useMemo(() => parseSort(sortParam), [sortParam]);
+  const invalidTableConfig = Boolean(
+    (columnParam && selectedColumns.length === 0) ||
+    (filterParam && filters.length === 0) ||
+    (sortParam && !sort) ||
+    (tableVersion !== null && tableVersion !== 1)
+  );
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  const columnSensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
   useEffect(() => setRowSelection({}), [activeProjectId]);
   useEffect(() => {
     if (tableVersion === null) void setTableVersion(1);
@@ -236,6 +324,7 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
       'record-table',
       activeProjectId,
       recordKind,
+      recordIds,
       query,
       page,
       selectedColumns,
@@ -247,6 +336,7 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
       api.queryRecordTable({
         project_scope_id: activeProjectId,
         record_kind: recordKind,
+        record_ids: recordIds,
         q: query || null,
         required_refs: requiredRefs,
         filters,
@@ -255,7 +345,7 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
         limit: pageSize,
         offset: (page - 1) * pageSize
       }),
-    enabled: Boolean(activeProjectId),
+    enabled: Boolean(activeProjectId) && (recordIds === undefined || recordIds.length > 0),
     placeholderData: (previous) => previous
   });
   const peekRecord = useQuery<SampleRecord | DataRecord>({
@@ -267,12 +357,16 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
     enabled: Boolean(peek)
   });
   const catalogColumns = useMemo(() => result.data?.columns ?? [], [result.data?.columns]);
-  const targetOptions = useMemo(() => {
-    const byTarget = new Map<string, RecordTableFieldRef>();
-    for (const field of catalogColumns)
-      if (!byTarget.has(field.target_id)) byTarget.set(field.target_id, field);
-    return [...byTarget.values()];
-  }, [catalogColumns]);
+  const targetOptions = result.data?.available_refs ?? [];
+  const initializedColumnContext = useRef<string | null>(null);
+  useEffect(() => {
+    const context = `${activeProjectId}:${recordIds?.join(',') ?? ''}`;
+    if (!embedded || !catalogColumns.length) return;
+    if (initializedColumnContext.current === context) return;
+    initializedColumnContext.current = context;
+    if (columnParam) return;
+    void setColumnParam(serializeColumns(catalogColumns));
+  }, [activeProjectId, catalogColumns, columnParam, embedded, recordIds, setColumnParam]);
   const orderedColumns = useMemo(() => {
     const known = new Map(selectedColumns.map((field) => [fieldKey(field), field]));
     const result: RecordTableFieldRef[] = [];
@@ -287,17 +381,30 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
   useEffect(() => setColumnOrder(selectedColumns.map(fieldKey)), [columnParam, selectedColumns]);
   const tableColumns = useMemo(() => {
     const defaults = baseColumns(recordKind);
+    const groups = new Map<string, RecordTableFieldRef[]>();
+    for (const field of orderedColumns) {
+      const current = groups.get(field.target_id) ?? [];
+      current.push(field);
+      groups.set(field.target_id, current);
+    }
     return [
       ...defaults.slice(0, -1),
-      ...orderedColumns.map((field) => {
-        const catalogField = result.data?.columns.find(
-          (candidate) => fieldKey(candidate) === fieldKey(field)
-        );
-        return column.display({
-          id: `field:${fieldKey(field)}`,
-          header: catalogField?.label ?? field.field_key,
-          meta: { field },
-          cell: FieldValuesCell
+      ...[...groups.entries()].map(([targetId, fields]) => {
+        const first = result.data?.columns.find((candidate) => candidate.target_id === targetId);
+        return column.group({
+          id: `target:${targetId}`,
+          header: first?.label?.split(' · ')[0] ?? 'Ref',
+          columns: fields.map((field) => {
+            const catalogField = result.data?.columns.find(
+              (candidate) => fieldKey(candidate) === fieldKey(field)
+            );
+            return column.display({
+              id: `field:${fieldKey(field)}`,
+              header: catalogField?.label?.split(' · ').at(-1) ?? field.field_key,
+              meta: { field },
+              cell: FieldValuesCell
+            });
+          })
         });
       }),
       defaults.at(-1)!
@@ -314,7 +421,11 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
     manualPagination: true,
     rowCount: result.data?.total ?? 0
   });
-  const selected = Object.keys(rowSelection).filter((id) => rowSelection[id]);
+  const selected = useMemo(
+    () => Object.keys(rowSelection).filter((id) => rowSelection[id]),
+    [rowSelection]
+  );
+  useEffect(() => onSelectionChange?.(selected), [onSelectionChange, selected]);
   const totalPages = Math.max(1, Math.ceil((result.data?.total ?? 0) / pageSize));
   const visibleIds = new Set((result.data?.rows ?? []).map((row) => row.record.id));
   const hiddenSelected = selected.filter((id) => !visibleIds.has(id)).length;
@@ -354,6 +465,19 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
       .filter((field): field is RecordTableFieldRef => Boolean(field));
     void setColumnParam(serializeColumns(fields) || null);
   };
+  const reorderColumns = (event: DragEndEvent) => {
+    if (!event.over || event.active.id === event.over.id) return;
+    const keys = orderedColumns.map(fieldKey);
+    const from = keys.indexOf(String(event.active.id));
+    const to = keys.indexOf(String(event.over.id));
+    if (from < 0 || to < 0) return;
+    const next = arrayMove(keys, from, to);
+    setColumnOrder(next);
+    const fields = next
+      .map((item) => orderedColumns.find((field) => fieldKey(field) === item))
+      .filter((field): field is RecordTableFieldRef => Boolean(field));
+    void setColumnParam(serializeColumns(fields) || null);
+  };
 
   const clearFilters = () => {
     void setFilterParam(null);
@@ -361,26 +485,30 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
   };
 
   return (
-    <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
-      <div className='mb-6 flex items-start justify-between gap-3'>
-        <div>
-          <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-            Scientific record table
-          </p>
-          <h1 className='mt-2 text-3xl font-semibold'>
-            {recordKind === 'sample' ? 'Samples' : 'Data'}
-          </h1>
-          <p className='mt-2 text-sm text-muted-foreground'>
-            服务器筛选与分页的 {recordKind === 'sample' ? 'Sample' : 'Data'} 记录。
-          </p>
+    <main
+      className={embedded ? 'w-full' : 'mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'}
+    >
+      {!embedded && (
+        <div className='mb-6 flex items-start justify-between gap-3'>
+          <div>
+            <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
+              Scientific record table
+            </p>
+            <h1 className='mt-2 text-3xl font-semibold'>
+              {recordKind === 'sample' ? 'Samples' : 'Data'}
+            </h1>
+            <p className='mt-2 text-sm text-muted-foreground'>
+              服务器筛选与分页的 {recordKind === 'sample' ? 'Sample' : 'Data'} 记录。
+            </p>
+          </div>
+          <Link
+            href={recordKind === 'sample' ? '/dashboard/samples/new' : '/dashboard/data/new'}
+            className='rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground'
+          >
+            {recordKind === 'sample' ? 'Create sample' : 'Record data'}
+          </Link>
         </div>
-        <Link
-          href={recordKind === 'sample' ? '/dashboard/samples/new' : '/dashboard/data/new'}
-          className='rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground'
-        >
-          {recordKind === 'sample' ? 'Create sample' : 'Record data'}
-        </Link>
-      </div>
+      )}
       <input
         className='mb-5 h-9 w-full rounded-md border bg-background px-3 text-sm'
         value={query}
@@ -390,6 +518,29 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
         }}
         placeholder='Search sample title or code…'
       />
+      {invalidTableConfig && (
+        <div
+          role='alert'
+          className='mb-5 flex items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm'
+        >
+          <span>分享链接中的表格配置无效，已忽略无法识别的部分。</span>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            onClick={() => {
+              void Promise.all([
+                setColumnParam(null),
+                setFilterParam(null),
+                setSortParam(null),
+                setTableVersion(1)
+              ]);
+            }}
+          >
+            恢复默认
+          </Button>
+        </div>
+      )}
       {!!filters.length && (
         <div className='mb-5 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs'>
           <span className='text-muted-foreground'>当前筛选：</span>
@@ -447,22 +598,22 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
             <div>
               <p className='text-xs font-medium text-muted-foreground'>必须包含 Ref</p>
               <div className='mt-2 flex flex-wrap gap-3'>
-                {targetOptions.map((field) => {
-                  const checked = requiredRefs.includes(field.target_id);
+                {targetOptions.map((target) => {
+                  const checked = requiredRefs.includes(target.id);
                   return (
-                    <label key={field.target_id} className='flex items-center gap-2 text-sm'>
+                    <label key={target.id} className='flex items-center gap-2 text-sm'>
                       <input
                         type='checkbox'
                         checked={checked}
                         onChange={(event) => {
                           const next = event.target.checked
-                            ? [...requiredRefs, field.target_id]
-                            : requiredRefs.filter((id) => id !== field.target_id);
+                            ? [...requiredRefs, target.id]
+                            : requiredRefs.filter((id) => id !== target.id);
                           void setRequiredParam(next.join(',') || null);
                           setPage(1);
                         }}
                       />
-                      {field.label?.split(' · ')[0] ?? field.target_id}
+                      {target.title}
                     </label>
                   );
                 })}
@@ -561,30 +712,23 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
             {!!orderedColumns.length && (
               <div className='flex flex-wrap gap-2 text-xs'>
                 <span className='py-1 text-muted-foreground'>列顺序：</span>
-                {orderedColumns.map((field, index) => (
-                  <span
-                    key={fieldKey(field)}
-                    className='inline-flex items-center gap-1 rounded border px-2 py-1'
-                  >
-                    {field.label ?? field.field_key}
-                    <button
-                      type='button'
-                      aria-label={`上移 ${field.field_key}`}
-                      disabled={index === 0}
-                      onClick={() => moveColumn(fieldKey(field), -1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type='button'
-                      aria-label={`下移 ${field.field_key}`}
-                      disabled={index === orderedColumns.length - 1}
-                      onClick={() => moveColumn(fieldKey(field), 1)}
-                    >
-                      ↓
-                    </button>
-                  </span>
-                ))}
+                <DndContext
+                  sensors={columnSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={reorderColumns}
+                >
+                  <SortableContext items={orderedColumns.map(fieldKey)}>
+                    {orderedColumns.map((field, index) => (
+                      <SortableColumnChip
+                        key={fieldKey(field)}
+                        field={field}
+                        index={index}
+                        count={orderedColumns.length}
+                        move={moveColumn}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </div>
             )}
           </div>
@@ -612,8 +756,14 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
                 {table.getHeaderGroups().map((group) => (
                   <tr key={group.id}>
                     {group.headers.map((header) => (
-                      <th key={header.id} className='px-4 py-3 font-medium'>
-                        {flexRender(header.column.columnDef.header, header.getContext())}
+                      <th
+                        key={header.id}
+                        colSpan={header.colSpan}
+                        className='border-r px-4 py-3 font-medium last:border-r-0'
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
                       </th>
                     ))}
                   </tr>
@@ -704,17 +854,7 @@ export function RecordTableList({ recordKind = 'sample' }: { recordKind?: 'sampl
                   ))}
                 </>
               ) : (
-                <>
-                  <p className='text-sm text-muted-foreground'>
-                    {peekRecord.data.representations.length} representations ·{' '}
-                    {peekRecord.data.subjects.length} subjects
-                  </p>
-                  {peekRecord.data.representations.map((representation) => (
-                    <div key={representation.id} className='rounded-lg border p-3 text-sm'>
-                      {representation.name} · {representation.kind}
-                    </div>
-                  ))}
-                </>
+                <DataDetailBody record={peekRecord.data} compact />
               )}
               <Link
                 className='text-sm text-primary hover:underline'

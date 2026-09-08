@@ -490,6 +490,7 @@ def _summary(obj: ResearchObject) -> dict[str, Any]:
 
 def object_out(obj: ResearchObject) -> dict[str, Any]:
     return {
+        "record_sha256": None,
         **_summary(obj),
         "type_version_id": str(obj.type_version_id) if obj.type_version_id else None,
         "type_version": obj.type_version.version if obj.type_version else None,

@@ -107,4 +107,39 @@ describe('scientific document codec', () => {
     expect(parseOccurrencePayload((ref.props as JsonObject).payload)?.binding).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it('allocates fresh local field identities and preserves their values in a copy', () => {
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn().mockReturnValueOnce('field-new').mockReturnValueOnce('occurrence-new')
+    });
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'occurrence-old',
+      kind: 'object',
+      target_id: 'object',
+      field_definitions: {
+        fields: [
+          {
+            key: 'local_field-old',
+            field_id: 'field-old',
+            source: 'local',
+            label: 'Local',
+            value_type: 'text'
+          }
+        ]
+      },
+      values: { 'local_field-old': { value: 'kept' } }
+    };
+    const cloned = cloneDocumentForNewRecord(paragraph(occurrenceRef(occurrence, 'Object')));
+    const copied = parseOccurrencePayload(
+      ((cloned[0].content as JsonObject[])[0].props as JsonObject).payload
+    );
+    expect(copied).toMatchObject({
+      occurrence_id: 'occurrence-new',
+      field_definitions: {
+        fields: [{ key: 'local_field-new', field_id: 'field-new', source: 'local' }]
+      },
+      values: { 'local_field-new': { value: 'kept' } }
+    });
+    vi.unstubAllGlobals();
+  });
 });

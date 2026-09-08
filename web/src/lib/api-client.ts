@@ -229,6 +229,8 @@ export const api = {
   createSampleBatch: (
     payload: {
       project_scope_id: string;
+      source_sample_id: string;
+      source_revision_id: string;
       rows: Array<{ client_row_id: string; record: SampleRecordCreatePayload }>;
     },
     idempotencyKey: string

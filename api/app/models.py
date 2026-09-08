@@ -649,6 +649,7 @@ class OccurrenceFieldValue(Base):
         ForeignKey("research_objects.id", ondelete="RESTRICT"), index=True
     )
     field_key: Mapped[str] = mapped_column(String(120))
+    field_label: Mapped[str | None] = mapped_column(String(240), nullable=True)
     value_type: Mapped[str] = mapped_column(String(16))
     text_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     number_value: Mapped[float | None] = mapped_column(Float, nullable=True)

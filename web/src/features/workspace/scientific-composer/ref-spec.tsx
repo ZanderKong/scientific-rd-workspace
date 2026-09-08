@@ -7,9 +7,16 @@ import {
   createReactInlineContentSpec,
   type ReactCustomInlineContentRenderProps
 } from '@blocknote/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent
+} from 'react';
+import { useTranslations } from 'next-intl';
 import type { JsonObject, ScientificOccurrenceDraft, UsageFieldDefinition } from '@/lib/domain';
-import { parseOccurrencePayload } from '../scientific-document/model';
+import { parseOccurrencePayload, remapLocalFieldIdentities } from '../scientific-document/model';
 
 const refProps = {
   occurrenceId: { default: '' },
@@ -48,10 +55,10 @@ function displayValue(occurrence: ScientificOccurrenceDraft, field: UsageFieldDe
 function writeValue(
   occurrence: ScientificOccurrenceDraft,
   field: UsageFieldDefinition,
-  value: string
+  value: unknown
 ): ScientificOccurrenceDraft {
   const next = structuredClone(occurrence);
-  if (!value) {
+  if (value === '' || value === null || value === undefined) {
     delete next.values[field.key];
     return next;
   }
@@ -66,19 +73,17 @@ function writeValue(
   return next;
 }
 
-function focusSibling(current: HTMLInputElement, backwards: boolean) {
+function focusSibling(current: HTMLElement, backwards: boolean) {
   // Scope Tab navigation to the composer that owns this Ref.  A page can
   // render more than one editor (for example in a Peek drawer); querying the
   // whole document would move focus into an unrelated editor.
   const scope = current.closest<HTMLElement>('[data-scientific-composer]') ?? current.ownerDocument;
-  const slots = Array.from(
-    scope.querySelectorAll<HTMLInputElement>('[data-scientific-slot="true"]')
-  );
+  const slots = Array.from(scope.querySelectorAll<HTMLElement>('[data-scientific-slot="true"]'));
   const index = slots.indexOf(current);
   const target = slots[index + (backwards ? -1 : 1)];
   if (!target) return false;
   target.focus();
-  target.select();
+  if (target instanceof HTMLInputElement) target.select();
   return true;
 }
 
@@ -93,16 +98,87 @@ function PropertySlot({
   occurrence: ScientificOccurrenceDraft;
   field: UsageFieldDefinition;
   label: string;
-  commit: (value: string) => void;
+  commit: (value: unknown) => void;
   editor: RefRenderProps['editor'];
   getPos: () => number | undefined;
 }) {
+  const t = useTranslations('ProductCompletion.composer');
   const committed = displayValue(occurrence, field);
   const [draft, setDraft] = useState(committed);
   const [isComposing, setIsComposing] = useState(false);
   useEffect(() => {
     if (!isComposing) setDraft(committed);
   }, [committed, isComposing]);
+  const common = {
+    'data-scientific-slot': 'true',
+    'data-occurrence-id': occurrence.occurrence_id,
+    'data-field-key': field.key,
+    'aria-label': `${label} ${field.label}`,
+    disabled: !editor.isEditable,
+    className:
+      'h-6 min-w-12 max-w-28 rounded border bg-background px-1 text-sm outline-none focus:ring-2 focus:ring-ring',
+    onFocus: () => editor.transact((tr) => closeHistory(tr)),
+    onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
+      if ((event.nativeEvent as KeyboardEvent).isComposing) return;
+      if (event.key === 'Tab') {
+        if (focusSibling(event.currentTarget, event.shiftKey)) event.preventDefault();
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.currentTarget.blur();
+        const pos = getPos();
+        if (typeof pos === 'number') {
+          editor.transact((tr) => closeHistory(tr.setSelection(NodeSelection.create(tr.doc, pos))));
+          editor.prosemirrorView.focus();
+        }
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) editor.redo();
+        else editor.undo();
+        return;
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        editor.redo();
+      }
+    }
+  } as const;
+  if (field.value_type === 'boolean') {
+    return (
+      <label className='inline-flex items-baseline gap-0.5 text-xs'>
+        <span className='text-muted-foreground'>{field.label}</span>
+        <select
+          {...common}
+          value={committed === '' ? '' : committed === 'true' ? 'true' : 'false'}
+          onChange={(event) =>
+            commit(event.target.value === '' ? '' : event.target.value === 'true')
+          }
+        >
+          <option value=''>—</option>
+          <option value='true'>{t('yes')}</option>
+          <option value='false'>{t('no')}</option>
+        </select>
+      </label>
+    );
+  }
+  if (field.value_type === 'select') {
+    return (
+      <label className='inline-flex items-baseline gap-0.5 text-xs'>
+        <span className='text-muted-foreground'>{field.label}</span>
+        <select {...common} value={draft} onChange={(event) => commit(event.target.value)}>
+          <option value=''>—</option>
+          {(field.options ?? []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
   return (
     <label className='inline-flex items-baseline gap-0.5 text-xs'>
       <span className='text-muted-foreground'>{field.label}</span>
@@ -114,7 +190,8 @@ function PropertySlot({
         disabled={!editor.isEditable}
         className='h-6 min-w-12 max-w-28 rounded border bg-background px-1 text-sm outline-none focus:ring-2 focus:ring-ring'
         value={draft}
-        placeholder={field.required ? '必填' : '—'}
+        inputMode={field.value_type === 'number' ? 'decimal' : undefined}
+        placeholder={field.required ? t('required') : '—'}
         onFocus={() => editor.transact((tr) => closeHistory(tr))}
         onCompositionStart={() => setIsComposing(true)}
         onCompositionEnd={(event) => {
@@ -159,24 +236,6 @@ function PropertySlot({
           }
           const atStart = event.currentTarget.selectionStart === 0;
           const atEnd = event.currentTarget.selectionEnd === event.currentTarget.value.length;
-          const collapsed = event.currentTarget.selectionStart === event.currentTarget.selectionEnd;
-          if (
-            collapsed &&
-            ((event.key === 'Backspace' && atStart) || (event.key === 'Delete' && atEnd))
-          ) {
-            const pos = getPos();
-            if (typeof pos === 'number') {
-              const node = editor.prosemirrorView.state.doc.nodeAt(pos);
-              if (!node || !isRefNode(node.type.name)) return;
-              event.preventDefault();
-              editor.transact((tr) => {
-                const nodeSize = tr.doc.nodeAt(pos)?.nodeSize ?? 1;
-                tr.delete(pos, pos + nodeSize).scrollIntoView();
-              });
-              editor.prosemirrorView.focus();
-              return;
-            }
-          }
           if ((event.key === 'ArrowLeft' && atStart) || (event.key === 'ArrowRight' && atEnd)) {
             // Arrow keys leave the atomic Ref at its boundary.  They must not
             // jump directly to another Ref's slot; the intervening document
@@ -201,11 +260,22 @@ function PropertySlot({
 }
 
 function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRenderProps) {
+  const t = useTranslations('ProductCompletion.composer');
   const occurrence = useMemo(
     () => parseOccurrencePayload(inlineContent.props.payload),
     [inlineContent.props.payload]
   );
   const activeField = useRef<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newType, setNewType] = useState<UsageFieldDefinition['value_type']>('text');
+  const [newUnit, setNewUnit] = useState('');
+  const [newOptions, setNewOptions] = useState('');
+  const newLabelRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (adding) newLabelRef.current?.focus();
+  }, [adding]);
   useEffect(() => {
     if (!activeField.current) return;
     const selector = `[data-occurrence-id="${CSS.escape(inlineContent.props.occurrenceId)}"][data-field-key="${CSS.escape(activeField.current)}"]`;
@@ -215,15 +285,22 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
     if (element && document.activeElement !== element) element.focus({ preventScroll: true });
   }, [editor.prosemirrorView, inlineContent.props.occurrenceId]);
   if (!occurrence) {
-    return <span className='rounded bg-destructive/10 px-1 text-destructive'>Invalid Ref</span>;
+    return (
+      <span className='rounded bg-destructive/10 px-1 text-destructive'>{t('invalidRef')}</span>
+    );
   }
   const definitions = fields(occurrence.field_definitions);
-  const updateField = (field: UsageFieldDefinition, value: string) => {
-    const next = writeValue(occurrence, field, value);
+  const visibleDefinitions = editing
+    ? definitions
+    : definitions.filter((field) => displayValue(occurrence, field) !== '');
+  const updateOccurrence = (next: ScientificOccurrenceDraft) =>
     updateInlineContent({
       type: inlineContent.type,
       props: { ...inlineContent.props, payload: JSON.stringify(next) }
     });
+  const updateField = (field: UsageFieldDefinition, value: unknown) => {
+    const next = writeValue(occurrence, field, value);
+    updateOccurrence(next);
   };
   const selectOccurrence = () => {
     document.dispatchEvent(
@@ -231,6 +308,74 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
         detail: { occurrenceId: occurrence.occurrence_id }
       })
     );
+    setEditing(true);
+  };
+  const localFields = definitions.filter((field) => field.source === 'local');
+  const updateLocalField = (field: UsageFieldDefinition, patch: Partial<UsageFieldDefinition>) => {
+    const next = structuredClone(occurrence);
+    next.field_definitions = {
+      fields: definitions.map((item) => (item.key === field.key ? { ...item, ...patch } : item))
+    };
+    updateOccurrence(next);
+  };
+  const moveLocalField = (field: UsageFieldDefinition, delta: -1 | 1) => {
+    const index = localFields.findIndex((item) => item.key === field.key);
+    const nextIndex = index + delta;
+    if (index < 0 || nextIndex < 0 || nextIndex >= localFields.length) return;
+    const reordered = [...localFields];
+    [reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
+    const template = definitions.filter((item) => item.source !== 'local');
+    const next = structuredClone(occurrence);
+    next.field_definitions = {
+      fields: [...template, ...reordered].map((item, order) => ({ ...item, order }))
+    };
+    updateOccurrence(next);
+  };
+  const removeLocalField = (field: UsageFieldDefinition) => {
+    if (
+      displayValue(occurrence, field) !== '' &&
+      !window.confirm(t('deleteConfirm', { label: field.label }))
+    )
+      return;
+    const next = structuredClone(occurrence);
+    next.field_definitions = { fields: definitions.filter((item) => item.key !== field.key) };
+    delete next.values[field.key];
+    updateOccurrence(next);
+  };
+  const addLocalField = () => {
+    const label = newLabel.trim();
+    if (!label || (newType === 'select' && !newOptions.split(',').some((item) => item.trim())))
+      return;
+    const fieldId = crypto.randomUUID();
+    const next = structuredClone(occurrence);
+    next.field_definitions = {
+      fields: [
+        ...definitions,
+        {
+          key: `local_${fieldId}`,
+          label,
+          value_type: newType,
+          source: 'local',
+          owner_id: null,
+          field_id: fieldId,
+          default_unit: newUnit.trim() || null,
+          options:
+            newType === 'select'
+              ? newOptions
+                  .split(',')
+                  .map((item) => item.trim())
+                  .filter(Boolean)
+              : [],
+          required: false,
+          order: definitions.length
+        }
+      ]
+    };
+    updateOccurrence(next);
+    setNewLabel('');
+    setNewUnit('');
+    setNewOptions('');
+    setAdding(false);
   };
   return (
     <span
@@ -238,6 +383,12 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
       data-scientific-ref={occurrence.kind}
       data-occurrence-id={occurrence.occurrence_id}
       className='mx-0.5 inline-flex max-w-full flex-wrap items-baseline gap-1 rounded-md border border-primary/25 bg-primary/5 px-1.5 py-0.5 align-baseline'
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setEditing(false);
+          setAdding(false);
+        }
+      }}
     >
       <button
         type='button'
@@ -250,7 +401,7 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
         {occurrence.kind === 'process' ? '/' : '@'}
         {inlineContent.props.label}
       </button>
-      {definitions.map((field) => (
+      {visibleDefinitions.map((field) => (
         <span
           key={field.key}
           onFocus={() => {
@@ -265,8 +416,101 @@ function RefView({ inlineContent, updateInlineContent, editor, getPos }: RefRend
             editor={editor}
             getPos={getPos}
           />
+          {editing && field.source === 'local' && (
+            <span className='inline-flex items-center gap-0.5'>
+              <input
+                aria-label={t('rename', { label: field.label })}
+                className='h-6 w-20 rounded border bg-background px-1 text-xs'
+                value={field.label}
+                onChange={(event) => updateLocalField(field, { label: event.target.value })}
+              />
+              <button
+                type='button'
+                disabled={localFields[0]?.key === field.key}
+                onClick={() => moveLocalField(field, -1)}
+              >
+                ↑
+              </button>
+              <button
+                type='button'
+                disabled={localFields.at(-1)?.key === field.key}
+                onClick={() => moveLocalField(field, 1)}
+              >
+                ↓
+              </button>
+              <button
+                type='button'
+                aria-label={t('delete', { label: field.label })}
+                onClick={() => removeLocalField(field)}
+              >
+                ×
+              </button>
+            </span>
+          )}
         </span>
       ))}
+      {editing &&
+        editor.isEditable &&
+        (adding ? (
+          <span className='inline-flex flex-wrap items-center gap-1 rounded border bg-background p-1'>
+            <input
+              ref={newLabelRef}
+              aria-label={t('localName')}
+              className='h-6 w-24 px-1 text-xs'
+              value={newLabel}
+              onChange={(event) => setNewLabel(event.target.value)}
+              placeholder={t('localName')}
+            />
+            <select
+              aria-label={t('localType')}
+              className='h-6 text-xs'
+              value={newType}
+              onChange={(event) =>
+                setNewType(event.target.value as UsageFieldDefinition['value_type'])
+              }
+            >
+              <option value='text'>文本</option>
+              <option value='number'>数字</option>
+              <option value='boolean'>布尔值</option>
+              <option value='select'>选项</option>
+            </select>
+            {newType !== 'boolean' && newType !== 'select' && (
+              <input
+                aria-label={t('localUnit')}
+                className='h-6 w-16 px-1 text-xs'
+                value={newUnit}
+                onChange={(event) => setNewUnit(event.target.value)}
+                placeholder={t('localUnit')}
+              />
+            )}
+            {newType === 'select' && (
+              <input
+                aria-label={t('localOptions')}
+                className='h-6 w-36 px-1 text-xs'
+                value={newOptions}
+                onChange={(event) => setNewOptions(event.target.value)}
+                placeholder={t('localOptions')}
+              />
+            )}
+            <button
+              type='button'
+              disabled={
+                !newLabel.trim() ||
+                (newType === 'select' && !newOptions.split(',').some((item) => item.trim()))
+              }
+              onClick={addLocalField}
+            >
+              {t('add')}
+            </button>
+            <button type='button' onClick={() => setAdding(false)}>
+              {t('cancel')}
+            </button>
+          </span>
+        ) : (
+          <button type='button' className='text-xs text-primary' onClick={() => setAdding(true)}>
+            {t('addLocal')}
+          </button>
+        ))}
     </span>
   );
 }
@@ -351,8 +595,9 @@ export const createRefIdentityExtension = createExtension(() => ({
             seen.add(oldId);
             return;
           }
-          const occurrence = parseOccurrencePayload(node.attrs.payload);
+          let occurrence = parseOccurrencePayload(node.attrs.payload);
           if (!occurrence) return;
+          occurrence = remapLocalFieldIdentities(occurrence);
           const nextId = crypto.randomUUID();
           remapped.set(oldId, nextId);
           occurrence.occurrence_id = nextId;
@@ -371,9 +616,9 @@ export const createRefIdentityExtension = createExtension(() => ({
           if (!node) continue;
           const occurrence = parseOccurrencePayload(update.attrs.payload);
           if (occurrence?.binding) {
-            occurrence.binding.process_occurrence_id =
-              remapped.get(occurrence.binding.process_occurrence_id) ??
-              occurrence.binding.process_occurrence_id;
+            const processOccurrenceId = remapped.get(occurrence.binding.process_occurrence_id);
+            if (!processOccurrenceId) occurrence.binding = null;
+            else occurrence.binding.process_occurrence_id = processOccurrenceId;
             update.attrs.payload = JSON.stringify(occurrence);
           }
           tr.setNodeMarkup(update.pos, undefined, update.attrs);

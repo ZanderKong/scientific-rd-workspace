@@ -294,9 +294,12 @@ jobs:
         working-directory: web
         run: >-
           npm run e2e -- e2e/sample-composer.spec.ts
+          e2e/composer-quick-create.spec.ts
+          e2e/template-maintenance.spec.ts
           e2e/golden-scientific-workflow.spec.ts
           e2e/data-composer.spec.ts
           e2e/sample-table.spec.ts
+          e2e/sample-batch-ui.spec.ts
           e2e/workflow-v15.spec.ts
           e2e/sample-save-race.spec.ts
       - name: Upload golden browser evidence

@@ -242,7 +242,7 @@ export function DataComposer() {
             api.listProcessDefinitions({
               project_scope_id: activeProjectId ?? draft?.project_scope_id,
               q: query || undefined,
-              limit: 50
+              limit: 200
             })
           }
           searchObjects={(query) =>
@@ -251,7 +251,20 @@ export function DataComposer() {
               project_scope_id: activeProjectId ?? draft?.project_scope_id,
               include_global: true,
               q: query || undefined,
-              limit: 50
+              limit: 200
+            })
+          }
+          createProcess={(value) =>
+            api.createProcessDefinition({
+              ...value,
+              project_scope_id: activeProjectId ?? draft?.project_scope_id
+            })
+          }
+          createObject={(value) =>
+            api.createObject({
+              ...value,
+              kind: 'research_object',
+              project_scope_id: activeProjectId ?? draft?.project_scope_id
             })
           }
           onChange={setBlocks}

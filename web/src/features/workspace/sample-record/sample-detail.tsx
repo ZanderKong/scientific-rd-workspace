@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api, ApiError } from '@/lib/api-client';
 import type { ObjectRevision, SampleRecord } from '@/lib/domain';
 import { SampleComposer } from './sample-composer';
@@ -45,6 +46,12 @@ export function SampleDetail({ sampleId }: { sampleId: string }) {
   return (
     <>
       <nav className='mx-auto flex w-full max-w-[1320px] flex-wrap gap-2 px-4 pt-5 md:px-8'>
+        <Link
+          className='rounded border px-3 py-1 text-sm'
+          href={`/dashboard/samples/${sampleId}/batch${selectedRevision ? `?revision=${selectedRevision}` : ''}`}
+        >
+          基于此版本批量创建
+        </Link>
         <button
           type='button'
           className='rounded border px-3 py-1 text-sm'

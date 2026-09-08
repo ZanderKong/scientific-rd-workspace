@@ -84,6 +84,7 @@ def query_record_table(db: Session, query: RecordTableQuery) -> dict[str, Any]:
     statement = catalog_statement.where(kind_condition)
     if query.record_ids is not None:
         catalog_statement = catalog_statement.where(ResearchObject.id.in_(query.record_ids))
+        statement = statement.where(ResearchObject.id.in_(query.record_ids))
     catalog_statement = catalog_statement.where(kind_condition)
     if query.q and query.q.strip():
         pattern = f"%{query.q.strip()}%"
@@ -112,6 +113,7 @@ def query_record_table(db: Session, query: RecordTableQuery) -> dict[str, Any]:
             OccurrenceFieldValue.target_id,
             OccurrenceFieldValue.field_key,
             OccurrenceFieldValue.value_type,
+            func.max(OccurrenceFieldValue.field_label).label("field_label"),
         )
         .join(catalog_ids, catalog_ids.c.id == OccurrenceFieldValue.owner_id)
         .group_by(
@@ -122,6 +124,13 @@ def query_record_table(db: Session, query: RecordTableQuery) -> dict[str, Any]:
         .order_by(OccurrenceFieldValue.target_id, OccurrenceFieldValue.field_key)
     ).all()
     catalog_target_ids = {row.target_id for row in catalog_rows}
+    available_target_ids = set(
+        db.scalars(
+            select(DocumentOccurrence.target_id)
+            .join(catalog_ids, catalog_ids.c.id == DocumentOccurrence.owner_id)
+            .distinct()
+        ).all()
+    )
     catalog_titles = {
         item.id: item.title
         for item in db.scalars(
@@ -218,9 +227,20 @@ def query_record_table(db: Session, query: RecordTableQuery) -> dict[str, Any]:
             {
                 "target_id": row.target_id,
                 "field_key": row.field_key,
-                "label": f"{catalog_titles.get(row.target_id, 'Ref')} · {row.field_key}",
+                "label": (
+                    f"{catalog_titles.get(row.target_id, 'Ref')} · "
+                    f"{row.field_label or row.field_key}"
+                ),
                 "value_type": row.value_type,
             }
             for row in catalog_rows
+        ],
+        "available_refs": [
+            object_out(item)
+            for item in db.scalars(
+                select(ResearchObject)
+                .where(ResearchObject.id.in_(available_target_ids))
+                .order_by(ResearchObject.title, ResearchObject.id)
+            ).all()
         ],
     }

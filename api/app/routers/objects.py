@@ -477,7 +477,9 @@ def get_object_route(
     if item is None:
         raise HTTPException(status_code=404, detail="research object not found")
     body = object_out(item)
-    response.headers["ETag"] = f'"{sha256_json(body)}"'
+    token = sha256_json(body)
+    response.headers["ETag"] = f'"{token}"'
+    body["record_sha256"] = token
     return ResearchObjectOut.model_validate(body)
 
 
@@ -526,8 +528,11 @@ def patch_object(
             payload.model_dump(exclude_unset=True),
             expected_record_sha256=if_match.strip('"') if if_match else None,
         )
-        response.headers["ETag"] = f'"{sha256_json(object_out(updated))}"'
-        return ResearchObjectOut.model_validate(object_out(updated))
+        body = object_out(updated)
+        token = sha256_json(body)
+        response.headers["ETag"] = f'"{token}"'
+        body["record_sha256"] = token
+        return ResearchObjectOut.model_validate(body)
     except HTTPException:
         raise
     except (LookupError, ValueError, IntegrityError) as exc:

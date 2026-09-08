@@ -61,6 +61,33 @@ export function occurrenceRef(occurrence: ScientificOccurrenceDraft, label: stri
   };
 }
 
+export function remapLocalFieldIdentities(
+  occurrence: ScientificOccurrenceDraft
+): ScientificOccurrenceDraft {
+  const next = structuredClone(occurrence);
+  const nested = next.field_definitions.fields;
+  if (!Array.isArray(nested)) return next;
+  const remappedValues: JsonObject = { ...next.values };
+  next.field_definitions = {
+    ...next.field_definitions,
+    fields: nested.map((value) => {
+      if (!value || typeof value !== 'object') return value;
+      const field = value as JsonObject;
+      if (field.source !== 'local') return field;
+      const oldKey = String(field.key ?? '');
+      const fieldId = crypto.randomUUID();
+      const key = `local_${fieldId}`;
+      if (oldKey in remappedValues) {
+        remappedValues[key] = remappedValues[oldKey];
+        delete remappedValues[oldKey];
+      }
+      return { ...field, key, field_id: fieldId, owner_id: null };
+    })
+  };
+  next.values = remappedValues;
+  return next;
+}
+
 export function enrichDocument(record: SampleRecord): ScientificEditorDraft {
   const blocks = enrichScientificDocument(record.document, record.occurrences);
   return {
@@ -135,8 +162,9 @@ export function cloneDocumentForNewRecord(blocks: JsonObject[]): JsonObject[] {
   visit(copy, (node) => {
     if (node.type !== 'processRef' && node.type !== 'objectRef') return;
     const props = node.props as RefProps | undefined;
-    const occurrence = parseOccurrencePayload(props?.payload);
+    let occurrence = parseOccurrencePayload(props?.payload);
     if (!props || !occurrence) return;
+    occurrence = remapLocalFieldIdentities(occurrence);
     const nextId = crypto.randomUUID();
     occurrenceMap.set(occurrence.occurrence_id, nextId);
     occurrence.occurrence_id = nextId;
@@ -152,9 +180,9 @@ export function cloneDocumentForNewRecord(blocks: JsonObject[]): JsonObject[] {
     const props = node.props as RefProps | undefined;
     const occurrence = parseOccurrencePayload(props?.payload);
     if (!props || !occurrence?.binding) return;
-    occurrence.binding.process_occurrence_id =
-      occurrenceMap.get(occurrence.binding.process_occurrence_id) ??
-      occurrence.binding.process_occurrence_id;
+    const processOccurrenceId = occurrenceMap.get(occurrence.binding.process_occurrence_id);
+    if (!processOccurrenceId) occurrence.binding = null;
+    else occurrence.binding.process_occurrence_id = processOccurrenceId;
     props.payload = JSON.stringify(occurrence);
   });
   return copy;

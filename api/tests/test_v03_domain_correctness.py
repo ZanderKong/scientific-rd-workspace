@@ -254,6 +254,37 @@ def test_definition_versions_and_representations_are_immutable(client, db):
         raise AssertionError("DataRepresentation accepted an in-place mutation")
 
 
+def test_process_definition_metadata_and_fields_publish_atomically(client):
+    project_id = _project(client)
+    definition = _definition(client, project_id, "PFD-AUTHORING")
+    definition_id = definition["process_definition"]["id"]
+    current = client.get(f"/api/v1/objects/{definition_id}")
+    assert current.status_code == 200, current.text
+    token = current.json()["record_sha256"]
+    published = client.post(
+        f"/api/v1/process-definitions/{definition_id}/versions",
+        json={
+            "title": "Updated definition",
+            "tags": ["updated"],
+            "properties_jsonb": {"method": "v2"},
+            "execution_field_definitions": {
+                "fields": [{"key": "speed", "label": "Speed", "value_type": "number"}]
+            },
+            "base_record_sha256": token,
+        },
+    )
+    assert published.status_code == 201, published.text
+    result = client.get(f"/api/v1/process-definitions/{definition_id}").json()
+    assert result["process_definition"]["title"] == "Updated definition"
+    assert result["process_definition"]["properties_jsonb"] == {"method": "v2"}
+    assert result["current_version"]["execution_field_definitions"]["fields"][0]["key"] == "speed"
+    stale = client.post(
+        f"/api/v1/process-definitions/{definition_id}/versions",
+        json={"execution_field_definitions": {}, "base_record_sha256": token},
+    )
+    assert stale.status_code == 412, stale.text
+
+
 def test_view_revision_is_pinned_on_process_execution(client, monkeypatch, tmp_path):
     import app.routers.objects as objects_router
 

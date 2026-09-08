@@ -12,11 +12,14 @@ import type {
   ExperimentRecord,
   ProjectRecord,
   ResearchObject,
+  Asset,
   ViewRecord
 } from '@/lib/domain';
 import { Button } from '@/components/ui/button';
 import { useProjectScope } from './project-scope/project-scope-context';
 import { objectPath } from './components/workspace-app';
+import { DataDetailBody } from './components/scientific-detail-body';
+import { RecordTableList } from './sample-record/sample-list';
 
 const card = 'rounded-2xl border bg-card/80 p-5 shadow-xs';
 function message(error: unknown) {
@@ -213,6 +216,9 @@ export function ExperimentWorkspace({
     const selected = searchParams.get('selectedSample');
     return selected ? [selected] : [];
   });
+  const [experimentTab, setExperimentTab] = useState<'sample' | 'data' | 'view' | 'claim'>(
+    'sample'
+  );
   useEffect(() => {
     if (experimentId)
       api
@@ -226,7 +232,30 @@ export function ExperimentWorkspace({
         .catch((cause) => setError(message(cause)));
   }, [experimentId, scope]);
   useEffect(() => {
-    if (!creating || !scope) return;
+    if (!create || !scope) return;
+    const key = `experiment-picker:${scope}`;
+    const saved = window.sessionStorage.getItem(key);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as { title?: string; selectedSamples?: string[] };
+        if (parsed.title) setTitle(parsed.title);
+        if (parsed.selectedSamples?.length) setSelectedSamples(parsed.selectedSamples);
+      } catch {
+        window.sessionStorage.removeItem(key);
+      }
+    } else if (!title) {
+      setTitle(`实验 ${new Date().toLocaleDateString()}`);
+    }
+  }, [create, scope, title]);
+  useEffect(() => {
+    if (!create || !scope) return;
+    window.sessionStorage.setItem(
+      `experiment-picker:${scope}`,
+      JSON.stringify({ title, selectedSamples })
+    );
+  }, [create, scope, selectedSamples, title]);
+  useEffect(() => {
+    if ((!creating && !record) || !scope) return;
     api
       .queryRecordTable({
         project_scope_id: scope,
@@ -242,10 +271,10 @@ export function ExperimentWorkspace({
         setSampleTotal(result.total);
       })
       .catch((cause) => setError(message(cause)));
-  }, [creating, samplePage, sampleQuery, scope]);
+  }, [creating, record, samplePage, sampleQuery, scope]);
   async function createExperiment(event: React.FormEvent) {
     event.preventDefault();
-    if (!scope || !title.trim()) return;
+    if (!scope || !title.trim() || selectedSamples.length === 0) return;
     try {
       const next = await api.createExperimentRecord({
         project_scope_id: scope,
@@ -262,7 +291,36 @@ export function ExperimentWorkspace({
       setError(message(cause));
     }
   }
-  if (record)
+  if (record) {
+    const references = Object.values(record.references).flat();
+    const sampleReferences = references.filter(
+      (item) => item.object.authoring_kind === 'sample' || item.role === 'sample'
+    );
+    const tabReferences = references.filter((item) => {
+      if (experimentTab === 'sample') return sampleReferences.includes(item);
+      return item.object.kind === experimentTab;
+    });
+    const reorderedSampleIds = (index: number, delta: -1 | 1) => {
+      const ordered = [...references].toSorted(
+        (left, right) => left.order_index - right.order_index
+      );
+      const current = ordered.findIndex(
+        (item) => item.relation_id === sampleReferences[index].relation_id
+      );
+      const sibling = ordered.findIndex(
+        (item) => item.relation_id === sampleReferences[index + delta].relation_id
+      );
+      [ordered[current], ordered[sibling]] = [ordered[sibling], ordered[current]];
+      return ordered.map((item) => item.relation_id);
+    };
+    const mutate = async (operation: () => Promise<ExperimentRecord>) => {
+      try {
+        setError(null);
+        setRecord(await operation());
+      } catch (cause) {
+        setError(message(cause));
+      }
+    };
     return (
       <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
         <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
@@ -273,17 +331,189 @@ export function ExperimentWorkspace({
           This experiment is a reference context; it does not own process, sample, or data
           provenance.
         </p>
-        <section className='mt-6 space-y-2'>
-          <h2 className='font-semibold'>References</h2>
-          {Object.values(record.references)
-            .flat()
-            .map((reference) => (
-              <ObjectLink key={reference.relation_id} object={reference.object} />
+        <section className='mt-6 space-y-4'>
+          <div className='flex flex-wrap gap-2' role='tablist'>
+            {(['sample', 'data', 'view', 'claim'] as const).map((tab) => (
+              <Button
+                key={tab}
+                type='button'
+                variant={experimentTab === tab ? 'default' : 'outline'}
+                onClick={() => setExperimentTab(tab)}
+              >
+                {tab === 'sample' ? 'Samples' : tab[0].toUpperCase() + tab.slice(1)}
+              </Button>
             ))}
+          </div>
+          {experimentTab === 'sample' && sampleReferences.length > 0 ? (
+            <RecordTableList
+              recordKind='sample'
+              recordIds={sampleReferences.map((item) => item.object.id)}
+              embedded
+            />
+          ) : (
+            <div className='grid gap-2'>
+              {tabReferences.map((reference) => (
+                <div key={reference.relation_id} className='flex items-center gap-2'>
+                  <div className='min-w-0 flex-1'>
+                    <ObjectLink object={reference.object} />
+                  </div>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={() =>
+                      void mutate(() =>
+                        api.removeExperimentReference(
+                          record.experiment.id,
+                          reference.relation_id,
+                          record.record_sha256
+                        )
+                      )
+                    }
+                  >
+                    移除
+                  </Button>
+                </div>
+              ))}
+              {!tabReferences.length && (
+                <p className='text-sm text-muted-foreground'>暂无此类成员。</p>
+              )}
+            </div>
+          )}
+          {experimentTab === 'sample' && (
+            <div className='space-y-2 rounded-lg border p-3'>
+              <h2 className='text-sm font-semibold'>管理 Sample 成员</h2>
+              <div className='flex gap-2'>
+                <input
+                  className='h-9 min-w-0 flex-1 rounded border bg-background px-3 text-sm'
+                  value={sampleQuery}
+                  onChange={(event) => {
+                    setSampleQuery(event.target.value);
+                    setSamplePage(1);
+                  }}
+                  placeholder='搜索要加入的 Sample…'
+                />
+              </div>
+              {sampleCandidates
+                .filter(
+                  (candidate) => !sampleReferences.some((item) => item.object.id === candidate.id)
+                )
+                .map((candidate) => (
+                  <div key={candidate.id} className='flex items-center gap-2 text-sm'>
+                    <span className='min-w-0 flex-1 truncate'>{candidate.title}</span>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      onClick={() =>
+                        void mutate(() =>
+                          api.addExperimentReference(
+                            record.experiment.id,
+                            {
+                              target_id: candidate.id,
+                              target_kind: 'research_object',
+                              role: 'sample',
+                              order_index: references.length
+                            },
+                            record.record_sha256
+                          )
+                        )
+                      }
+                    >
+                      加入
+                    </Button>
+                  </div>
+                ))}
+              {sampleTotal > 50 && (
+                <div className='flex items-center justify-between text-sm'>
+                  <span>
+                    第 {samplePage} 页，共 {sampleTotal} 条
+                  </span>
+                  <span className='flex gap-2'>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      disabled={samplePage <= 1}
+                      onClick={() => setSamplePage((page) => page - 1)}
+                    >
+                      上一页
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant='outline'
+                      disabled={samplePage >= Math.ceil(sampleTotal / 50)}
+                      onClick={() => setSamplePage((page) => page + 1)}
+                    >
+                      下一页
+                    </Button>
+                  </span>
+                </div>
+              )}
+              {sampleReferences.map((reference, index) => (
+                <div key={reference.relation_id} className='flex items-center gap-2 text-sm'>
+                  <span className='min-w-0 flex-1 truncate'>{reference.object.title}</span>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    disabled={index === 0 || sampleReferences.length > 200}
+                    onClick={() => {
+                      void mutate(() =>
+                        api.reorderExperimentReferences(
+                          record.experiment.id,
+                          reorderedSampleIds(index, -1),
+                          record.record_sha256
+                        )
+                      );
+                    }}
+                  >
+                    ↑
+                  </Button>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    disabled={
+                      index === sampleReferences.length - 1 || sampleReferences.length > 200
+                    }
+                    onClick={() => {
+                      void mutate(() =>
+                        api.reorderExperimentReferences(
+                          record.experiment.id,
+                          reorderedSampleIds(index, 1),
+                          record.record_sha256
+                        )
+                      );
+                    }}
+                  >
+                    ↓
+                  </Button>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    onClick={() =>
+                      void mutate(() =>
+                        api.removeExperimentReference(
+                          record.experiment.id,
+                          reference.relation_id,
+                          record.record_sha256
+                        )
+                      )
+                    }
+                  >
+                    移除
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
         <ClaimCreator source={record.experiment} sourceKind='experiment' />
       </main>
     );
+  }
   return (
     <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
       <div className='mb-6 flex items-start justify-between gap-3'>
@@ -304,7 +534,7 @@ export function ExperimentWorkspace({
               onChange={(event) => setTitle(event.target.value)}
               placeholder='Experiment title'
             />
-            <Button type='submit' disabled={!title.trim()}>
+            <Button type='submit' disabled={!title.trim() || selectedSamples.length === 0}>
               Save with {selectedSamples.length} Sample{selectedSamples.length === 1 ? '' : 's'}
             </Button>
           </div>
@@ -418,42 +648,9 @@ export function DataWorkspace({ dataId }: { dataId: string }) {
           <p className='mt-2 font-mono text-xs text-muted-foreground'>
             Origin representation: {record.origin_representation_id ?? 'not set'}
           </p>
-          <div className='mt-6 grid gap-3 md:grid-cols-2'>
-            {record.representations.map((representation) => (
-              <article key={representation.id} className={card}>
-                <div className='flex items-center justify-between'>
-                  <h2 className='font-semibold'>{representation.name}</h2>
-                  <span className='rounded-full bg-muted px-2 py-1 text-xs'>
-                    {representation.kind}
-                  </span>
-                </div>
-                <p className='mt-2 font-mono text-[10px] text-muted-foreground'>
-                  {representation.representation_sha256.slice(0, 16)}…
-                </p>
-              </article>
-            ))}
+          <div className='mt-6'>
+            <DataDetailBody record={record} />
           </div>
-          {!!record.occurrences.length && (
-            <section className={`${card} mt-6`}>
-              <h2 className='font-semibold'>获取正文 · {record.occurrences.length} Ref</h2>
-              <div className='mt-3 space-y-2'>
-                {record.occurrences.map((occurrence) => (
-                  <div key={occurrence.occurrence_id} className='rounded-lg border p-3 text-sm'>
-                    <div className='flex items-center justify-between gap-2'>
-                      <span className='font-medium'>
-                        {occurrence.kind === 'process' ? '/' : '@'}
-                        {occurrence.label_snapshot ?? occurrence.target_id}
-                      </span>
-                      <span className='text-xs text-muted-foreground'>{occurrence.status}</span>
-                    </div>
-                    <pre className='mt-2 overflow-auto text-xs'>
-                      {JSON.stringify(occurrence.values, null, 2)}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
           <section className='mt-6 grid gap-3 md:grid-cols-2'>
             <div className={card}>
               <h2 className='font-semibold'>Subjects</h2>
@@ -476,15 +673,139 @@ export function DataWorkspace({ dataId }: { dataId: string }) {
   );
 }
 
+export function ViewCreateWorkspace() {
+  const { activeProjectId } = useProjectScope();
+  const [title, setTitle] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedData, setSelectedData] = useState<DataRecord[]>([]);
+  const [representationIds, setRepresentationIds] = useState<Record<string, string[]>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    Promise.all(selectedIds.map((id) => api.getDataRecord(id)))
+      .then((records) => {
+        if (!active) return;
+        setSelectedData(records);
+        setRepresentationIds((current) =>
+          Object.fromEntries(
+            records.map((record) => [
+              record.data.id,
+              current[record.data.id] ?? record.representations.map((item) => item.id)
+            ])
+          )
+        );
+      })
+      .catch((cause) => setError(message(cause)));
+    return () => {
+      active = false;
+    };
+  }, [selectedIds]);
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    if (!activeProjectId || !title.trim() || selectedData.length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const dataRefs = await Promise.all(
+        selectedData.map(async (record) => {
+          const revision = (await api.listRevisions(record.data.id)).at(-1);
+          if (!revision) throw new Error(`${record.data.title} has no revision to pin.`);
+          return {
+            data_id: record.data.id,
+            data_revision_id: revision.id,
+            representation_ids: representationIds[record.data.id] ?? []
+          };
+        })
+      );
+      const result = await api.createView({
+        project_scope_id: activeProjectId,
+        title: title.trim(),
+        data_refs: dataRefs,
+        config: {}
+      });
+      window.location.assign(objectPath(result.view));
+    } catch (cause) {
+      setError(message(cause));
+      setSaving(false);
+    }
+  }
+  return (
+    <main className='mx-auto w-full max-w-[1320px] space-y-5 px-4 py-7 md:px-8 md:py-10'>
+      <header>
+        <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>Pinned View</p>
+        <h1 className='mt-2 text-3xl font-semibold'>创建 View</h1>
+        <p className='mt-2 text-sm text-muted-foreground'>
+          选择 Data 与 Representation；提交时固定当前明确版本。
+        </p>
+      </header>
+      <RecordTableList recordKind='data' embedded onSelectionChange={setSelectedIds} />
+      <form onSubmit={create} className={`${card} space-y-4`}>
+        <label className='grid gap-1 text-sm'>
+          View 名称
+          <input
+            className='h-9 rounded border bg-background px-3'
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </label>
+        {selectedData.map((record) => (
+          <fieldset key={record.data.id} className='rounded-lg border p-3'>
+            <legend className='px-1 text-sm font-medium'>{record.data.title}</legend>
+            <div className='flex flex-wrap gap-3'>
+              {record.representations.map((representation) => (
+                <label key={representation.id} className='flex items-center gap-2 text-sm'>
+                  <input
+                    type='checkbox'
+                    checked={(representationIds[record.data.id] ?? []).includes(representation.id)}
+                    onChange={(event) =>
+                      setRepresentationIds((current) => ({
+                        ...current,
+                        [record.data.id]: event.target.checked
+                          ? [...(current[record.data.id] ?? []), representation.id]
+                          : (current[record.data.id] ?? []).filter((id) => id !== representation.id)
+                      }))
+                    }
+                  />
+                  {representation.name} · {representation.kind}
+                </label>
+              ))}
+              {!record.representations.length && (
+                <span className='text-sm text-muted-foreground'>没有可选 Representation</span>
+              )}
+            </div>
+          </fieldset>
+        ))}
+        <Button type='submit' disabled={saving || !title.trim() || selectedData.length === 0}>
+          {saving ? '正在创建…' : `创建 View（${selectedData.length} 个 Data）`}
+        </Button>
+        {error && (
+          <p role='alert' className='text-sm text-destructive'>
+            {error}
+          </p>
+        )}
+      </form>
+    </main>
+  );
+}
+
 export function ViewWorkspace({ viewId }: { viewId: string }) {
   const [record, setRecord] = useState<ViewRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   useEffect(() => {
     api
       .getView(viewId)
       .then(setRecord)
       .catch((cause) => setError(message(cause)));
+  }, [viewId]);
+  useEffect(() => {
+    api
+      .listAssets(viewId)
+      .then(setAssets)
+      .catch(() => setAssets([]));
   }, [viewId]);
   const dropzone = useDropzone({
     multiple: false,
@@ -502,6 +823,7 @@ export function ViewWorkspace({ viewId }: { viewId: string }) {
       setError(null);
       try {
         const asset = await api.uploadAsset(record.view.id, file);
+        setAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
         const updated = await api.updateView(
           record.view.id,
           { artifact_asset_id: asset.id, change_note: 'replace Artifact' },
@@ -515,6 +837,14 @@ export function ViewWorkspace({ viewId }: { viewId: string }) {
       }
     }
   });
+  const selectedRevision = record?.revisions.find((item) => item.id === selectedRevisionId);
+  const shownArtifactId = selectedRevision
+    ? String(selectedRevision.snapshot_jsonb.artifact_asset_id ?? '') || null
+    : (record?.artifact_asset_id ?? null);
+  const artifact = assets.find((item) => item.id === shownArtifactId);
+  const shownDataRefs = selectedRevision
+    ? ((selectedRevision.snapshot_jsonb.data_refs as ViewRecord['data_refs'] | undefined) ?? [])
+    : (record?.data_refs ?? []);
   return (
     <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
       <State loading={!record && !error} error={error} />
@@ -549,12 +879,43 @@ export function ViewWorkspace({ viewId }: { viewId: string }) {
           </section>
           <section className={`${card} mt-6`}>
             <h2 className='font-semibold'>Revision history</h2>
-            <div className='mt-3 space-y-2'>
+            <div className='mt-3 flex flex-wrap gap-2'>
+              <Button
+                type='button'
+                variant={selectedRevisionId ? 'outline' : 'default'}
+                onClick={() => setSelectedRevisionId(null)}
+              >
+                当前
+              </Button>
               {record.revisions.map((revision) => (
-                <div key={revision.id} className='rounded-lg border px-3 py-2 text-sm'>
-                  Revision {revision.revision_number} · {revision.snapshot_sha256.slice(0, 12)}…
-                </div>
+                <Button
+                  key={revision.id}
+                  type='button'
+                  variant={selectedRevisionId === revision.id ? 'default' : 'outline'}
+                  onClick={() => setSelectedRevisionId(revision.id)}
+                >
+                  v{revision.revision_number}
+                </Button>
               ))}
+            </div>
+            <div className='mt-4 space-y-2 text-sm'>
+              {shownDataRefs.map((dataRef) => {
+                const data = record.data.find((item) => item.id === dataRef.data_id);
+                return (
+                  <div key={dataRef.data_id} className='rounded-lg border p-3'>
+                    <p className='font-medium'>{data?.title ?? '历史 Data 不可用'}</p>
+                    <p className='mt-1 font-mono text-xs text-muted-foreground'>
+                      Data revision {dataRef.data_revision_id}
+                    </p>
+                    <p className='mt-1 text-xs text-muted-foreground'>
+                      {dataRef.representation_ids.length} Representation
+                    </p>
+                  </div>
+                );
+              })}
+              {!shownDataRefs.length && (
+                <p className='text-muted-foreground'>此版本没有 Data 来源。</p>
+              )}
             </div>
           </section>
           <section className={`${card} mt-6`}>
@@ -570,6 +931,33 @@ export function ViewWorkspace({ viewId }: { viewId: string }) {
             </div>
             {record.artifact_sha256 && (
               <p className='mt-2 font-mono text-xs'>{record.artifact_sha256}</p>
+            )}
+            {artifact && artifact.mime_type?.startsWith('image/') && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                className='mt-4 max-h-[32rem] max-w-full rounded-lg border object-contain'
+                src={api.downloadUrl(artifact.id)}
+                alt={artifact.original_filename}
+              />
+            )}
+            {artifact?.mime_type === 'application/pdf' && (
+              <iframe
+                className='mt-4 h-[32rem] w-full rounded-lg border'
+                src={api.downloadUrl(artifact.id)}
+                title={artifact.original_filename}
+                sandbox='allow-same-origin'
+              />
+            )}
+            {artifact && (
+              <a
+                className='mt-3 inline-block text-sm text-primary hover:underline'
+                href={api.downloadUrl(artifact.id)}
+              >
+                下载 {artifact.original_filename}
+              </a>
+            )}
+            {shownArtifactId && !artifact && (
+              <p className='mt-3 text-sm text-muted-foreground'>该版本的 Artifact 元数据不可用。</p>
             )}
           </section>
           <ClaimCreator

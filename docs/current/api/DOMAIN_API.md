@@ -47,7 +47,7 @@ PUT      /experiments/{id}/reference-order
 POST     /record-tables/query
 ```
 
-Sample writes use `ScientificDocumentV1` plus stable typed occurrences; the `steps` input format is removed. The table query performs full-scope filtering and sorting before pagination and returns ordered occurrence values. Experiment output remains grouped typed references and never ownership/provenance.
+Sample writes use `ScientificDocumentV1` plus stable typed occurrences; the `steps` input format is removed. Batch creation accepts an explicit `source_sample_id` and `source_revision_id`, keeps each `client_row_id`, and either creates every row or returns row/occurrence/field errors without partial success. The table query performs full-scope filtering and sorting before pagination and returns ordered occurrence values. Experiment output remains grouped typed references and never ownership/provenance.
 
 ## Data and assets
 

@@ -59,6 +59,9 @@ export function SampleComposer({
   const [status, setStatus] = useState(initialRecord?.sample.status ?? 'draft');
   const [tags, setTags] = useState(initialRecord?.sample.tags.join(',') ?? '样品');
   const [blocks, setBlocks] = useState<JsonObject[]>(initialBlocks);
+  const [producerProcessOccurrenceId, setProducerProcessOccurrenceId] = useState<string | null>(
+    editing ? (initialRecord?.producer_process_occurrence_id ?? null) : null
+  );
   const [baseRecordSha256, setBaseRecordSha256] = useState(
     editing ? (initialRecord?.record_sha256 ?? null) : null
   );
@@ -71,10 +74,17 @@ export function SampleComposer({
   const [createdRecordId, setCreatedRecordId] = useState<string | null>(null);
   const createKey = useRef(crypto.randomUUID());
   const generation = useRef(0);
-  const saveIntent = useRef<'save' | 'save-and-new'>('save');
+  const saveIntent = useRef<'save' | 'save-and-new' | 'save-and-batch'>('save');
   const recordId = initialRecord?.sample.id ?? createdRecordId;
   const isEditing = editing || Boolean(createdRecordId);
   const draftKey = recordId ? `sample:${recordId}` : `sample:new:${projectId}`;
+  const processOccurrences = useMemo(() => {
+    try {
+      return canonicalizeDocument(blocks).occurrences.filter((item) => item.kind === 'process');
+    } catch {
+      return [];
+    }
+  }, [blocks]);
 
   function markDirty() {
     generation.current += 1;
@@ -86,8 +96,7 @@ export function SampleComposer({
     readScientificDraft(draftKey)
       .then((draft) => {
         if (!active || !draft) return;
-        if (draft.base_record_sha256 === baseRecordSha256) setRecoverableDraft(draft);
-        else deleteScientificDraft(draftKey).catch(() => undefined);
+        setRecoverableDraft(draft);
       })
       .finally(() => {
         if (active) setDraftReady(true);
@@ -95,7 +104,7 @@ export function SampleComposer({
     return () => {
       active = false;
     };
-  }, [baseRecordSha256, draftKey]);
+  }, [draftKey]);
 
   useEffect(() => {
     if (!draftReady || !dirty || readOnly || recoverableDraft) return;
@@ -110,7 +119,8 @@ export function SampleComposer({
         title,
         status,
         tags,
-        blocks
+        blocks,
+        producer_process_occurrence_id: producerProcessOccurrenceId
       }).catch(() => undefined);
     }, 500);
     return () => window.clearTimeout(timeout);
@@ -121,6 +131,7 @@ export function SampleComposer({
     draftReady,
     dirty,
     projectId,
+    producerProcessOccurrenceId,
     recordId,
     readOnly,
     recoverableDraft,
@@ -153,6 +164,7 @@ export function SampleComposer({
               {
                 sample,
                 ...canonical,
+                producer_process_occurrence_id: producerProcessOccurrenceId,
                 base_record_sha256: baseRecordSha256,
                 change_note: 'save scientific record'
               },
@@ -163,6 +175,7 @@ export function SampleComposer({
                 project_scope_id: projectId,
                 sample,
                 ...canonical,
+                producer_process_occurrence_id: producerProcessOccurrenceId,
                 change_note: initialRecord ? 'create from sample draft' : 'create scientific record'
               },
               createKey.current
@@ -184,6 +197,8 @@ export function SampleComposer({
         router.push(
           `/dashboard/samples/new?project=${encodeURIComponent(projectId)}&from=${saved.sample.id}`
         );
+      } else if (requestIntent === 'save-and-batch' && !hasNewerChanges) {
+        router.push(`/dashboard/samples/${saved.sample.id}/batch`);
       } else if (!isEditing && !hasNewerChanges) {
         if (returnTo?.startsWith('/dashboard/')) {
           const separator = returnTo.includes('?') ? '&' : '?';
@@ -206,11 +221,29 @@ export function SampleComposer({
     <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
       <form onSubmit={save} className='space-y-5'>
         {recoverableDraft && (
-          <section className='flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm'>
-            <span>
+          <section className='space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm'>
+            <p>
               发现 {new Date(recoverableDraft.saved_at).toLocaleString()} 保存的本地草稿。
-            </span>
-            <span className='flex gap-2'>
+              {recoverableDraft.base_record_sha256 !== baseRecordSha256
+                ? ' 服务器版本已经变化，请先查看内容再决定。'
+                : ''}
+            </p>
+            <details>
+              <summary className='cursor-pointer font-medium'>查看本地草稿内容</summary>
+              <pre className='mt-2 max-h-64 overflow-auto rounded bg-background/70 p-3 text-xs'>
+                {JSON.stringify(
+                  {
+                    title: recoverableDraft.title,
+                    status: recoverableDraft.status,
+                    tags: recoverableDraft.tags,
+                    blocks: recoverableDraft.blocks
+                  },
+                  null,
+                  2
+                )}
+              </pre>
+            </details>
+            <span className='flex flex-wrap gap-2'>
               <Button
                 type='button'
                 variant='outline'
@@ -219,6 +252,9 @@ export function SampleComposer({
                   setStatus(recoverableDraft.status);
                   setTags(recoverableDraft.tags);
                   setBlocks(recoverableDraft.blocks);
+                  setProducerProcessOccurrenceId(
+                    recoverableDraft.producer_process_occurrence_id ?? null
+                  );
                   setComposerGeneration((current) => current + 1);
                   setRecoverableDraft(null);
                   setDirty(true);
@@ -226,6 +262,23 @@ export function SampleComposer({
                 }}
               >
                 恢复草稿
+              </Button>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(recoverableDraft, null, 2)], {
+                    type: 'application/json'
+                  });
+                  const url = URL.createObjectURL(blob);
+                  const anchor = document.createElement('a');
+                  anchor.href = url;
+                  anchor.download = `sample-draft-${recoverableDraft.record_id ?? 'new'}.json`;
+                  anchor.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                导出草稿
               </Button>
               <Button
                 type='button'
@@ -275,11 +328,22 @@ export function SampleComposer({
               >
                 保存并再建一份
               </Button>
+              <Button
+                type='submit'
+                variant='outline'
+                data-testid='save-and-batch-sample-record'
+                disabled={saving || !title.trim() || !projectId}
+                onClick={() => {
+                  saveIntent.current = 'save-and-batch';
+                }}
+              >
+                保存并批量创建类似样品
+              </Button>
             </div>
           )}
         </header>
 
-        <section className='grid gap-3 rounded-xl border bg-card/70 p-4 md:grid-cols-[1fr_160px_1fr]'>
+        <section className='grid gap-3 rounded-xl border bg-card/70 p-4 md:grid-cols-2 lg:grid-cols-4'>
           <label className='space-y-1 text-sm'>
             <span>名称</span>
             <input
@@ -322,6 +386,25 @@ export function SampleComposer({
               }}
             />
           </label>
+          <label className='space-y-1 text-sm'>
+            <span>产出当前 Sample</span>
+            <select
+              className='h-9 w-full rounded border bg-background px-2'
+              value={producerProcessOccurrenceId ?? ''}
+              disabled={readOnly}
+              onChange={(event) => {
+                setProducerProcessOccurrenceId(event.target.value || null);
+                markDirty();
+              }}
+            >
+              <option value=''>不指定</option>
+              {processOccurrences.map((occurrence, index) => (
+                <option key={occurrence.occurrence_id} value={occurrence.occurrence_id}>
+                  {occurrence.label_snapshot ?? `Process ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
         </section>
 
         <ScientificComposer
@@ -331,7 +414,7 @@ export function SampleComposer({
             api.listProcessDefinitions({
               project_scope_id: projectId,
               q: query || undefined,
-              limit: 50
+              limit: 200
             })
           }
           searchObjects={(query) =>
@@ -340,8 +423,14 @@ export function SampleComposer({
               project_scope_id: projectId,
               include_global: true,
               q: query || undefined,
-              limit: 50
+              limit: 200
             })
+          }
+          createProcess={(draft) =>
+            api.createProcessDefinition({ ...draft, project_scope_id: projectId })
+          }
+          createObject={(draft) =>
+            api.createObject({ ...draft, kind: 'research_object', project_scope_id: projectId })
           }
           onChange={(next) => {
             generation.current += 1;

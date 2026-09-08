@@ -15,6 +15,23 @@ export interface ScientificLocalDraft {
   status: string;
   tags: string;
   blocks: JsonObject[];
+  producer_process_occurrence_id?: string | null;
+}
+
+export interface ScientificBatchDraft {
+  format_version: 1;
+  key: string;
+  project_id: string;
+  source_sample_id: string;
+  source_revision_id: string;
+  saved_at: string;
+  submit_key: string;
+  rows: Array<{
+    clientRowId: string;
+    title: string;
+    note: string;
+    blocks: JsonObject[];
+  }>;
 }
 
 function database(): Promise<IDBDatabase | null> {
@@ -45,6 +62,10 @@ export async function readScientificDraft(key: string): Promise<ScientificLocalD
   });
 }
 
+export async function readScientificBatchDraft(key: string): Promise<ScientificBatchDraft | null> {
+  return (await readScientificDraft(key)) as unknown as ScientificBatchDraft | null;
+}
+
 export async function writeScientificDraft(draft: ScientificLocalDraft): Promise<void> {
   const db = await database();
   if (!db) return;
@@ -57,6 +78,10 @@ export async function writeScientificDraft(draft: ScientificLocalDraft): Promise
     });
     transaction.addEventListener('error', () => reject(transaction.error));
   });
+}
+
+export async function writeScientificBatchDraft(draft: ScientificBatchDraft): Promise<void> {
+  return writeScientificDraft(draft as unknown as ScientificLocalDraft);
 }
 
 export async function deleteScientificDraft(key: string): Promise<void> {
