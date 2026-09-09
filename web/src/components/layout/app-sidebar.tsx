@@ -35,7 +35,11 @@ export default function AppSidebar() {
             <SidebarMenu>
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const active = pathname === item.url || pathname.startsWith(`${item.url}/`);
+                const active =
+                  pathname === item.url ||
+                  pathname.startsWith(`${item.url}/`) ||
+                  (item.title === 'analysis' &&
+                    (pathname === '/dashboard/views' || pathname.startsWith('/dashboard/views/')));
                 return (
                   <SidebarMenuItem key={item.url}>
                     <SidebarMenuButton

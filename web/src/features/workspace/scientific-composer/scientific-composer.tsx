@@ -9,11 +9,12 @@ import {
   useEditorChange,
   type DefaultReactSuggestionItem
 } from '@blocknote/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   JsonObject,
   ProcessDefinition,
   ResearchObject,
+  ResourceRole,
   ScientificOccurrenceDraft
 } from '@/lib/domain';
 import {
@@ -147,7 +148,7 @@ export function ScientificComposer({
   searchProcesses,
   searchObjects,
   createProcess: _createProcess,
-  createObject: _createObject,
+  createResource,
   onChange,
   editable = true
 }: {
@@ -169,13 +170,14 @@ export function ScientificComposer({
     },
     commandId?: string
   ) => Promise<ProcessDefinition>;
-  createObject?: (
+  createResource?: (
     draft: {
       title: string;
       tags: string[];
       properties_jsonb: JsonObject;
       process_field_definitions: JsonObject;
     },
+    role: Exclude<ResourceRole, 'process'>,
     commandId?: string
   ) => Promise<ResearchObject>;
   onChange: (blocks: JsonObject[]) => void;
@@ -187,9 +189,7 @@ export function ScientificComposer({
       ? initialBlocks
       : [{ type: 'bulletListItem', content: [], children: [] }]) as never
   });
-  const [blocks, setBlocks] = useState<JsonObject[]>(initialBlocks);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const occurrences = useMemo(() => currentOccurrences(blocks), [blocks]);
   const searchAbort = useRef<AbortController | null>(null);
   const searchSequence = useRef(0);
   const composing = useRef(false);
@@ -201,6 +201,10 @@ export function ScientificComposer({
     };
     const end = () => {
       composing.current = false;
+      // BlockNote's suggestion controller may have evaluated the transient
+      // composition text. Re-dispatch the current transaction so the final
+      // committed IME text is searched once, after composition has ended.
+      editor.prosemirrorView.dispatch(editor.prosemirrorView.state.tr);
     };
     dom.addEventListener('compositionstart', begin);
     dom.addEventListener('compositionend', end);
@@ -212,7 +216,6 @@ export function ScientificComposer({
   }, [editor]);
   useEditorChange((current) => {
     const next = current.document as unknown as JsonObject[];
-    setBlocks(next);
     try {
       canonicalizeDocument(next);
       setValidationError(null);
@@ -223,6 +226,7 @@ export function ScientificComposer({
   }, editor);
 
   const searchReferences = async (query: string): Promise<DefaultReactSuggestionItem[]> => {
+    if (composing.current) return lastReferenceItems.current;
     const parentIds = parentOccurrenceIds(editor);
     const activeOccurrences = currentOccurrences(editor.document as unknown as JsonObject[]);
     if (parentIds) {
@@ -315,7 +319,9 @@ export function ScientificComposer({
           editor.insertInlineContent([occurrenceRef(occurrence, target.title) as never])
       });
     });
-    resultItems(objectResult).forEach((object) => {
+    resultItems(objectResult)
+      .filter((object) => object.authoring_kind !== 'data')
+      .forEach((object) => {
       const occurrence: ScientificOccurrenceDraft = {
         occurrence_id: crypto.randomUUID(),
         kind: 'object',
@@ -328,7 +334,10 @@ export function ScientificComposer({
       };
       items.push({
         title: object.title,
-        subtext: '对象 · 当前一级 bullet',
+        subtext:
+          object.authoring_kind === 'sample'
+            ? '样品 · 已保存记录，可作为中间体引用'
+            : `${object.resource_role === 'equipment' ? '设备' : object.resource_role === 'material' ? '原料' : '资源'} · 当前一级 bullet`,
         aliases: [object.code, ...object.tags],
         onItemClick: () =>
           editor.insertInlineContent([occurrenceRef(occurrence, object.title) as never])
@@ -363,32 +372,35 @@ export function ScientificComposer({
         }
       });
     }
-    if (_createObject && query.trim()) {
-      items.push({
-        title: `新建对象「${query.trim()}」`,
-        subtext: '创建后插入当前一级 bullet',
-        onItemClick: async () => {
-          const created = await _createObject(
-            {
-              title: query.trim(),
-              tags: [],
-              properties_jsonb: {},
-              process_field_definitions: { fields: [] }
-            },
-            crypto.randomUUID()
-          );
-          const occurrence: ScientificOccurrenceDraft = {
-            occurrence_id: crypto.randomUUID(),
-            kind: 'object',
-            target_id: created.id,
-            label_snapshot: created.title,
-            field_definitions: created.process_field_definitions,
-            values: {},
-            status: 'recorded',
-            binding: null
-          };
-          editor.insertInlineContent([occurrenceRef(occurrence, created.title) as never]);
-        }
+    if (createResource && query.trim()) {
+      (['material', 'equipment'] as const).forEach((role) => {
+        items.push({
+          title: `新建${role === 'material' ? '原料' : '设备'}「${query.trim()}」`,
+          subtext: '创建后插入当前一级 bullet',
+          onItemClick: async () => {
+            const created = await createResource(
+              {
+                title: query.trim(),
+                tags: [],
+                properties_jsonb: {},
+                process_field_definitions: { fields: [] }
+              },
+              role,
+              crypto.randomUUID()
+            );
+            const occurrence: ScientificOccurrenceDraft = {
+              occurrence_id: crypto.randomUUID(),
+              kind: 'object',
+              target_id: created.id,
+              label_snapshot: created.title,
+              field_definitions: created.process_field_definitions,
+              values: {},
+              status: 'recorded',
+              binding: null
+            };
+            editor.insertInlineContent([occurrenceRef(occurrence, created.title) as never]);
+          }
+        });
       });
     }
     const normalized = query.trim().toLocaleLowerCase();
@@ -421,17 +433,13 @@ export function ScientificComposer({
     <div
       data-testid='scientific-composer'
       data-scientific-composer
-      className='relative rounded-xl border bg-background'
+      className='scientific-editor-surface relative bg-background'
     >
       <BlockNoteView editor={editor} editable={editable}>
         <SuggestionMenuController triggerCharacter='@' getItems={searchReferences} />
         <SuggestionMenuController triggerCharacter='|' getItems={properties} />
         <SuggestionMenuController triggerCharacter='｜' getItems={properties} />
       </BlockNoteView>
-      <div className='border-t px-4 py-3 text-xs text-muted-foreground'>
-        一级 bullet：自然语言 + <code>@对象/过程</code>；二级 bullet：<code>@引用｜属性: 值</code>
-        。当前有 {occurrences.length} 个 occurrence。
-      </div>
       {validationError && (
         <p role='alert' className='border-t px-4 py-3 text-sm text-destructive'>
           {validationError}。请修复或删除失去父级引用的子 bullet 后再保存。

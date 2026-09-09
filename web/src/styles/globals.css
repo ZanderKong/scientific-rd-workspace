@@ -15,11 +15,20 @@
 
 /* Scientific Composer keeps references quiet in reading mode and makes the
    active field discoverable without turning every reference into a card. */
-.scientific-composer-surface .bn-editor {
+.scientific-editor-surface .bn-editor {
   min-height: 12rem;
-  padding: 1.25rem 1.5rem;
+  padding: 1rem 0.25rem;
   font-size: 1rem;
   line-height: 1.8;
+}
+
+.scientific-editor-surface .bn-container,
+.scientific-editor-surface .bn-editor {
+  background: transparent;
+}
+
+.scientific-editor-surface .bn-block-outer {
+  margin-inline: 0;
 }
 
 .scientific-composer-ghost {
@@ -37,8 +46,8 @@
 }
 
 @media (max-width: 640px) {
-  .scientific-composer-surface .bn-editor {
-    padding-inline: 1rem;
+  .scientific-editor-surface .bn-editor {
+    padding-inline: 0;
   }
 
   .scientific-ref input,

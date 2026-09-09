@@ -212,11 +212,11 @@ export function DataComposer() {
       <header className='flex flex-wrap items-start justify-between gap-3'>
         <div>
           <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-            Recoverable Data Composer
+            Data
           </p>
           <h1 className='mt-2 text-3xl font-semibold'>记录 Data</h1>
           <p className='mt-2 text-sm text-muted-foreground'>
-            用一级 bullet 记录过程，在二级 bullet 补充对象属性；观察和判断可用 @data / @claim。
+            用自然语言记录观察，必要时用 @data 或 @claim 标记语义行。
           </p>
         </div>
         <div className='flex gap-2'>
@@ -224,12 +224,12 @@ export function DataComposer() {
             {draft ? '保存草稿' : '开始草稿'}
           </Button>
           <Button disabled={busy || !draft || !title.trim()} onClick={handleFinalize}>
-            Finalize
+            提交数据
           </Button>
         </div>
       </header>
-      <section className='grid gap-3 rounded-xl border bg-card/70 p-4 md:grid-cols-3'>
-        <label className='space-y-1 text-sm md:col-span-2'>
+      <section className='rounded-xl border bg-card/60 p-4'>
+        <label className='block space-y-1 text-sm'>
           <span>名称</span>
           <input
             className='h-9 w-full rounded border bg-background px-3'
@@ -240,31 +240,36 @@ export function DataComposer() {
             }}
           />
         </label>
-        <label className='space-y-1 text-sm'>
-          <span>科学类型</span>
-          <input
-            className='h-9 w-full rounded border bg-background px-3'
-            value={scientificType}
-            onChange={(event) => {
-              setScientificType(event.target.value);
-              markDirty();
-            }}
-          />
-        </label>
-        <label className='space-y-1 text-sm md:col-span-3'>
-          <span>标签</span>
-          <input
-            className='h-9 w-full rounded border bg-background px-3'
-            value={tags}
-            onChange={(event) => {
-              setTags(event.target.value);
-              markDirty();
-            }}
-          />
-        </label>
+        <details className='mt-3'>
+          <summary className='cursor-pointer text-sm text-muted-foreground'>更多内容设置</summary>
+          <div className='mt-3 grid gap-3 md:grid-cols-2'>
+            <label className='space-y-1 text-sm'>
+              <span>内容类型</span>
+              <input
+                className='h-9 w-full rounded border bg-background px-3'
+                value={scientificType}
+                onChange={(event) => {
+                  setScientificType(event.target.value);
+                  markDirty();
+                }}
+              />
+            </label>
+            <label className='space-y-1 text-sm'>
+              <span>标签</span>
+              <input
+                className='h-9 w-full rounded border bg-background px-3'
+                value={tags}
+                onChange={(event) => {
+                  setTags(event.target.value);
+                  markDirty();
+                }}
+              />
+            </label>
+          </div>
+        </details>
       </section>
       <section>
-        <h2 className='mb-2 font-medium'>获取正文</h2>
+        <h2 className='mb-2 font-medium'>记录正文</h2>
         <ScientificComposer
           key={editorGeneration}
           initialBlocks={blocks}
@@ -297,11 +302,12 @@ export function DataComposer() {
               commandId
             )
           }
-          createObject={(value, commandId) =>
+          createResource={(value, role, commandId) =>
             api.createObject(
               {
                 ...value,
                 kind: 'research_object',
+                resource_role: role,
                 project_scope_id: activeProjectId ?? draft?.project_scope_id
               },
               commandId

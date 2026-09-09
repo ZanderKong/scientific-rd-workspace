@@ -14,14 +14,16 @@ export function Breadcrumbs() {
     projects: 'projects',
     experiments: 'experiments',
     samples: 'samples',
+    analysis: 'analysis',
     processes: 'processes',
     data: 'data',
     materials: 'materials',
     equipment: 'equipment',
     settings: 'settings',
     changes: 'changes',
-    views: 'views',
+    views: 'analysis',
     claims: 'claims',
+    resources: 'resources',
     new: 'new',
     edit: 'edit'
   };

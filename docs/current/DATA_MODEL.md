@@ -1,4 +1,4 @@
-# Canonical Data Model v1.5
+# Canonical Data Model v1.6
 
 ## Kinds and identity
 
@@ -8,7 +8,7 @@
 research_object · process_definition · data · experiment · project · view · claim
 ```
 
-Material, Equipment and Sample are `research_object` rows distinguished by `tags_jsonb`; no physical table or API kind exists for them. Each row has a stable UUID/code, status, optional project scope, optional ObjectType version, tags, properties, process-field definitions, content document and timestamps.
+Material, Equipment and Sample are `research_object` rows. Resource objects use the controlled `resource_role` values `material`, `equipment` or `process`; tags remain descriptive and cannot grant Sample eligibility. A Sample is a formally saved authoring record (`authoring_kind=sample`) and can be referenced as an intermediate only after it exists. Each row has a stable UUID/code, status, optional project scope, optional ObjectType version, tags, properties, process-field definitions, content document and timestamps.
 
 `ObjectRevision` stores immutable JSON snapshots and SHA-256 hashes. `ObjectTypeVersion` is immutable; a new schema is a new version and existing records retain their pinned version.
 
@@ -39,9 +39,9 @@ An execution may produce multiple Research Objects and Data records. Binding fie
 
 The Sample Record API owns a `ScientificDocumentV1` and stable `DocumentOccurrence` rows. Scientific Sample/Data identities carry an explicit authoring marker even when the document is empty. Process occurrences uniquely own authored Executions; object occurrences may own stable bindings to a process occurrence. Typed occurrence values form the query projection while the Execution/binding/document remains authoritative. Aggregate create and update preserve IDs, pin revisions and write the revision manifest atomically.
 
-## Experiment
+## Analysis and context
 
-Experiment is a context record with typed `references` grouped by role/order/note. It has no ownership, provenance or cascade relationship to Process, Sample, Data or Research Object records. An object/data record can be reused by multiple experiments or by none.
+The user-facing analysis surface is the View model. An analysis stores ordered content blocks and explicit member/revision references; opening an analysis does not create a new version. Legacy Experiment records remain in the database for historical compatibility, but no new user-facing Experiment workflow is exposed.
 
 ## Data and representations
 
@@ -61,8 +61,8 @@ Data can be assembled as a recoverable draft with stable identity and idempotent
 
 ## Views, Claims and revision protection
 
-A View revision pins explicit Data revision IDs, Representation IDs and an optional Artifact Asset ID/hash. Metadata-only changes keep the existing pin; source or Artifact changes append a ViewRevision. A Claim separately stores author provenance, one typed primary source revision and a finite context snapshot. `ClaimContextReference` and revision manifest indexes protect and reverse-query pinned sources.
+A View revision pins explicit Data revision IDs, Representation IDs and an optional Artifact Asset ID/hash. Metadata-only changes keep the existing pin; source or Artifact changes append a ViewRevision. A Claim separately stores author provenance, an optional typed primary source revision and a finite context snapshot. `ClaimContextReference` and revision manifest indexes protect and reverse-query pinned sources.
 
 ## Governance and migration
 
-ChangeSets, idempotency records, ETag/If-Match and revisions remain active. Alembic `0001`–`0012` are immutable history. Additive migrations `0013`–`0019` establish Scientific Records, typed occurrence projections, Data drafts, View manifests, Claim provenance and typed historical revision references; `0020_authoring_binding` adds explicit record ownership and durable binding validity; `0021_typed_revision_refs` adds typed source/target revision foreign keys and protection indexes; `0022_occurrence_field_labels` preserves user-facing field labels in the query projection so a dynamic table does not reconstruct them from mutable templates. PostgreSQL is the only supported database.
+ChangeSets, idempotency records, ETag/If-Match and revisions remain active. Alembic `0001`–`0012` are immutable history. Additive migrations `0013`–`0019` establish Scientific Records, typed occurrence projections, Data drafts, View manifests, Claim provenance and typed historical revision references; `0020_authoring_binding` adds explicit record ownership and durable binding validity; `0021_typed_revision_refs` adds typed source/target revision foreign keys and protection indexes; `0022_occurrence_field_labels` preserves user-facing field labels in the query projection; `0023_scientific_document_v2` adds semantic document rows; `0024_resource_roles` adds controlled resource classification; `0025_optional_claim_source` permits draft Claims without a primary source; `0026_backfill_resource_roles` backfills safe legacy classifications; `0027_clear_unclassified_resource_roles` removes broad material inference for unclassified legacy objects. PostgreSQL is the only supported database.

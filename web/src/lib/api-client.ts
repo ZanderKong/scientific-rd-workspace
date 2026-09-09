@@ -23,6 +23,7 @@ import type {
   RelationType,
   ResearchObject,
   ResearchObjectKind,
+  ResourceRole,
   SampleRecord,
   SampleRecordCreatePayload,
   SampleRecordPutPayload,
@@ -137,6 +138,7 @@ export const api = {
       properties_jsonb?: JsonObject;
       process_field_definitions?: JsonObject;
       content_document?: JsonObject[];
+      resource_role?: ResourceRole | null;
     },
     idempotencyKey?: string
   ) =>
@@ -156,6 +158,7 @@ export const api = {
         | 'properties_jsonb'
         | 'process_field_definitions'
         | 'content_document'
+        | 'resource_role'
       >
     >,
     etag: string

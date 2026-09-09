@@ -9,7 +9,11 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.data_service import sync_data_subject_assignments
 from app.models import (
+    ClaimContextReference,
+    ClaimRecord,
+    DataRecord,
     DocumentOccurrence,
     ObjectRelation,
     ObjectRevision,
@@ -144,12 +148,12 @@ def _normalise_document_v2(
         return "".join(chunks)
 
     def parse_properties(value: str) -> list[tuple[str, str, int]]:
-        normalised = value.replace("｜", "|").replace("：", ":")
         parsed: list[tuple[str, str, int]] = []
-        for part in normalised.split("|"):
-            if ":" not in part:
+        for part in value.replace("｜", "|").split("|"):
+            separator = next((index for index, char in enumerate(part) if char in {":", "："}), -1)
+            if separator < 1:
                 continue
-            key, raw = part.split(":", 1)
+            key, raw = part[:separator], part[separator + 1 :]
             key, raw = key.strip(), raw.strip()
             if key and raw != "":
                 parsed.append((key, raw, len(parsed)))
@@ -448,7 +452,15 @@ def _record_body(db: Session, sample: ResearchObject) -> dict[str, Any]:
         "blocks": sample.content_document,
     }
     if sample.semantic_entries_jsonb:
-        document["semantic_entries"] = sample.semantic_entries_jsonb
+        document["semantic_entries"] = [
+            {
+                key: entry.get(key)
+                for key in ("id", "kind", "text", "block_id")
+                if key in entry
+            }
+            for entry in sample.semantic_entries_jsonb
+            if isinstance(entry, dict)
+        ]
     body = {
         "sample": object_out(sample),
         "document": document,
@@ -829,11 +841,146 @@ def _sync_record(
         db.expire(execution, ["object_bindings", "data_bindings"])
         _revision(db, execution, change_note or "save scientific record")
     sample.content_document = copy.deepcopy(document.blocks)
-    sample.semantic_entries_jsonb = [
-        entry.model_dump(mode="json") for entry in document.semantic_entries
-    ]
+    _sync_semantic_entries(db, sample, document.semantic_entries)
     sample.document_format_version = document.schema_version
     db.flush()
+
+
+def _sync_semantic_entries(db: Session, sample: ResearchObject, entries: list[Any]) -> None:
+    """Materialize @data/@claim rows while retaining stable links in the sample record.
+
+    The links live in the sample's durable JSON projection so the public document
+    remains compatible with ScientificSemanticEntry, while retries can find and
+    update the same independent entity instead of creating duplicates.
+    """
+    previous = {
+        str(item.get("id")): item
+        for item in (sample.semantic_entries_jsonb or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    current_ids = {entry.id for entry in entries}
+    for old in previous.values():
+        if old.get("id") in current_ids or not old.get("entity_id"):
+            continue
+        try:
+            removed_id = uuid.UUID(str(old["entity_id"]))
+        except ValueError:
+            continue
+        if old.get("kind") == "data":
+            sync_data_subject_assignments(
+                db,
+                removed_id,
+                subject_ids=[],
+                source_kind="acquisition_document",
+                source_ref_id=sample.id,
+            )
+        elif old.get("kind") == "claim":
+            db.query(ClaimContextReference).filter(
+                ClaimContextReference.claim_id == removed_id,
+                ClaimContextReference.reference_kind == "context",
+                ClaimContextReference.object_id == sample.id,
+            ).delete(synchronize_session=False)
+    links: list[dict[str, Any]] = []
+    for entry in entries:
+        payload = entry.model_dump(mode="json")
+        old = previous.get(entry.id)
+        entity = None
+        if old and old.get("entity_id"):
+            try:
+                entity = get_object(db, uuid.UUID(str(old["entity_id"])))
+            except ValueError:
+                entity = None
+        if entity is None or entity.kind != entry.kind:
+            entity = _create_object_in_session(
+                db,
+                ObjectCreate(
+                    kind=entry.kind,
+                    title=entry.text[:120],
+                    status="active",
+                    project_scope_id=sample.project_scope_id,
+                    tags=[entry.kind],
+                    properties_jsonb={},
+                    content_document=[],
+                ),
+            )
+            if entry.kind == "data":
+                entity.authoring_kind = "data"
+                db.add(
+                    DataRecord(
+                        data_object_id=entity.id,
+                        scientific_type="description",
+                        description=entry.text,
+                    )
+                )
+            else:
+                db.add(
+                    ClaimRecord(
+                        claim_id=entity.id,
+                        statement=entry.text,
+                        author_provenance_jsonb={"kind": "human"},
+                        context_snapshot_jsonb={},
+                        confidence=None,
+                        metadata_jsonb={},
+                    )
+                )
+            db.flush()
+        elif old is None or old.get("text") != entry.text:
+            if entry.kind == "data":
+                record = db.get(DataRecord, entity.id)
+                if record is not None:
+                    record.description = entry.text
+            else:
+                record = db.get(ClaimRecord, entity.id)
+                if record is not None:
+                    record.statement = entry.text
+            db.flush()
+        if entry.kind == "claim":
+            db.query(ClaimContextReference).filter(
+                ClaimContextReference.claim_id == entity.id,
+                ClaimContextReference.reference_kind == "context",
+                ClaimContextReference.object_id == sample.id,
+            ).delete(synchronize_session=False)
+            sample_revision_id = db.scalar(
+                select(ObjectRevision.id)
+                .where(ObjectRevision.object_id == sample.id)
+                .order_by(ObjectRevision.revision_number.desc())
+                .limit(1)
+            )
+            db.add(
+                ClaimContextReference(
+                    claim_id=entity.id,
+                    reference_kind="context",
+                    object_id=sample.id,
+                    revision_id=sample_revision_id,
+                )
+            )
+        if entry.kind == "data":
+            sync_data_subject_assignments(
+                db,
+                entity.id,
+                subject_ids=[sample.id],
+                source_kind="acquisition_document",
+                source_ref_id=sample.id,
+            )
+        if entity_revision_id := (old or {}).get("entity_revision_id"):
+            try:
+                revision = db.get(ObjectRevision, uuid.UUID(str(entity_revision_id)))
+            except ValueError:
+                revision = None
+        else:
+            revision = None
+        if revision is not None and revision.object_id != entity.id:
+            revision = None
+        if revision is None or old is None or old.get("text") != entry.text:
+            revision = _create_revision_in_session(db, entity.id, "sync semantic entry")
+        links.append(
+            {
+                **payload,
+                "entity_id": str(entity.id),
+                "entity_revision_id": str(revision.id),
+            }
+        )
+    sample.semantic_entries_jsonb = links
 
 
 def create_sample_record(

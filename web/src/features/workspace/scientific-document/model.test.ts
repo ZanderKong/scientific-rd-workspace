@@ -50,6 +50,13 @@ describe('scientific document codec', () => {
     });
   });
 
+  it('preserves punctuation inside the raw property value', () => {
+    expect(parsePropertyText('比例：1：10｜备注: A:B').map((item) => item.rawValue)).toEqual([
+      '1：10',
+      'A:B'
+    ]);
+  });
+
   it('rejects a property row that does not belong to its parent bullet', () => {
     const occurrence: ScientificOccurrenceDraft = {
       occurrence_id: 'parent-occurrence',
@@ -215,6 +222,8 @@ describe('scientific document codec', () => {
       expect.objectContaining({ key: 'property_line-new_0' })
     ]);
     expect(cloned?.values).toMatchObject({ 'property_line-new_0': { value: '60 ℃' } });
+    const property = ((copied[0].children as JsonObject[])[0].content as JsonObject[])[0];
+    expect((property.props as JsonObject).occurrenceId).toBe('occurrence-new');
     vi.unstubAllGlobals();
   });
 

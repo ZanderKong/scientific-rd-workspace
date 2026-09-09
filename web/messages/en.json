@@ -17,6 +17,7 @@
     "projects": "Projects",
     "experiments": "Experiments",
     "samples": "Samples",
+    "analysis": "Analysis",
     "processes": "Processes",
     "data": "Data",
     "materials": "Materials",
@@ -28,6 +29,7 @@
     "changes": "Changes",
     "views": "Views",
     "claims": "Claims",
+    "resources": "Resources",
     "new": "New",
     "edit": "Edit"
   },

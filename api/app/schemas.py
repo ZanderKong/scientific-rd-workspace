@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 ObjectKind = Literal[
     "research_object", "process_definition", "data", "experiment", "project", "view", "claim"
 ]
+ResourceRole = Literal["material", "equipment", "process"]
 RelationType = Literal["references", "subject", "derived_from", "related_to"]
 BindingDirection = Literal["input", "context", "output"]
 RepresentationKind = Literal["raw_file", "table", "image", "description", "structured"]
@@ -127,6 +128,7 @@ class ResearchObjectOut(ObjectSummary):
     )
     document_format_version: int = 1
     authoring_kind: Literal["sample", "data"] | None = None
+    resource_role: ResourceRole | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -143,6 +145,7 @@ class ObjectCreate(BaseModel):
     properties_jsonb: dict[str, Any] = Field(default_factory=dict)
     process_field_definitions: dict[str, Any] = Field(default_factory=dict)
     content_document: list[dict[str, Any]] = Field(default_factory=list)
+    resource_role: ResourceRole | None = None
 
     @field_validator("title", "status")
     @classmethod
@@ -185,6 +188,7 @@ class ObjectPatch(BaseModel):
     properties_jsonb: dict[str, Any] | None = None
     process_field_definitions: dict[str, Any] | None = None
     content_document: list[dict[str, Any]] | None = None
+    resource_role: ResourceRole | None = None
 
 
 class RelationCreate(BaseModel):
@@ -882,7 +886,7 @@ class ClaimCreate(BaseModel):
     statement: str = Field(min_length=1)
     code: str | None = None
     author_provenance: dict[str, Any] = Field(default_factory=lambda: {"kind": "human"})
-    primary_source: ClaimPrimarySource
+    primary_source: ClaimPrimarySource | None = None
     confidence: str | None = None
     metadata_jsonb: dict[str, Any] = Field(default_factory=dict)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
@@ -929,8 +933,8 @@ class ClaimOut(BaseModel):
     claim: ResearchObjectOut
     statement: str
     author_provenance: dict[str, Any]
-    primary_source: ClaimPrimarySource
-    primary_source_object: ResearchObjectOut
+    primary_source: ClaimPrimarySource | None = None
+    primary_source_object: ResearchObjectOut | None = None
     context_snapshot: dict[str, Any]
     confidence: str | None
     metadata_jsonb: dict[str, Any]

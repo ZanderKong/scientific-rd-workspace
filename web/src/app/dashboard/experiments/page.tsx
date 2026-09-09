@@ -1,5 +1,5 @@
-import { ExperimentWorkspace } from '@/features/workspace/domain-workspaces';
+import { redirect } from 'next/navigation';
 
 export default function ExperimentsPage() {
-  return <ExperimentWorkspace />;
+  redirect('/dashboard/analysis');
 }

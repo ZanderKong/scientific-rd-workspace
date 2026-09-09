@@ -19,7 +19,7 @@ const meta: Record<ResearchObjectKind, { zh: string; en: string; path: string }>
   data: { zh: '数据', en: 'Data', path: 'data' },
   experiment: { zh: '实验', en: 'Experiment', path: 'experiments' },
   project: { zh: '项目', en: 'Project', path: 'projects' },
-  view: { zh: '视图', en: 'View', path: 'views' },
+  view: { zh: '分析', en: 'Analysis', path: 'views' },
   claim: { zh: '论断', en: 'Claim', path: 'claims' }
 };
 
@@ -39,20 +39,22 @@ function ObjectCard({ object }: { object: ResearchObject }) {
     <Link href={objectPath(object)} className={`${card} block transition hover:border-primary`}>
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0'>
-          <p className='font-mono text-[10px] text-muted-foreground'>{object.code}</p>
+          <p className='font-mono text-[10px] text-muted-foreground'>{object.kind === 'view' ? '分析' : object.code}</p>
           <h2 className='mt-1 truncate text-base font-semibold'>{object.title}</h2>
         </div>
         <span className='rounded-full border px-2 py-1 text-[11px] text-muted-foreground'>
           {object.status}
         </span>
       </div>
-      <div className='mt-3 flex flex-wrap gap-1'>
-        {object.tags.map((tag) => (
-          <span key={tag} className='rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground'>
-            {tag}
-          </span>
-        ))}
-      </div>
+      {object.kind !== 'view' && object.tags.length > 0 && (
+        <div className='mt-3 flex flex-wrap gap-1'>
+          {object.tags.map((tag) => (
+            <span key={tag} className='rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground'>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
     </Link>
   );
 }
@@ -179,24 +181,26 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
       .catch((cause) => setError(errorText(cause)))
       .finally(() => setLoading(false));
   }, [kind, projectId, query, tag]);
-  const label = meta[kind].en;
+  const label = kind === 'view' ? '分析' : meta[kind].en;
+  const description =
+    kind === 'view' ? '把样品、数据和论点放在一起看，保留你明确选择的内容和版本。' : '浏览当前作用域内的记录。';
   const canCreateHere = !['claim', 'view'].includes(kind);
   return (
     <main className='mx-auto w-full max-w-[1320px] px-4 py-7 md:px-8 md:py-10'>
       <div className='mb-6 flex flex-wrap items-start justify-between gap-3'>
         <div>
           <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-            v0.3 domain
+            工作台
           </p>
           <h1 className='mt-2 text-3xl font-semibold'>{label}</h1>
-          <p className='mt-2 text-sm text-muted-foreground'>Canonical objects and typed records.</p>
+          <p className='mt-2 text-sm text-muted-foreground'>{description}</p>
         </div>
         {kind === 'view' ? (
           <Link
             href='/dashboard/views/new'
             className='rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground'
           >
-            Create
+            新建分析
           </Link>
         ) : (
           canCreateHere && (
@@ -221,14 +225,14 @@ function ObjectList({ kind, tag }: { kind: ResearchObjectKind; tag?: string }) {
       )}
       {kind === 'claim' && (
         <p className='mb-5 rounded-xl border border-dashed p-4 text-sm text-muted-foreground'>
-          Create a Claim from an Experiment, Data, or View so its primary source revision is fixed.
+          可以先写下论点，再从数据或分析中明确添加证据。
         </p>
       )}
       <input
         className={`${input} mb-5`}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder='Search title, code, tags…'
+        placeholder={kind === 'view' ? '搜索分析名称…' : '搜索名称或编号…'}
       />
       {loading ? (
         <p className='py-12 text-center text-sm text-muted-foreground'>Loading…</p>

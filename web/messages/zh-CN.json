@@ -17,6 +17,7 @@
     "projects": "项目",
     "experiments": "实验",
     "samples": "样品",
+    "analysis": "分析",
     "processes": "过程",
     "data": "数据",
     "materials": "原料",
@@ -28,6 +29,7 @@
     "changes": "变更",
     "views": "视图",
     "claims": "论断",
+    "resources": "资源",
     "new": "新建",
     "edit": "编辑"
   },

@@ -70,19 +70,16 @@ function contentAfter(content: unknown[], type: string): string {
     .join('');
 }
 
-function normaliseSeparators(value: string) {
-  return value.replaceAll('｜', '|').replaceAll('：', ':');
-}
-
 export type ParsedProperty = { key: string; rawValue: string; ordinal: number };
 
 export function parsePropertyText(value: string): ParsedProperty[] {
-  return normaliseSeparators(value)
-    .split('|')
+  return value
+    .split(/[|｜]/u)
     .map((part) => part.trim())
     .filter(Boolean)
     .flatMap((part, ordinal) => {
-      const split = part.indexOf(':');
+      const match = part.match(/[:：]/u);
+      const split = match?.index ?? -1;
       if (split <= 0) return [];
       const key = part.slice(0, split).trim();
       const rawValue = part.slice(split + 1).trim();
@@ -153,14 +150,15 @@ function collectNestedProperties(
         const occurrence = occurrences.get(props.occurrenceId);
         if (!occurrence) throw new Error('Property row references a missing occurrence');
         const rawPropertyText = contentAfter(content, 'propertyRef');
-        const propertyParts = normaliseSeparators(rawPropertyText)
-          .split('|')
+        const propertyParts = rawPropertyText
+          .split(/[|｜]/u)
           .map((part) => part.trim())
           .filter(Boolean);
         const parsed = parsePropertyText(rawPropertyText);
         if (
           propertyParts.some((part) => {
-            const separator = part.indexOf(':');
+            const match = part.match(/[:：]/u);
+            const separator = match?.index ?? -1;
             return separator <= 0 || part.slice(separator + 1).trim() === '';
           })
         ) {
@@ -414,6 +412,13 @@ export function cloneDocumentForNewRecord(blocks: JsonObject[]): JsonObject[] {
     else if (occurrence.binding) occurrence.binding.binding_id = null;
     props.occurrenceId = nextId;
     props.payload = JSON.stringify(occurrence);
+  });
+  visit(copy, (node) => {
+    if (node.type !== 'propertyRef') return;
+    const props = node.props as PropertyRefProps | undefined;
+    if (!props) return;
+    const nextOccurrenceId = occurrenceMap.get(props.occurrenceId);
+    if (nextOccurrenceId) props.occurrenceId = nextOccurrenceId;
   });
   visit(copy, (node) => {
     if (node.type !== 'objectRef') return;

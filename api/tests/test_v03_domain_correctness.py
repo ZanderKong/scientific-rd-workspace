@@ -34,14 +34,44 @@ def _definition(client, project_id: str, code: str = "PFD-V03") -> dict:
 
 
 def _object(
-    client, project_id: str, code: str, title: str, *, kind: str = "research_object"
+    client,
+    project_id: str,
+    code: str,
+    title: str,
+    *,
+    kind: str = "research_object",
+    resource_role: str | None = None,
 ) -> dict:
     response = client.post(
         "/api/v1/objects",
-        json={"kind": kind, "code": code, "title": title, "project_scope_id": project_id},
+        json={
+            "kind": kind,
+            "code": code,
+            "title": title,
+            "project_scope_id": project_id,
+            "resource_role": resource_role,
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def test_resource_role_is_explicit_and_reclassifies_same_object(client):
+    project_id = _project(client)
+    material = _object(
+        client, project_id, "ROO-ROLE-MATERIAL", "Solvent", resource_role="material"
+    )
+    assert material["resource_role"] == "material"
+    current = client.get(f"/api/v1/objects/{material['id']}")
+    assert current.status_code == 200, current.text
+    changed = client.patch(
+        f"/api/v1/objects/{material['id']}",
+        headers={"If-Match": current.json()["record_sha256"]},
+        json={"resource_role": "equipment"},
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["resource_role"] == "equipment"
+    assert changed.json()["id"] == material["id"]
 
 
 def test_process_execution_enforces_binding_kinds_and_one_data_producer(client):
@@ -439,6 +469,80 @@ def test_claim_evidence_cycle_is_rejected(client, db):
         assert getattr(exc, "code", None) == "cycle_detected"
     else:
         raise AssertionError("Claim evidence cycle was accepted")
+
+
+def test_claim_can_be_drafted_without_primary_source(client, db):
+    project_id = _project(client)
+    draft = create_claim(
+        db,
+        ClaimCreate(
+            project_scope_id=project_id,
+            title="Unlinked claim",
+            statement="A hypothesis waiting for evidence",
+        ),
+    )
+    assert draft["primary_source"] is None
+    assert draft["primary_source_object"] is None
+    assert draft["context_snapshot"] == {}
+
+
+def test_semantic_rows_materialize_once_and_follow_sample_subject(client):
+    project_id = _project(client)
+    payload = {
+        "project_scope_id": project_id,
+        "sample": {"title": "Semantic sample"},
+        "document": {
+            "schema_version": 2,
+            "blocks": [
+                {
+                    "type": "bulletListItem",
+                    "id": "data-block",
+                    "content": [{"type": "text", "text": "@data observed"}],
+                    "children": [],
+                },
+                {
+                    "type": "bulletListItem",
+                    "id": "claim-block",
+                    "content": [{"type": "text", "text": "@claim looks stable"}],
+                    "children": [],
+                },
+            ],
+            "semantic_entries": [
+                {
+                    "id": "data-entry",
+                    "kind": "data",
+                    "text": "observed",
+                    "block_id": "data-block",
+                },
+                {
+                    "id": "claim-entry",
+                    "kind": "claim",
+                    "text": "looks stable",
+                    "block_id": "claim-block",
+                },
+            ],
+        },
+    }
+    created = client.post(
+        "/api/v1/sample-records", headers={"Idempotency-Key": str(uuid.uuid4())}, json=payload
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert len(body["data"]) == 1
+    first_data_id = body["data"][0]["id"]
+    updated = client.put(
+        f"/api/v1/samples/{body['sample']['id']}/record",
+        headers={"If-Match": body["record_sha256"]},
+        json={
+            "sample": {"title": body["sample"]["title"], "status": body["sample"]["status"]},
+            "document": payload["document"],
+            "occurrences": [],
+            "base_record_sha256": body["record_sha256"],
+            "change_note": "repeat semantic save",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["data"][0]["id"] == first_data_id
 
 
 def test_changeset_create_records_target_identity(client):

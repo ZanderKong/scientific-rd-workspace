@@ -58,8 +58,15 @@ export function SampleComposer({
   }, [editing, initialDraft, readOnly]);
   const [title, setTitle] = useState(initialRecord?.sample.title ?? '');
   const [status, setStatus] = useState(initialRecord?.sample.status ?? 'draft');
-  const [tags, setTags] = useState(initialRecord?.sample.tags.join(',') ?? '样品');
+  const [tags] = useState(initialRecord?.sample.tags.join(',') ?? '样品');
   const [blocks, setBlocks] = useState<JsonObject[]>(initialBlocks);
+  const processOccurrences = useMemo(() => {
+    try {
+      return canonicalizeDocument(blocks).occurrences.filter((item) => item.kind === 'process');
+    } catch {
+      return [];
+    }
+  }, [blocks]);
   const [producerProcessOccurrenceId, setProducerProcessOccurrenceId] = useState<string | null>(
     editing ? (initialRecord?.producer_process_occurrence_id ?? null) : null
   );
@@ -79,14 +86,6 @@ export function SampleComposer({
   const recordId = initialRecord?.sample.id ?? createdRecordId;
   const isEditing = editing || Boolean(createdRecordId);
   const draftKey = recordId ? `sample:${recordId}` : `sample:new:${projectId}`;
-  const processOccurrences = useMemo(() => {
-    try {
-      return canonicalizeDocument(blocks).occurrences.filter((item) => item.kind === 'process');
-    } catch {
-      return [];
-    }
-  }, [blocks]);
-
   function markDirty() {
     generation.current += 1;
     setDirty(true);
@@ -251,7 +250,6 @@ export function SampleComposer({
                 onClick={() => {
                   setTitle(recoverableDraft.title);
                   setStatus(recoverableDraft.status);
-                  setTags(recoverableDraft.tags);
                   setBlocks(recoverableDraft.blocks);
                   setProducerProcessOccurrenceId(
                     recoverableDraft.producer_process_occurrence_id ?? null
@@ -302,16 +300,14 @@ export function SampleComposer({
               required
               disabled={readOnly}
               value={title}
-              placeholder={readOnly ? 'Sample 历史版本' : '未命名 Sample'}
+              placeholder={readOnly ? '历史版本' : '未命名样品'}
               onChange={(event) => {
                 setTitle(event.target.value);
                 markDirty();
               }}
             />
             <p className='mt-1 text-sm text-muted-foreground'>
-              {readOnly
-                ? 'Sample 历史版本'
-                : '一级 bullet 记录自然语言；输入 @ 添加对象或过程，Tab 创建二级属性 bullet。'}
+              {readOnly ? '历史版本' : '自然语言记录'}
             </p>
           </div>
           {!readOnly && (
@@ -353,61 +349,30 @@ export function SampleComposer({
                   >
                     保存并批量创建类似样品
                   </button>
+                  <label className='border-t px-3 py-2 text-left text-sm'>
+                    <span className='block text-xs text-muted-foreground'>样品产出过程</span>
+                    <select
+                      className='mt-1 h-8 w-full rounded border bg-background px-2'
+                      value={producerProcessOccurrenceId ?? ''}
+                      disabled={saving}
+                      onChange={(event) => {
+                        setProducerProcessOccurrenceId(event.target.value || null);
+                        markDirty();
+                      }}
+                    >
+                      <option value=''>不指定</option>
+                      {processOccurrences.map((occurrence, index) => (
+                        <option key={occurrence.occurrence_id} value={occurrence.occurrence_id}>
+                          {occurrence.label_snapshot ?? `过程 ${index + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </details>
             </div>
           )}
         </header>
-
-        <section className='flex flex-wrap items-center gap-x-4 gap-y-2 border-y py-2 text-sm'>
-          <label className='flex items-center gap-2 text-sm'>
-            <span>记录状态</span>
-            <select
-              className='h-9 w-full rounded border bg-background px-2'
-              value={status}
-              disabled={readOnly}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                markDirty();
-              }}
-            >
-              <option value='draft'>草稿</option>
-              <option value='active'>有效</option>
-              <option value='archived'>归档</option>
-            </select>
-          </label>
-          <label className='flex items-center gap-2 text-sm'>
-            <span>标签</span>
-            <input
-              className='h-9 w-full rounded border bg-background px-3'
-              value={tags}
-              disabled={readOnly}
-              onChange={(event) => {
-                setTags(event.target.value);
-                markDirty();
-              }}
-            />
-          </label>
-          <label className='flex items-center gap-2 text-sm'>
-            <span>产出当前 Sample</span>
-            <select
-              className='h-9 w-full rounded border bg-background px-2'
-              value={producerProcessOccurrenceId ?? ''}
-              disabled={readOnly}
-              onChange={(event) => {
-                setProducerProcessOccurrenceId(event.target.value || null);
-                markDirty();
-              }}
-            >
-              <option value=''>不指定</option>
-              {processOccurrences.map((occurrence, index) => (
-                <option key={occurrence.occurrence_id} value={occurrence.occurrence_id}>
-                  {occurrence.label_snapshot ?? `Process ${index + 1}`}
-                </option>
-              ))}
-            </select>
-          </label>
-        </section>
 
         <ScientificComposer
           key={composerGeneration}
@@ -435,9 +400,14 @@ export function SampleComposer({
           createProcess={(draft, commandId) =>
             api.createProcessDefinition({ ...draft, project_scope_id: projectId }, commandId)
           }
-          createObject={(draft, commandId) =>
+          createResource={(draft, role, commandId) =>
             api.createObject(
-              { ...draft, kind: 'research_object', project_scope_id: projectId },
+              {
+                ...draft,
+                kind: 'research_object',
+                resource_role: role,
+                project_scope_id: projectId
+              },
               commandId
             )
           }

@@ -676,6 +676,7 @@ export function DataWorkspace({ dataId }: { dataId: string }) {
 export function ViewCreateWorkspace() {
   const { activeProjectId } = useProjectScope();
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedData, setSelectedData] = useState<DataRecord[]>([]);
   const [representationIds, setRepresentationIds] = useState<Record<string, string[]>>({});
@@ -703,7 +704,7 @@ export function ViewCreateWorkspace() {
   }, [selectedIds]);
   async function create(event: React.FormEvent) {
     event.preventDefault();
-    if (!activeProjectId || !title.trim() || selectedData.length === 0) return;
+    if (!activeProjectId || !title.trim()) return;
     setSaving(true);
     setError(null);
     try {
@@ -721,8 +722,21 @@ export function ViewCreateWorkspace() {
       const result = await api.createView({
         project_scope_id: activeProjectId,
         title: title.trim(),
+        description: description.trim() || null,
         data_refs: dataRefs,
-        config: {}
+        config: {
+          blocks: [
+            ...(description.trim()
+              ? [{ id: crypto.randomUUID(), type: 'text', text: description.trim() }]
+              : []),
+            {
+              id: crypto.randomUUID(),
+              type: 'manual_collection',
+              entity: 'data',
+              record_ids: selectedData.map((record) => record.data.id)
+            }
+          ]
+        }
       });
       window.location.assign(objectPath(result.view));
     } catch (cause) {
@@ -733,20 +747,29 @@ export function ViewCreateWorkspace() {
   return (
     <main className='mx-auto w-full max-w-[1320px] space-y-5 px-4 py-7 md:px-8 md:py-10'>
       <header>
-        <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>Pinned View</p>
-        <h1 className='mt-2 text-3xl font-semibold'>创建 View</h1>
+        <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>Analysis</p>
+        <h1 className='mt-2 text-3xl font-semibold'>新建分析</h1>
         <p className='mt-2 text-sm text-muted-foreground'>
-          选择 Data 与 Representation；提交时固定当前明确版本。
+          写下这次想放在一起看的问题，再手动选择 Data。提交时固定明确版本。
         </p>
       </header>
       <RecordTableList recordKind='data' embedded onSelectionChange={setSelectedIds} />
       <form onSubmit={create} className={`${card} space-y-4`}>
         <label className='grid gap-1 text-sm'>
-          View 名称
+          分析名称
           <input
             className='h-9 rounded border bg-background px-3'
             value={title}
             onChange={(event) => setTitle(event.target.value)}
+          />
+        </label>
+        <label className='grid gap-1 text-sm'>
+          说明（可选）
+          <textarea
+            className='min-h-24 rounded border bg-background px-3 py-2'
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder='例如：比较不同处理条件下的含水量变化'
           />
         </label>
         {selectedData.map((record) => (
@@ -776,8 +799,8 @@ export function ViewCreateWorkspace() {
             </div>
           </fieldset>
         ))}
-        <Button type='submit' disabled={saving || !title.trim() || selectedData.length === 0}>
-          {saving ? '正在创建…' : `创建 View（${selectedData.length} 个 Data）`}
+        <Button type='submit' disabled={saving || !title.trim()}>
+          {saving ? '正在创建…' : `创建分析（${selectedData.length} 个 Data）`}
         </Button>
         {error && (
           <p role='alert' className='text-sm text-destructive'>
@@ -850,16 +873,14 @@ export function ViewWorkspace({ viewId }: { viewId: string }) {
       <State loading={!record && !error} error={error} />
       {record && (
         <>
-          <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-            View record
-          </p>
+          <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>分析</p>
           <h1 className='mt-2 text-3xl font-semibold'>{record.view.title}</h1>
           <p className='mt-2 text-sm text-muted-foreground'>
-            {record.description ?? 'A versioned, data-only scientific view.'}
+            {record.description ?? '将样品、数据和论点放在一起观察。'}
           </p>
           <section className='mt-6 grid gap-3 md:grid-cols-2'>
             <div className={card}>
-              <h2 className='font-semibold'>Data references</h2>
+              <h2 className='font-semibold'>已加入内容</h2>
               <div className='mt-3 space-y-2'>
                 {record.data.map((item) => (
                   <ObjectLink key={item.id} object={item} />
@@ -867,14 +888,21 @@ export function ViewWorkspace({ viewId }: { viewId: string }) {
               </div>
             </div>
             <div className={card}>
-              <h2 className='font-semibold'>Current revision</h2>
-              <p className='mt-2 font-mono text-xs'>
-                {record.current_revision_id ?? 'No revision'}
+              <h2 className='font-semibold'>当前版本</h2>
+              <p className='mt-2 text-sm text-muted-foreground'>
+                {record.current_revision_id ? '已固定当前内容版本' : '尚未固定版本'}
               </p>
-              <h3 className='mt-5 font-semibold'>Configuration</h3>
-              <pre className='mt-2 overflow-auto rounded-lg bg-muted/40 p-3 text-xs'>
-                {JSON.stringify(record.config, null, 2)}
-              </pre>
+              {typeof record.config.blocks === 'object' && Array.isArray(record.config.blocks) && (
+                <div className='mt-5 space-y-2'>
+                  {(record.config.blocks as Array<{ type?: string; text?: string }>).map((block) =>
+                    block.type === 'text' && block.text ? (
+                      <p key={block.text} className='rounded-lg bg-muted/40 p-3 text-sm leading-6'>
+                        {block.text}
+                      </p>
+                    ) : null
+                  )}
+                </div>
+              )}
             </div>
           </section>
           <section className={`${card} mt-6`}>
@@ -1086,9 +1114,13 @@ export function ClaimWorkspace({ claimId }: { claimId: string }) {
           <h1 className='mt-2 text-3xl font-semibold'>{record.claim.title}</h1>
           <p className={`${card} mt-5 text-base`}>{record.statement}</p>
           <div className='mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground'>
-            <span className='rounded-full border px-2 py-1'>
-              Source: {record.primary_source.kind} · {record.primary_source_object.title}
-            </span>
+            {record.primary_source && record.primary_source_object ? (
+              <span className='rounded-full border px-2 py-1'>
+                Source: {record.primary_source.kind} · {record.primary_source_object.title}
+              </span>
+            ) : (
+              <span className='rounded-full border px-2 py-1'>Source: not assigned</span>
+            )}
             <span className='rounded-full border px-2 py-1'>
               Confidence: {record.confidence ?? 'not set'}
             </span>

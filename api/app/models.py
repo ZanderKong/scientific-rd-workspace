@@ -144,6 +144,10 @@ class ResearchObject(Base):
             "authoring_kind is null or authoring_kind in ('sample','data')",
             name="ck_research_objects_authoring_kind",
         ),
+        CheckConstraint(
+            "resource_role is null or resource_role in ('material','equipment','process')",
+            name="ck_research_objects_resource_role",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(32))
@@ -175,6 +179,7 @@ class ResearchObject(Base):
     # Explicit ownership marker for scientific record aggregates.  Tags and
     # occurrence rows are projections and may legitimately be empty.
     authoring_kind: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    resource_role: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -1023,14 +1028,17 @@ class ClaimRecord(Base):
     author_provenance_jsonb: Mapped[dict[str, Any]] = mapped_column(
         JsonColumn, default=dict, server_default=text("'{}'::jsonb")
     )
-    primary_source_kind: Mapped[str] = mapped_column(String(32))
-    primary_source_id: Mapped[uuid.UUID] = mapped_column(
+    primary_source_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    primary_source_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(
             "research_objects.id", ondelete="RESTRICT", name="fk_claim_records_primary_source"
         ),
+        nullable=True,
         index=True,
     )
-    primary_source_revision_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    primary_source_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True, index=True
+    )
     context_snapshot_jsonb: Mapped[dict[str, Any]] = mapped_column(
         JsonColumn, default=dict, server_default=text("'{}'::jsonb")
     )

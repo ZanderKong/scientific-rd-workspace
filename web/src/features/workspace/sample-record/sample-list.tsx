@@ -492,20 +492,20 @@ export function RecordTableList({
         <div className='mb-6 flex items-start justify-between gap-3'>
           <div>
             <p className='font-mono text-[10px] uppercase tracking-[0.2em] text-primary'>
-              Scientific record table
+              工作台
             </p>
             <h1 className='mt-2 text-3xl font-semibold'>
-              {recordKind === 'sample' ? 'Samples' : 'Data'}
+              {recordKind === 'sample' ? '样品' : '数据'}
             </h1>
             <p className='mt-2 text-sm text-muted-foreground'>
-              服务器筛选与分页的 {recordKind === 'sample' ? 'Sample' : 'Data'} 记录。
+              {recordKind === 'sample' ? '记录你实际做过和处理过的样品。' : '记录观察、测量和附件。'}
             </p>
           </div>
           <Link
             href={recordKind === 'sample' ? '/dashboard/samples/new' : '/dashboard/data/new'}
             className='rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground'
           >
-            {recordKind === 'sample' ? 'Create sample' : 'Record data'}
+            {recordKind === 'sample' ? '新建样品' : '记录数据'}
           </Link>
         </div>
       )}
@@ -516,7 +516,7 @@ export function RecordTableList({
           setQuery(event.target.value);
           setPage(1);
         }}
-        placeholder='Search sample title or code…'
+        placeholder={recordKind === 'sample' ? '搜索样品名称或编号…' : '搜索数据名称或编号…'}
       />
       {invalidTableConfig && (
         <div

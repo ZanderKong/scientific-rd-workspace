@@ -204,6 +204,10 @@ def _create_object_in_session(db: Session, payload: ObjectCreate) -> ResearchObj
         tags_jsonb=normalize_tags(payload.tags),
         process_field_definitions_jsonb=fields,
         content_document=copy.deepcopy(payload.content_document),
+        resource_role=(
+            payload.resource_role
+            or ("process" if payload.kind == "process_definition" else None)
+        ),
     )
     db.add(obj)
     _advance_counter(db, payload.kind, code)
@@ -282,6 +286,7 @@ def _update_object_in_session(
         "tags",
         "process_field_definitions",
         "content_document",
+        "resource_role",
     ):
         if field in changes:
             value = changes[field]
@@ -500,11 +505,20 @@ def object_out(obj: ResearchObject) -> dict[str, Any]:
         "content_document": obj.content_document or [],
         "document_format_version": obj.document_format_version,
         "authoring_kind": obj.authoring_kind,
+        "resource_role": obj.resource_role,
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
     }
     if obj.semantic_entries_jsonb:
-        result["semantic_entries"] = obj.semantic_entries_jsonb
+        result["semantic_entries"] = [
+            {
+                key: entry.get(key)
+                for key in ("id", "kind", "text", "block_id")
+                if key in entry
+            }
+            for entry in obj.semantic_entries_jsonb
+            if isinstance(entry, dict)
+        ]
     return result
 
 

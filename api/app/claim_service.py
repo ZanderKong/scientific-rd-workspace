@@ -119,14 +119,16 @@ def _replace_context_references(db: Session, record: ClaimRecord) -> None:
     db.query(ClaimContextReference).filter(
         ClaimContextReference.claim_id == record.claim_id
     ).delete(synchronize_session=False)
-    rows: list[ClaimContextReference] = [
-        ClaimContextReference(
-            claim_id=record.claim_id,
-            reference_kind="primary",
-            object_id=record.primary_source_id,
-            revision_id=record.primary_source_revision_id,
+    rows: list[ClaimContextReference] = []
+    if record.primary_source_id is not None:
+        rows.append(
+            ClaimContextReference(
+                claim_id=record.claim_id,
+                reference_kind="primary",
+                object_id=record.primary_source_id,
+                revision_id=record.primary_source_revision_id,
+            )
         )
-    ]
     context = record.context_snapshot_jsonb or {}
     if record.primary_source_kind == "data":
         items = context.get("subjects", [])
@@ -269,11 +271,15 @@ def _revision(db: Session, record: ClaimRecord, change_note: str | None) -> Clai
         {
             "statement": record.statement,
             "author_provenance": record.author_provenance_jsonb or {},
-            "primary_source": {
-                "kind": record.primary_source_kind,
-                "object_id": str(record.primary_source_id),
-                "revision_id": str(record.primary_source_revision_id),
-            },
+            "primary_source": (
+                {
+                    "kind": record.primary_source_kind,
+                    "object_id": str(record.primary_source_id),
+                    "revision_id": str(record.primary_source_revision_id),
+                }
+                if record.primary_source_id is not None
+                else None
+            ),
             "context_snapshot": record.context_snapshot_jsonb or {},
             "confidence": record.confidence,
             "metadata_jsonb": record.metadata_jsonb or {},
@@ -299,17 +305,19 @@ def _revision(db: Session, record: ClaimRecord, change_note: str | None) -> Clai
     )
     db.add(revision)
     db.flush()
-    references: list[RevisionReference] = [
-        RevisionReference(
-            source_claim_revision_id=revision.id,
-            **_revision_target(
-                db,
-                record.primary_source_kind,
-                record.primary_source_id,
-                record.primary_source_revision_id,
-            ),
+    references: list[RevisionReference] = []
+    if record.primary_source_id is not None and record.primary_source_kind is not None:
+        references.append(
+            RevisionReference(
+                source_claim_revision_id=revision.id,
+                **_revision_target(
+                    db,
+                    record.primary_source_kind,
+                    record.primary_source_id,
+                    record.primary_source_revision_id,
+                ),
+            )
         )
-    ]
     context = record.context_snapshot_jsonb or {}
     for item in context.get("subjects", []) + context.get("members", []):
         value = item.get("subject_id") or item.get("object_id")
@@ -386,12 +394,18 @@ def _body(db: Session, claim: ResearchObject, record: ClaimRecord) -> dict[str, 
         "claim": object_out(claim),
         "statement": record.statement,
         "author_provenance": record.author_provenance_jsonb or {},
-        "primary_source": {
-            "kind": record.primary_source_kind,
-            "object_id": record.primary_source_id,
-            "revision_id": record.primary_source_revision_id,
-        },
-        "primary_source_object": object_out(record.primary_source),
+        "primary_source": (
+            {
+                "kind": record.primary_source_kind,
+                "object_id": record.primary_source_id,
+                "revision_id": record.primary_source_revision_id,
+            }
+            if record.primary_source_id is not None
+            else None
+        ),
+        "primary_source_object": object_out(record.primary_source)
+        if record.primary_source is not None
+        else None,
         "context_snapshot": record.context_snapshot_jsonb or {},
         "confidence": record.confidence,
         "metadata_jsonb": record.metadata_jsonb or {},
@@ -458,7 +472,9 @@ def create_claim(db: Session, payload: ClaimCreate, *, commit: bool = True) -> d
         statement = payload.statement.strip()
         if not statement:
             raise ValueError("Claim statement is required")
-        source, _ = _primary_source(db, payload.project_scope_id, payload.primary_source)
+        source = None
+        if payload.primary_source is not None:
+            source, _ = _primary_source(db, payload.project_scope_id, payload.primary_source)
         claim = _create_object_in_session(
             db,
             ObjectCreate(
@@ -474,11 +490,15 @@ def create_claim(db: Session, payload: ClaimCreate, *, commit: bool = True) -> d
             claim_id=claim.id,
             statement=statement,
             author_provenance_jsonb=_author_provenance(payload.author_provenance),
-            primary_source_kind=payload.primary_source.kind,
-            primary_source_id=source.id,
-            primary_source_revision_id=payload.primary_source.revision_id,
-            context_snapshot_jsonb=_capture_context(
-                db, payload.project_scope_id, payload.primary_source
+            primary_source_kind=payload.primary_source.kind if payload.primary_source else None,
+            primary_source_id=source.id if source else None,
+            primary_source_revision_id=payload.primary_source.revision_id
+            if payload.primary_source
+            else None,
+            context_snapshot_jsonb=(
+                _capture_context(db, payload.project_scope_id, payload.primary_source)
+                if payload.primary_source
+                else {}
             ),
             confidence=payload.confidence,
             metadata_jsonb=copy.deepcopy(payload.metadata_jsonb),
@@ -537,7 +557,7 @@ def update_claim(
             record.context_snapshot_jsonb = _capture_context(
                 db, claim.project_scope_id, payload.primary_source
             )
-        elif payload.refresh_context:
+        elif payload.refresh_context and record.primary_source_id and record.primary_source_kind:
             record.context_snapshot_jsonb = _capture_context(
                 db,
                 claim.project_scope_id,

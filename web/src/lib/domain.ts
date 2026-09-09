@@ -6,6 +6,7 @@ export type ResearchObjectKind =
   | 'project'
   | 'view'
   | 'claim';
+export type ResourceRole = 'material' | 'equipment' | 'process';
 
 export type RelationType = 'references' | 'subject' | 'derived_from' | 'related_to';
 export type JsonObject = Record<string, unknown>;
@@ -55,6 +56,7 @@ export interface ResearchObject {
   code: string;
   kind: ResearchObjectKind;
   authoring_kind?: 'sample' | 'data' | null;
+  resource_role?: ResourceRole | null;
   title: string;
   status: string;
   project_scope_id: string | null;
@@ -497,8 +499,8 @@ export interface ClaimRecord {
     kind: 'experiment' | 'data' | 'view';
     object_id: string;
     revision_id: string;
-  };
-  primary_source_object: ResearchObject;
+  } | null;
+  primary_source_object: ResearchObject | null;
   context_snapshot: JsonObject;
   confidence: string | null;
   metadata_jsonb: JsonObject;

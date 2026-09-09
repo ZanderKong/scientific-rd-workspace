@@ -160,9 +160,6 @@ export function SampleBatchEditor({ sampleId, revision }: { sampleId: string; re
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [selectedVariables, setSelectedVariables] = useState<string[]>([]);
   const [results, setResults] = useState<SampleRecord[]>([]);
-  const [experiments, setExperiments] = useState<Array<{ id: string; title: string }>>([]);
-  const [experimentId, setExperimentId] = useState('');
-  const [addingToExperiment, setAddingToExperiment] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitKey = useRef(crypto.randomUUID());
@@ -190,16 +187,6 @@ export function SampleBatchEditor({ sampleId, revision }: { sampleId: string; re
             .filter((item) => item.filled)
             .map((item) => `${item.occurrenceId}:${item.fieldKey}`)
         );
-        api
-          .listObjects({
-            kind: 'experiment',
-            project_scope_id: record.sample.project_scope_id ?? undefined,
-            limit: 200
-          })
-          .then((items) =>
-            setExperiments(items.map((item) => ({ id: item.id, title: item.title })))
-          )
-          .catch(() => setExperiments([]));
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : 'Request failed'));
   }, [draftKey, revision, sampleId, t]);
@@ -307,31 +294,6 @@ export function SampleBatchEditor({ sampleId, revision }: { sampleId: string; re
     }
   }
 
-  async function addResultsToExperiment() {
-    if (!experimentId || !results.length) return;
-    setAddingToExperiment(true);
-    setError(null);
-    try {
-      let experiment = await api.getExperimentRecord(experimentId);
-      const start = Object.values(experiment.references).flat().length;
-      for (const [index, result] of results.entries()) {
-        experiment = await api.addExperimentReference(
-          experimentId,
-          {
-            target_id: result.sample.id,
-            target_kind: 'research_object',
-            role: 'sample',
-            order_index: start + index
-          },
-          experiment.record_sha256
-        );
-      }
-      window.location.assign(`/dashboard/experiments/${experimentId}`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Request failed');
-      setAddingToExperiment(false);
-    }
-  }
 
   if (!source || !sourceRevision)
     return <main className='mx-auto max-w-[1480px] p-8'>{error ?? t('loading')}</main>;
@@ -539,30 +501,6 @@ export function SampleBatchEditor({ sampleId, revision }: { sampleId: string; re
               </Link>
             ))}
           </div>
-          {!!experiments.length && (
-            <div className='mt-4 flex flex-wrap gap-2'>
-              <select
-                className='h-9 rounded border bg-background px-2 text-sm'
-                value={experimentId}
-                onChange={(event) => setExperimentId(event.target.value)}
-              >
-                <option value=''>选择 Experiment</option>
-                {experiments.map((experiment) => (
-                  <option key={experiment.id} value={experiment.id}>
-                    {experiment.title}
-                  </option>
-                ))}
-              </select>
-              <Button
-                type='button'
-                variant='outline'
-                disabled={!experimentId || addingToExperiment}
-                onClick={addResultsToExperiment}
-              >
-                {addingToExperiment ? '正在加入…' : '全部加入 Experiment'}
-              </Button>
-            </div>
-          )}
         </section>
       )}
     </main>
