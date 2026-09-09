@@ -22,6 +22,8 @@
 
 ## 当前边界
 
+2026-09-09 引用输入修复：新插入的 Object/Process/父级属性引用两侧写入正文空格，引用显示浅色背景；二级引用通过 BlockNote SuggestionMenu 接口插入 `｜` 并立即打开属性菜单。compositionend 延后一帧刷新事务和候选加载，避免最终中文已被观察但未实际查询时必须再输入空格。浏览器验证二级引用→自动属性菜单→温度值，确认只有一个分隔符；lint、typecheck、21 项单测、build 通过。真实 macOS IME 仍待人工验证。
+
 PostgreSQL 是唯一数据库，附件 bytes 存文件系统。没有 SQLite fallback、协同编辑、离线自动合并、内置分析/AI runtime、RBAC 或队列。真实 macOS 中文 IME 与固定性能环境仍是发布前人工门禁；100 Ref × 20 字段读取的本机 SQL 诊断已从 503 条降至 10 条。
 
 ## 验证与发布门禁

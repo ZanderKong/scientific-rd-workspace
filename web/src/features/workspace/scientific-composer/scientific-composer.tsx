@@ -1,6 +1,7 @@
 'use client';
 
 import { BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core';
+import { SuggestionMenu } from '@blocknote/core/extensions';
 import { BlockNoteView } from '@blocknote/shadcn';
 import {
   SuggestionMenuController,
@@ -195,18 +196,24 @@ export function ScientificComposer({
   const searchAbort = useRef<AbortController | null>(null);
   const searchSequence = useRef(0);
   const composing = useRef(false);
+  const [, refreshSearch] = useState(0);
   const lastReferenceItems = useRef<DefaultReactSuggestionItem[]>([]);
   useEffect(() => {
     const dom = editor.prosemirrorView.dom;
+    let compositionFrame = 0;
     const begin = () => {
+      cancelAnimationFrame(compositionFrame);
       composing.current = true;
+      searchAbort.current?.abort();
     };
     const end = () => {
       composing.current = false;
-      // BlockNote's suggestion controller may have evaluated the transient
-      // composition text. Re-dispatch the current transaction so the final
-      // committed IME text is searched once, after composition has ended.
-      editor.prosemirrorView.dispatch(editor.prosemirrorView.state.tr);
+      // Wait for the final native input/ProseMirror transaction, then invalidate
+      // getItems even when the final query string has already been observed.
+      compositionFrame = requestAnimationFrame(() => {
+        editor.prosemirrorView.dispatch(editor.prosemirrorView.state.tr);
+        refreshSearch((generation) => generation + 1);
+      });
     };
     dom.addEventListener('compositionstart', begin);
     dom.addEventListener('compositionend', end);
@@ -214,6 +221,7 @@ export function ScientificComposer({
       dom.removeEventListener('compositionstart', begin);
       dom.removeEventListener('compositionend', end);
       searchAbort.current?.abort();
+      cancelAnimationFrame(compositionFrame);
     };
   }, [editor]);
   useEditorChange((current) => {
@@ -247,8 +255,9 @@ export function ScientificComposer({
             title: `${item.label_snapshot ?? '引用'} · 第${ordinal}次`,
             subtext: item.kind === 'process' ? '父级过程 occurrence' : '父级对象 occurrence',
             aliases: [item.label_snapshot ?? ''],
-            onItemClick: () =>
+            onItemClick: () => {
               editor.insertInlineContent([
+                ' ',
                 {
                   type: 'propertyRef',
                   props: {
@@ -257,8 +266,16 @@ export function ScientificComposer({
                     label: item.label_snapshot ?? ''
                   }
                 } as never,
-                '｜'
-              ])
+                ' '
+              ]);
+              // Programmatic text insertion does not run handleTextInput.
+              // Let the extension insert and own its trigger so selection
+              // replaces exactly one separator and opens the menu immediately.
+              editor.getExtension(SuggestionMenu)?.openSuggestionMenu('｜', {
+                deleteTriggerCharacter: true,
+                ignoreQueryLength: true
+              });
+            }
           };
         });
       const normalized = query.trim().toLocaleLowerCase();
@@ -318,7 +335,7 @@ export function ScientificComposer({
         subtext: '过程 · 当前一级 bullet',
         aliases: [target.code, ...target.tags],
         onItemClick: () =>
-          editor.insertInlineContent([occurrenceRef(occurrence, target.title) as never])
+          editor.insertInlineContent([' ', occurrenceRef(occurrence, target.title) as never, ' '])
       });
     });
     resultItems(objectResult)
@@ -342,7 +359,7 @@ export function ScientificComposer({
             : `${object.resource_role === 'equipment' ? '设备' : object.resource_role === 'material' ? '原料' : '资源'} · 当前一级 bullet`,
         aliases: [object.code, ...object.tags],
         onItemClick: () =>
-          editor.insertInlineContent([occurrenceRef(occurrence, object.title) as never])
+          editor.insertInlineContent([' ', occurrenceRef(occurrence, object.title) as never, ' '])
       });
     });
     if (_createProcess && query.trim()) {
@@ -370,7 +387,7 @@ export function ScientificComposer({
             values: {},
             status: 'recorded'
           };
-          editor.insertInlineContent([occurrenceRef(occurrence, target.title) as never]);
+          editor.insertInlineContent([' ', occurrenceRef(occurrence, target.title) as never, ' ']);
         }
       });
     }
@@ -400,7 +417,7 @@ export function ScientificComposer({
               status: 'recorded',
               binding: null
             };
-            editor.insertInlineContent([occurrenceRef(occurrence, created.title) as never]);
+            editor.insertInlineContent([' ', occurrenceRef(occurrence, created.title) as never, ' ']);
           }
         });
       });

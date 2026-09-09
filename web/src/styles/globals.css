@@ -31,6 +31,19 @@
   margin-inline: 0;
 }
 
+.scientific-ref {
+  border-radius: 0.3rem;
+  padding: 0.08em 0.3em;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--foreground);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.scientific-ref--property {
+  background: var(--muted);
+}
+
 .scientific-composer-ghost {
   pointer-events: none;
   color: var(--muted-foreground);
