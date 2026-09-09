@@ -411,6 +411,7 @@ export function SampleComposer({
               commandId
             )
           }
+          excludeObjectId={recordId}
           onChange={(next) => {
             generation.current += 1;
             setBlocks(next);

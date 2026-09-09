@@ -149,6 +149,7 @@ export function ScientificComposer({
   searchObjects,
   createProcess: _createProcess,
   createResource,
+  excludeObjectId,
   onChange,
   editable = true
 }: {
@@ -180,6 +181,7 @@ export function ScientificComposer({
     role: Exclude<ResourceRole, 'process'>,
     commandId?: string
   ) => Promise<ResearchObject>;
+  excludeObjectId?: string | null;
   onChange: (blocks: JsonObject[]) => void;
   editable?: boolean;
 }) {
@@ -320,7 +322,7 @@ export function ScientificComposer({
       });
     });
     resultItems(objectResult)
-      .filter((object) => object.authoring_kind !== 'data')
+      .filter((object) => object.authoring_kind !== 'data' && object.id !== excludeObjectId)
       .forEach((object) => {
       const occurrence: ScientificOccurrenceDraft = {
         occurrence_id: crypto.randomUUID(),
