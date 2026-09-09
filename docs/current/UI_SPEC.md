@@ -12,7 +12,7 @@ The UI displays one Research Object identity with code/title/status/tags/propert
 
 ## Process and Sample Record
 
-Scientific Composer is a continuous BlockNote document. `/` inserts an atomic Process Ref, `@` inserts an Object Ref, and each Ref renders its PropertySlots at the source position. Slot editing, Ref deletion and body edits share undo history. Candidate search is server-backed. Sample detail supports canonical reload, immutable history, conflict-safe drafts and identity-remapped copy creation.
+Scientific Composer uses a two-level BlockNote document. A top-level bullet is natural language with `@` Object/Process declarations; a direct child bullet uses `@reference｜property: raw value` and can only reference an occurrence declared by its parent. Repeated declarations receive stable occurrence identities and are shown as “第 N 次”. `@data` and `@claim` are parser commands usable at either level and are stored against the current Sample/Data authoring subject. Properties remain free text; the vocabulary only supplies bilingual suggestions and unit hints. Candidate search is server-backed and composition-aware. Sample/Data detail supports canonical reload, immutable history, conflict-safe drafts and identity-remapped copy creation.
 
 ## Data, Experiment, View and Claim
 

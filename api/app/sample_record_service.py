@@ -98,6 +98,146 @@ def _validate_document(
         raise ValueError("document Ref order must match occurrences")
 
 
+def _normalise_document_v2(
+    document: ScientificDocumentV1, occurrences: list[ScientificOccurrenceDraft]
+) -> list[ScientificOccurrenceDraft]:
+    """Validate the two-level authoring shape and project free-form property rows.
+
+    Property rows are deliberately not occurrence nodes. They point at a
+    parent occurrence and are converted to local field definitions only at the
+    aggregate boundary, preserving the user's original label and raw value.
+    """
+    if document.schema_version < 2:
+        return occurrences
+    by_id = {item.occurrence_id: item.model_copy(deep=True) for item in occurrences}
+    property_line_ids: set[str] = set()
+    for occurrence in by_id.values():
+        had_fields = isinstance((occurrence.field_definitions or {}).get("fields"), list)
+        fields = [
+            field
+            for field in list((occurrence.field_definitions or {}).get("fields") or [])
+            if not (
+                isinstance(field, dict)
+                and field.get("source") == "local"
+                and str(field.get("key") or "").startswith("property_")
+            )
+        ]
+        if had_fields:
+            occurrence.field_definitions = {**occurrence.field_definitions, "fields": fields}
+        occurrence.values = {
+            key: value
+            for key, value in dict(occurrence.values or {}).items()
+            if not str(key).startswith("property_")
+        }
+
+    def text_after_property(content: list[dict[str, Any]]) -> str:
+        seen = False
+        chunks: list[str] = []
+        for item in content:
+            if not seen and item.get("type") == "propertyRef":
+                seen = True
+                continue
+            if not seen:
+                continue
+            if item.get("type") == "text":
+                chunks.append(str(item.get("text") or ""))
+        return "".join(chunks)
+
+    def parse_properties(value: str) -> list[tuple[str, str, int]]:
+        normalised = value.replace("｜", "|").replace("：", ":")
+        parsed: list[tuple[str, str, int]] = []
+        for part in normalised.split("|"):
+            if ":" not in part:
+                continue
+            key, raw = part.split(":", 1)
+            key, raw = key.strip(), raw.strip()
+            if key and raw != "":
+                parsed.append((key, raw, len(parsed)))
+        return parsed
+
+    def walk(blocks: list[dict[str, Any]], parent_ids: set[uuid.UUID], depth: int) -> None:
+        if depth > 1 and blocks:
+            raise ValueError("scientific document supports only two bullet levels")
+        for block in blocks:
+            content = block.get("content") if isinstance(block.get("content"), list) else []
+            declarations = {
+                uuid.UUID(str((item.get("props") or {}).get("occurrenceId")))
+                for item in content
+                if isinstance(item, dict)
+                and item.get("type") in {"processRef", "objectRef"}
+                and (item.get("props") or {}).get("occurrenceId")
+            }
+            if depth > 0 and declarations:
+                raise ValueError("child bullets may only reference a parent occurrence")
+            property_node = next(
+                (
+                    item
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "propertyRef"
+                ),
+                None,
+            )
+            if property_node is not None:
+                props = property_node.get("props") or {}
+                try:
+                    occurrence_id = uuid.UUID(str(props.get("occurrenceId")))
+                except (ValueError, TypeError) as exc:
+                    raise ValueError("property row contains an invalid occurrence ID") from exc
+                if occurrence_id not in parent_ids:
+                    raise ValueError(
+                        "property row must reference an occurrence declared by its parent bullet"
+                    )
+                occurrence = by_id.get(occurrence_id)
+                if occurrence is None:
+                    raise ValueError("property row references a missing occurrence")
+                line_id = str(props.get("lineId") or "")
+                if not line_id:
+                    raise ValueError("property row is missing its stable line ID")
+                if line_id in property_line_ids:
+                    raise ValueError("property rows must have unique stable line IDs")
+                property_line_ids.add(line_id)
+                fields = list((occurrence.field_definitions or {}).get("fields") or [])
+                values = dict(occurrence.values or {})
+                raw_property_text = text_after_property(content)
+                normalised_parts = [
+                    part.strip()
+                    for part in raw_property_text.replace("｜", "|").replace("：", ":").split("|")
+                    if part.strip()
+                ]
+                if any(
+                    ":" not in part
+                    or not part.split(":", 1)[0].strip()
+                    or not part.split(":", 1)[1].strip()
+                    for part in normalised_parts
+                ):
+                    raise ValueError("property row contains an incomplete property: value pair")
+                for key, raw, ordinal in parse_properties(raw_property_text):
+                    field_key = f"property_{line_id}_{ordinal}"
+                    if not any(
+                        isinstance(field, dict) and field.get("key") == field_key
+                        for field in fields
+                    ):
+                        fields.append(
+                            {
+                                "key": field_key,
+                                "field_id": field_key,
+                                "source": "local",
+                                "label": key,
+                                "value_type": "text",
+                                "order": len(fields),
+                            }
+                        )
+                    values[field_key] = {"value": raw, "raw_value": raw}
+                occurrence.field_definitions = {**occurrence.field_definitions, "fields": fields}
+                occurrence.values = values
+            children = block.get("children") if isinstance(block.get("children"), list) else []
+            if children:
+                walk(children, declarations, depth + 1)
+
+    walk(document.blocks, set(), 0)
+    return [by_id[item.occurrence_id] for item in occurrences]
+
+
 def _field_definitions(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
     nested = value.get("fields")
     if isinstance(nested, list):
@@ -303,12 +443,15 @@ def _record_body(db: Session, sample: ResearchObject) -> dict[str, Any]:
         if data_ids
         else []
     )
+    document = {
+        "schema_version": sample.document_format_version,
+        "blocks": sample.content_document,
+    }
+    if sample.semantic_entries_jsonb:
+        document["semantic_entries"] = sample.semantic_entries_jsonb
     body = {
         "sample": object_out(sample),
-        "document": {
-            "schema_version": sample.document_format_version,
-            "blocks": sample.content_document,
-        },
+        "document": document,
         "occurrences": occurrences,
         "producer_process_occurrence_id": next(
             (
@@ -434,6 +577,7 @@ def get_sample_record_revision(
         "document": {
             "schema_version": manifest.get("document_format_version", 1),
             "blocks": object_snapshot.get("content_document") or [],
+            "semantic_entries": object_snapshot.get("semantic_entries_jsonb") or [],
         },
         "occurrences": occurrences,
         "data": [],
@@ -468,6 +612,7 @@ def _sync_record(
     change_note: str | None,
     producer_process_occurrence_id: uuid.UUID | None = None,
 ) -> None:
+    occurrences = _normalise_document_v2(document, occurrences)
     _validate_document(document, occurrences)
     lock_project_graph(db, sample.project_scope_id)
     resolved_occurrences: list[ScientificOccurrenceDraft] = []
@@ -684,6 +829,9 @@ def _sync_record(
         db.expire(execution, ["object_bindings", "data_bindings"])
         _revision(db, execution, change_note or "save scientific record")
     sample.content_document = copy.deepcopy(document.blocks)
+    sample.semantic_entries_jsonb = [
+        entry.model_dump(mode="json") for entry in document.semantic_entries
+    ]
     sample.document_format_version = document.schema_version
     db.flush()
 

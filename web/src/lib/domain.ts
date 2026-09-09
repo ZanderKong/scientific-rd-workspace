@@ -67,6 +67,7 @@ export interface ResearchObject {
   properties_jsonb: JsonObject;
   process_field_definitions: JsonObject;
   content_document: JsonObject[];
+  semantic_entries?: ScientificSemanticEntry[];
   document_format_version: number;
   record_sha256?: string | null;
   created_at: string;
@@ -213,9 +214,26 @@ export interface ProcessExecutionDraft {
   source_view_revision_id?: string | null;
 }
 
-export interface ScientificDocumentV1 {
-  schema_version: 1;
+/**
+ * Scientific Document V2 is deliberately small: BlockNote owns the block
+ * tree, while semantic identity lives in occurrence payloads.  Property rows
+ * reference an existing parent occurrence and never create a second process
+ * execution.
+ */
+export interface ScientificDocumentV2 {
+  schema_version: 2;
   blocks: JsonObject[];
+  semantic_entries?: ScientificSemanticEntry[];
+}
+
+/** Kept as a source-compatible name for API consumers during the cutover. */
+export type ScientificDocumentV1 = ScientificDocumentV2;
+
+export interface ScientificSemanticEntry {
+  id: string;
+  kind: 'data' | 'claim';
+  text: string;
+  block_id?: string | null;
 }
 
 export interface ScientificBindingDraft {

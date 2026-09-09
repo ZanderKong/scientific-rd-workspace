@@ -30,10 +30,18 @@ def run_idempotent(
     response_status: int = 200,
 ) -> dict[str, Any]:
     if not key:
-        return operation()
+        result = operation()
+        # Router operations are intentionally passed with commit=False when
+        # they may be wrapped by an idempotency reservation.  The no-key path
+        # has no reservation to commit the outer transaction, so it must still
+        # durably commit before returning a successful response.
+        db.commit()
+        return result
     key = key.strip()
     if not key:
-        return operation()
+        result = operation()
+        db.commit()
+        return result
     request_hash = sha256_json(request_payload)
     existing = db.scalar(
         select(IdempotencyRecord).where(IdempotencyRecord.idempotency_key == key).with_for_update()

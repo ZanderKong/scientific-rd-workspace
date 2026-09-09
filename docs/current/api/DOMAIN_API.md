@@ -47,7 +47,7 @@ PUT      /experiments/{id}/reference-order
 POST     /record-tables/query
 ```
 
-Sample writes use `ScientificDocumentV1` plus stable typed occurrences; the `steps` input format is removed. Batch creation accepts an explicit `source_sample_id` and `source_revision_id`, keeps each `client_row_id`, and either creates every row or returns row/occurrence/field errors without partial success. The table query performs full-scope filtering and sorting before pagination and returns ordered occurrence values. Experiment output remains grouped typed references and never ownership/provenance.
+Sample writes use `ScientificDocumentV2` plus stable typed occurrences; the `steps` input format is removed. V2 keeps property rows in the BlockNote tree while projecting their raw values onto the parent occurrence at the aggregate boundary. Batch creation accepts an explicit `source_sample_id` and `source_revision_id`, keeps each `client_row_id`, and either creates every row or returns row/occurrence/field errors without partial success. The table query performs full-scope filtering and sorting before pagination and returns ordered occurrence values. Experiment output remains grouped typed references and never ownership/provenance.
 
 ## Data and assets
 
@@ -70,7 +70,7 @@ GET      /assets/{id}/download
 ```
 
 Representations are `raw_file`, `table`, `image`, `description` or `structured`. Legacy `/payloads`, `/data-payloads` and typed payload endpoints are removed.
-Data record reads and writes use the same `ScientificDocumentV1` plus occurrence contract. Occurrence field projections preserve empty slots so a table can distinguish an unreferenced field from a referenced but unfilled occurrence.
+Data record reads and writes use the same `ScientificDocumentV2` plus occurrence contract. `@data`/`@claim` semantic entries are retained with the authoring document and current subject. Occurrence field projections preserve empty slots so a table can distinguish an unreferenced field from a referenced but unfilled occurrence.
 
 ## View and Claim
 

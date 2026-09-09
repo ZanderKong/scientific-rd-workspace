@@ -9,14 +9,11 @@ async function post(request: APIRequestContext, path: string, data: unknown) {
   return response.json();
 }
 
-test('continuous composer saves inline slots and stable Ref identities', async ({
+test('two-level scientific bullets save properties without creating another occurrence', async ({
   page,
   request
 }, testInfo) => {
   const assertBrowserHealthy = installBrowserGuards(page, testInfo);
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
-    origin: 'http://127.0.0.1:3000'
-  });
   const suffix = `${Date.now()}`;
   const project = await post(request, '/project-records', {
     project: { code: `PRJ-COMPOSER-${suffix}`, title: 'Composer project' }
@@ -26,101 +23,23 @@ test('continuous composer saves inline slots and stable Ref identities', async (
     code: `PFD-EXPOSURE-${suffix}`,
     title: 'Exposure',
     project_scope_id: projectId,
-    execution_field_definitions: {
-      fields: [
-        { key: 'duration', label: 'Duration', value_type: 'number', default_unit: 'min' },
-        { key: 'note', label: 'Note', value_type: 'text' }
-      ]
-    }
-  });
-  await post(request, '/process-definitions', {
-    code: `PFD-MIXING-${suffix}`,
-    title: 'Mixing',
-    project_scope_id: projectId,
-    execution_field_definitions: {
-      fields: [{ key: 'speed', label: 'Speed', value_type: 'number', default_unit: 'rpm' }]
-    }
-  });
-  await post(request, '/objects', {
-    kind: 'research_object',
-    code: `ROO-MATERIAL-${suffix}`,
-    title: 'Resolver material',
-    project_scope_id: projectId,
-    tags: ['原料'],
-    process_field_definitions: {
-      fields: [{ key: 'quantity', label: 'Quantity', value_type: 'number', default_unit: 'g' }]
-    }
+    execution_field_definitions: { fields: [] }
   });
 
   await page.goto(`/dashboard/samples/new?project=${projectId}`);
-  await page.getByTestId('sample-title').fill('Continuous sample');
+  await page.getByTestId('sample-title').fill('Two-level sample');
   const editor = page.locator('[data-testid="scientific-composer"] .bn-editor');
   await editor.click();
-  await page.keyboard.type('/Expo');
-  await expect(page.getByText(/v1 · Duration · Note/)).toBeVisible();
+  await page.keyboard.type('record @Expo');
   await page.getByText('Exposure', { exact: true }).last().click();
-  const duration = page.getByRole('textbox', { name: 'Exposure Duration' });
-  const note = page.getByRole('textbox', { name: 'Exposure Note' });
-  await duration.fill('15');
-  await duration.press('Tab');
-  await expect(note).toBeFocused();
-  await note.fill('中文记录');
-  await note.press('Shift+Tab');
-  await expect(duration).toBeFocused();
-  await duration.press('ArrowLeft');
-  await duration.press('Escape');
-  await page.keyboard.press('Backspace');
-  await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveCount(0);
-  await page.keyboard.press('ControlOrMeta+z');
-  await page.getByRole('button', { name: '选择过程 Exposure' }).click();
-  await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveValue('15');
-  await expect(page.getByRole('textbox', { name: 'Exposure Note' })).toHaveValue('中文记录');
-  await page.getByRole('textbox', { name: 'Exposure Duration' }).focus();
-  await page.keyboard.press('ControlOrMeta+Shift+z');
-  await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveCount(0);
-  await editor.focus();
-  await page.keyboard.press('ControlOrMeta+z');
-  await page.getByRole('button', { name: '选择过程 Exposure' }).click();
-  await expect(page.getByRole('textbox', { name: 'Exposure Duration' })).toHaveValue('15');
-  await page.getByRole('textbox', { name: 'Exposure Duration' }).press('Escape');
-  await page.keyboard.press('ControlOrMeta+c');
-  const externalText = await page.evaluate(() => navigator.clipboard.readText());
-  expect(externalText).toContain('/Exposure');
-  expect(externalText).toContain('Duration 15min');
-  await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ControlOrMeta+v');
-  await expect(page.getByRole('button', { name: '选择过程 Exposure' })).toHaveCount(2);
-  await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('Delete');
-  await expect(page.getByRole('button', { name: '选择过程 Exposure' })).toHaveCount(1);
-  await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.getByRole('button', { name: '选择过程 Exposure' })).toHaveCount(2);
-  await page.keyboard.press('ControlOrMeta+Shift+z');
-  await expect(page.getByRole('button', { name: '选择过程 Exposure' })).toHaveCount(1);
-  await page.keyboard.press('ControlOrMeta+z');
-  await expect(page.getByRole('button', { name: '选择过程 Exposure' })).toHaveCount(2);
-
-  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
-  await page.evaluate(() => navigator.clipboard.writeText('外部纯文本'));
-  await page.keyboard.press('ControlOrMeta+v');
-  await expect(editor).toContainText('外部纯文本');
-  await page.keyboard.type(' @Resolver');
-  await page.getByText('Resolver material', { exact: true }).last().click();
-  await page.getByRole('button', { name: '选择对象 Resolver material' }).click();
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('@Expo');
   await page
-    .locator('section')
-    .filter({ hasText: '关联过程' })
-    .getByRole('combobox')
-    .first()
-    .selectOption({ index: 1 });
-  await page.getByRole('textbox', { name: 'Resolver material Quantity' }).fill('5');
-  await page.getByRole('button', { name: '＋新增属性' }).click();
-  await page.getByLabel('新属性名称').fill('Yield');
-  await page.getByLabel('新属性类型').selectOption('number');
-  await page.getByLabel('新属性单位').fill('%');
-  await page.getByRole('button', { name: '添加', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Resolver material Yield' }).fill('92');
+    .getByText(/Exposure · 第1次/)
+    .last()
+    .click();
+  await page.keyboard.type('｜温度: 60 ℃｜添加量: 0');
 
   const createResponse = page.waitForResponse(
     (response) =>
@@ -128,70 +47,21 @@ test('continuous composer saves inline slots and stable Ref identities', async (
   );
   await page.getByTestId('save-sample-record').click();
   const created = await (await createResponse).json();
-  expect(created.occurrences).toHaveLength(3);
-  const processOccurrences = created.occurrences.filter(
-    (occurrence: { kind: string }) => occurrence.kind === 'process'
+  expect(created.occurrences).toHaveLength(1);
+  expect(created.occurrences[0].execution_id).toBeTruthy();
+  const propertyValues = Object.values(created.occurrences[0].values).filter(
+    (value: unknown) =>
+      Boolean(value) && typeof value === 'object' && 'raw_value' in (value as object)
   );
-  const objectOccurrence = created.occurrences.find(
-    (occurrence: { kind: string }) => occurrence.kind === 'object'
+  expect(propertyValues).toEqual(
+    expect.arrayContaining([
+      { value: '60 ℃', raw_value: '60 ℃' },
+      { value: '0', raw_value: '0' }
+    ])
   );
-  expect(processOccurrences[0].execution.values).toMatchObject({
-    duration: '15',
-    note: '中文记录'
-  });
-  expect(processOccurrences[0].execution_id).not.toBe(processOccurrences[1].execution_id);
-  expect(objectOccurrence.values.quantity).toMatchObject({ value: '5', unit: 'g' });
-  const localField = objectOccurrence.field_definitions.fields.find(
-    (field: { source?: string }) => field.source === 'local'
-  );
-  expect(localField).toMatchObject({ label: 'Yield', value_type: 'number', default_unit: '%' });
-  expect(objectOccurrence.values[localField.key]).toMatchObject({ value: '92', unit: '%' });
-  const executionId = processOccurrences[0].execution_id as string;
-  const bindingId = objectOccurrence.binding.binding_id as string;
 
   await page.goto(`/dashboard/samples/${created.sample.id}?project=${projectId}`);
-  await page.getByRole('button', { name: '选择过程 Exposure' }).first().click();
-  await page.getByRole('textbox', { name: '替换 Ref 搜索' }).fill('Mixing');
-  await page.getByRole('button', { name: '查找' }).click();
-  await page.getByRole('button', { name: /Mixing PFD-MIXING/ }).click();
-  await expect(page.getByRole('textbox', { name: 'Mixing Speed' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Resolver material Quantity' }).fill('6');
-  const updateResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes(`/api/v1/samples/${created.sample.id}/record`) &&
-      response.request().method() === 'PUT'
-  );
-  await page.getByTestId('save-sample-record').click();
-  const updated = await (await updateResponse).json();
-  expect(updated.occurrences[0].execution_id).toBe(executionId);
-  expect(updated.occurrences[0].label_snapshot).toBe('Mixing');
-  expect(updated.occurrences[0].values).toEqual({});
-  const updatedObject = updated.occurrences.find(
-    (occurrence: { kind: string }) => occurrence.kind === 'object'
-  );
-  expect(updatedObject.binding.binding_id).toBe(bindingId);
-  expect(updatedObject.values.quantity.value).toBe('6');
-
-  await page.getByTestId('save-and-new-sample-record').click();
-  await expect(page).toHaveURL(
-    new RegExp(`/dashboard/samples/new\\?project=${projectId}&from=${created.sample.id}`)
-  );
-  await expect(page.getByTestId('sample-title')).toHaveValue('Continuous sample');
-  await expect(page.getByRole('textbox', { name: 'Resolver material Quantity' })).toHaveValue('6');
-  const clonedResponse = page.waitForResponse(
-    (response) =>
-      response.url().endsWith('/api/v1/sample-records') && response.request().method() === 'POST'
-  );
-  await page.getByTestId('save-sample-record').click();
-  const cloned = await (await clonedResponse).json();
-  const clonedProcesses = cloned.occurrences.filter(
-    (occurrence: { kind: string }) => occurrence.kind === 'process'
-  );
-  const clonedObject = cloned.occurrences.find(
-    (occurrence: { kind: string }) => occurrence.kind === 'object'
-  );
-  expect(clonedProcesses[0].execution_id).not.toBe(executionId);
-  expect(clonedObject.binding.binding_id).not.toBe(bindingId);
+  await expect(page.getByTestId('scientific-composer')).toContainText('@Exposure');
   await expectNoHorizontalOverflow(page);
   assertBrowserHealthy();
 });

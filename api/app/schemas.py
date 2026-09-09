@@ -122,6 +122,9 @@ class ResearchObjectOut(ObjectSummary):
     properties_jsonb: dict[str, Any] = Field(default_factory=dict)
     process_field_definitions: dict[str, Any] = Field(default_factory=dict)
     content_document: list[dict[str, Any]] = Field(default_factory=list)
+    semantic_entries: list[dict[str, Any]] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     document_format_version: int = 1
     authoring_kind: Literal["sample", "data"] | None = None
     created_at: datetime
@@ -373,10 +376,26 @@ class ProcessExecutionRevisionOut(BaseModel):
     created_at: datetime
 
 
-class ScientificDocumentV1(BaseModel):
+class ScientificSemanticEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1] = 1
+    id: str = Field(min_length=1, max_length=120)
+    kind: Literal["data", "claim"]
+    text: str = Field(min_length=1)
+    block_id: str | None = None
+
+
+class ScientificDocumentV2(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1, 2] = 2
     blocks: list[dict[str, Any]] = Field(default_factory=list)
+    semantic_entries: list[ScientificSemanticEntry] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+
+
+# The public Python name is retained so existing service imports remain
+# source-compatible while new records are written as schema version 2.
+ScientificDocumentV1 = ScientificDocumentV2
 
 
 class ScientificBindingDraft(BaseModel):

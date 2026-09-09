@@ -489,7 +489,7 @@ def _summary(obj: ResearchObject) -> dict[str, Any]:
 
 
 def object_out(obj: ResearchObject) -> dict[str, Any]:
-    return {
+    result = {
         "record_sha256": None,
         **_summary(obj),
         "type_version_id": str(obj.type_version_id) if obj.type_version_id else None,
@@ -503,6 +503,9 @@ def object_out(obj: ResearchObject) -> dict[str, Any]:
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
     }
+    if obj.semantic_entries_jsonb:
+        result["semantic_entries"] = obj.semantic_entries_jsonb
+    return result
 
 
 def relation_out(relation: ObjectRelation) -> dict[str, Any]:

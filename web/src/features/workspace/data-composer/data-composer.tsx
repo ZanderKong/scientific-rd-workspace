@@ -21,7 +21,7 @@ const ScientificComposer = dynamic(
   }
 );
 
-const emptyBlocks: JsonObject[] = [{ type: 'paragraph', content: [] }];
+const emptyBlocks: JsonObject[] = [{ type: 'bulletListItem', content: [], children: [] }];
 
 function message(cause: unknown) {
   return cause instanceof Error ? cause.message : 'Request failed';
@@ -215,7 +215,9 @@ export function DataComposer() {
             Recoverable Data Composer
           </p>
           <h1 className='mt-2 text-3xl font-semibold'>记录 Data</h1>
-          <p className='mt-2 text-sm text-muted-foreground'>获取过程与观察内容分开保存。</p>
+          <p className='mt-2 text-sm text-muted-foreground'>
+            用一级 bullet 记录过程，在二级 bullet 补充对象属性；观察和判断可用 @data / @claim。
+          </p>
         </div>
         <div className='flex gap-2'>
           <Button variant='outline' disabled={busy || !title.trim()} onClick={handleSave}>

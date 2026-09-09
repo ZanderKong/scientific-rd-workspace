@@ -284,12 +284,15 @@ def get_data_record(db: Session, data_id: uuid.UUID) -> dict[str, Any]:
         .where(DataSubjectAssignment.data_id == data.id)
         .order_by(DataSubjectAssignment.created_at, DataSubjectAssignment.id)
     ).all()
+    document = {
+        "schema_version": data.document_format_version,
+        "blocks": data.content_document,
+    }
+    if data.semantic_entries_jsonb:
+        document["semantic_entries"] = data.semantic_entries_jsonb
     body = {
         "data": object_out(data),
-        "document": {
-            "schema_version": data.document_format_version,
-            "blocks": data.content_document,
-        },
+        "document": document,
         "occurrences": occurrences,
         "editable": True,
         "edit_blockers": [],

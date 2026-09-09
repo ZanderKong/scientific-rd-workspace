@@ -1,20 +1,21 @@
 # Current State — Scientific R&D Workspace
 
-更新时间：2026-09-06。本文是当前 handoff；历史交接与执行计划不覆盖本文。
+更新时间：2026-09-09。本文是当前 handoff；历史交接与执行计划不覆盖本文。
 
 最新复审：见 [修复后补充审计](V1_5_REPAIR_FOLLOWUP_AUDIT_2026_09_06.md)。四个已复现阻断已修复并转为正确行为回归；聚合并发、完整历史读写、编辑器边界和发布门禁仍未完成。以下能力描述表示实现已存在，不代表修复计划或发布验收完成。
 
 ## 当前事实
 
 - 产品是 PostgreSQL-only 的 Scientific R&D Workspace，当前开发版本为 `0.3.0`。
-- 当前工作树以 `main@93700a6` 和 v1.5 冻结基线实施核心工作流重构；详细状态见 [`V1_5_IMPLEMENTATION_PROGRESS.md`](V1_5_IMPLEMENTATION_PROGRESS.md)。本轮修复追加 `0020_authoring_binding` 与 `0021_typed_revision_refs`，开发数据库仍停在历史 `0006_agent_changes`，没有未经确认进行数据升级。
+- 当前工作树以 `main@93700a6` 和 v1.5 冻结基线实施核心工作流重构；详细状态见 [`V1_5_IMPLEMENTATION_PROGRESS.md`](V1_5_IMPLEMENTATION_PROGRESS.md)。本轮追加 `0023_scientific_document_v2`，为两级 bullet 保存语义行。经用户授权，已重置本项目本地开发 PostgreSQL 的 `public` schema，执行完整 Alembic 迁移并重新 seed；测试使用独立临时数据库，测试结束后已删除。
 - canonical kinds 是 `research_object`、`process_definition`、`data`、`experiment`、`project`、`view` 和 `claim`；Material、Equipment、Sample 由 Research Object tags 表达。
 - Web、REST API 与 MCP 适配器复用 domain services。MCP 写入遵循 proposal-first ChangeSet；不包含模型运行时。
 - Scientific Record 以文档、稳定 occurrence、Execution/binding 实际值和固定 revision manifest 为准；typed occurrence 表只服务查询。Data subject 显式保留 manual、acquisition document 与 producer 来源；View/Claim 历史 revision 通过 typed revision reference 保护其固定依赖。
 - Sample、Data、ProcessExecution、View 和 Claim 均支持按明确 revision 的只读读取；编辑 token 不包含关联对象当前标题等动态展示字段。
 - Sample/Data 写入共享项目图与 owner 锁入口；业务 DTO 和 provenance 仍在各自领域服务中编排。
 - `/dashboard` 重定向至 `/dashboard/processes`。Samples、Projects、Experiments、Data、Views、Claims、Change Sets 与 Settings 均为有效工作区页面；Research Object、View 与 Claim 有可达的详情页。
-- Project scope 由路由/query/localStorage/首个项目解析。连续 Scientific Composer 支持 `/Process`、`@Object`、原位 PropertySlot、Replace、统一 Undo/Redo、历史读取、草稿恢复和复制重映射。
+- Project scope 由路由/query/localStorage/首个项目解析。Scientific Composer 当前采用 V2 两级 bullet：一级自然语言声明 `@` occurrence，二级 bullet 以 `@引用｜属性: 值` 补充自由字段，并支持 `@data` / `@claim` 语义行；保存、历史读取、草稿恢复和复制重映射复用现有科学记录服务。旧的 `/Process` 与原位 PropertySlot 编辑路径已移除。
+- 当前 V2 将语义行以稳定 ID 保存在当前 Sample/Data 文档并纳入 revision；独立 canonical Data/Claim 实体的自动物化、级联删除确认和搜索加载更多仍属于后续工作，不能据此宣称已完成完整语义实体闭环。
 - Data draft/finalize、服务器记录表、Experiment Sample Picker、固定版本 View/Artifact 与 Claim context 已进入当前运行契约。
 - synthetic/anonymised seed 仅用于验收；用户创建或导入的记录不会自动标为演示数据。
 - 不再维护 `steps`、View `data_ids`、Claim `source_type` 等旧客户端写入契约。

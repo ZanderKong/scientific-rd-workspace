@@ -168,6 +168,9 @@ class ResearchObject(Base):
     content_document: Mapped[list[dict[str, Any]]] = mapped_column(
         JsonColumn, default=list, server_default=text("'[]'::jsonb")
     )
+    semantic_entries_jsonb: Mapped[list[dict[str, Any]]] = mapped_column(
+        JsonColumn, default=list, server_default=text("'[]'::jsonb")
+    )
     document_format_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     # Explicit ownership marker for scientific record aggregates.  Tags and
     # occurrence rows are projections and may legitimately be empty.

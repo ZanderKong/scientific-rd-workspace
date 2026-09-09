@@ -50,7 +50,8 @@ export function SampleComposer({
     [initialRecord]
   );
   const initialBlocks = useMemo(() => {
-    if (!initialDraft) return [{ type: 'paragraph', content: [] }] as JsonObject[];
+    if (!initialDraft)
+      return [{ type: 'bulletListItem', content: [], children: [] }] as JsonObject[];
     return editing || readOnly
       ? initialDraft.document.blocks
       : cloneDocumentForNewRecord(initialDraft.document.blocks);
@@ -308,7 +309,9 @@ export function SampleComposer({
               }}
             />
             <p className='mt-1 text-sm text-muted-foreground'>
-              {readOnly ? 'Sample 历史版本' : '在正文中输入 / 添加过程，输入 @ 添加对象。'}
+              {readOnly
+                ? 'Sample 历史版本'
+                : '一级 bullet 记录自然语言；输入 @ 添加对象或过程，Tab 创建二级属性 bullet。'}
             </p>
           </div>
           {!readOnly && (

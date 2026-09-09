@@ -4,6 +4,7 @@ import {
   canonicalizeDocument,
   cloneDocumentForNewRecord,
   occurrenceRef,
+  parsePropertyText,
   parseOccurrencePayload
 } from './model';
 
@@ -12,6 +13,211 @@ function paragraph(...content: JsonObject[]): JsonObject[] {
 }
 
 describe('scientific document codec', () => {
+  it('parses full-width property syntax and projects a child row onto its parent occurrence', () => {
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'parent-occurrence',
+      kind: 'object',
+      target_id: 'water',
+      field_definitions: {},
+      values: {},
+      status: 'recorded'
+    };
+    const blocks: JsonObject[] = [
+      {
+        type: 'bulletListItem',
+        content: [occurrenceRef(occurrence, '水')],
+        children: [
+          {
+            type: 'bulletListItem',
+            content: [
+              {
+                type: 'propertyRef',
+                props: { occurrenceId: occurrence.occurrence_id, lineId: 'line-1', label: '水' }
+              },
+              { type: 'text', text: '｜温度：60 ℃｜添加量: 0' }
+            ]
+          }
+        ]
+      }
+    ];
+    const parsed = parsePropertyText('｜温度：60 ℃｜添加量: 0');
+    expect(parsed.map((item) => item.rawValue)).toEqual(['60 ℃', '0']);
+    const result = canonicalizeDocument(blocks);
+    expect(result.document.schema_version).toBe(2);
+    expect(result.occurrences[0].values).toMatchObject({
+      'property_line-1_0': { value: '60 ℃', raw_value: '60 ℃' },
+      'property_line-1_1': { value: '0', raw_value: '0' }
+    });
+  });
+
+  it('rejects a property row that does not belong to its parent bullet', () => {
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'parent-occurrence',
+      kind: 'object',
+      target_id: 'water',
+      field_definitions: {},
+      values: {}
+    };
+    expect(() =>
+      canonicalizeDocument([
+        {
+          type: 'bulletListItem',
+          content: [occurrenceRef(occurrence, '水')],
+          children: [
+            {
+              type: 'bulletListItem',
+              content: [
+                {
+                  type: 'propertyRef',
+                  props: { occurrenceId: 'other', lineId: 'line', label: '水' }
+                },
+                { type: 'text', text: '｜温度: 60 ℃' }
+              ]
+            }
+          ]
+        }
+      ])
+    ).toThrow('parent bullet');
+  });
+
+  it('reports an incomplete property pair instead of silently dropping it', () => {
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'parent-occurrence',
+      kind: 'object',
+      target_id: 'water',
+      field_definitions: {},
+      values: {}
+    };
+    expect(() =>
+      canonicalizeDocument([
+        {
+          type: 'bulletListItem',
+          content: [occurrenceRef(occurrence, '水')],
+          children: [
+            {
+              type: 'bulletListItem',
+              content: [
+                {
+                  type: 'propertyRef',
+                  props: { occurrenceId: 'parent-occurrence', lineId: 'line', label: '水' }
+                },
+                { type: 'text', text: '｜温度' }
+              ]
+            }
+          ]
+        }
+      ])
+    ).toThrow('incomplete property');
+  });
+
+  it('removes projected property values when the child row is deleted', () => {
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'parent-occurrence',
+      kind: 'object',
+      target_id: 'water',
+      field_definitions: {
+        fields: [
+          {
+            key: 'property_old_line_0',
+            field_id: 'property_old_line_0',
+            source: 'local',
+            label: '温度',
+            value_type: 'text'
+          },
+          { key: 'template_note', label: '备注', source: 'template', value_type: 'text' }
+        ]
+      },
+      values: {
+        property_old_line_0: { value: '60 ℃', raw_value: '60 ℃' },
+        template_note: { value: 'keep' }
+      }
+    };
+    const result = canonicalizeDocument([
+      { type: 'bulletListItem', content: [occurrenceRef(occurrence, '水')], children: [] }
+    ]);
+    expect(result.occurrences[0].values).toEqual({ template_note: { value: 'keep' } });
+    expect(result.occurrences[0].field_definitions.fields).toEqual([
+      { key: 'template_note', label: '备注', source: 'template', value_type: 'text' }
+    ]);
+  });
+
+  it('rejects duplicate property line identities instead of merging them', () => {
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'parent-occurrence',
+      kind: 'object',
+      target_id: 'water',
+      field_definitions: {},
+      values: {}
+    };
+    const child = {
+      type: 'bulletListItem',
+      content: [
+        {
+          type: 'propertyRef',
+          props: { occurrenceId: occurrence.occurrence_id, lineId: 'same-line', label: '水' }
+        },
+        { type: 'text', text: '｜温度: 60 ℃' }
+      ]
+    };
+    expect(() =>
+      canonicalizeDocument([
+        {
+          type: 'bulletListItem',
+          content: [occurrenceRef(occurrence, '水')],
+          children: [child, structuredClone(child)]
+        }
+      ])
+    ).toThrow('unique stable line IDs');
+  });
+
+  it('remaps property line identities when copying a record', () => {
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn().mockReturnValueOnce('line-new').mockReturnValueOnce('occurrence-new')
+    });
+    const occurrence: ScientificOccurrenceDraft = {
+      occurrence_id: 'occurrence-old',
+      kind: 'object',
+      target_id: 'water',
+      field_definitions: {
+        fields: [
+          {
+            key: 'property_line-old_0',
+            field_id: 'property_line-old_0',
+            source: 'local',
+            label: '温度',
+            value_type: 'text'
+          }
+        ]
+      },
+      values: { 'property_line-old_0': { value: '60 ℃', raw_value: '60 ℃' } }
+    };
+    const copied = cloneDocumentForNewRecord([
+      {
+        type: 'bulletListItem',
+        content: [occurrenceRef(occurrence, '水')],
+        children: [
+          {
+            type: 'bulletListItem',
+            content: [
+              {
+                type: 'propertyRef',
+                props: { occurrenceId: 'occurrence-old', lineId: 'line-old', label: '水' }
+              },
+              { type: 'text', text: '｜温度: 60 ℃' }
+            ]
+          }
+        ]
+      }
+    ]);
+    const ref = (copied[0].content as JsonObject[])[0];
+    const cloned = parseOccurrencePayload((ref.props as JsonObject).payload);
+    expect(cloned?.field_definitions.fields).toEqual([
+      expect.objectContaining({ key: 'property_line-new_0' })
+    ]);
+    expect(cloned?.values).toMatchObject({ 'property_line-new_0': { value: '60 ℃' } });
+    vi.unstubAllGlobals();
+  });
+
   it('keeps values in the occurrence write set and strips them from canonical nodes', () => {
     const occurrence: ScientificOccurrenceDraft = {
       occurrence_id: '11111111-1111-4111-8111-111111111111',
